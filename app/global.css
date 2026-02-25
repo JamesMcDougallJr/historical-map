@@ -1,0 +1,407 @@
+@import 'tailwindcss';
+
+/* Blue/Purple Theme Color System */
+:root {
+  /* Primary theme colors */
+  --color-primary: #3b82f6;
+  --color-primary-hover: #2563eb;
+  --color-accent: #8b5cf6;
+  --color-accent-hover: #7c3aed;
+
+  /* Flame accent colors */
+  --color-flame: #f97316;
+  --color-flame-hover: #ea580c;
+  --color-ember: #fbbf24;
+
+  /* Backgrounds (keep neutral) */
+  --bg-primary: #ffffff;
+  --bg-secondary: #f8fafc;
+  --bg-card: #ffffff;
+
+  /* Text */
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-muted: #64748b;
+
+  /* Borders & Shadows */
+  --border-subtle: #e2e8f0;
+  --border-accent: #3b82f6;
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1);
+  --shadow-accent: 0 4px 14px 0 rgba(59, 130, 246, 0.25);
+
+  /* Syntax highlighting - blue/purple theme */
+  --sh-class: #3b82f6;
+  --sh-identifier: #334155;
+  --sh-sign: #64748b;
+  --sh-string: #10b981;
+  --sh-keyword: #8b5cf6;
+  --sh-comment: #94a3b8;
+  --sh-jsxliterals: #6366f1;
+  --sh-property: #f59e0b;
+  --sh-entity: #f59e0b;
+}
+
+.dark {
+  /* Dark mode theme colors */
+  --color-primary: #60a5fa;
+  --color-primary-hover: #3b82f6;
+  --color-accent: #a78bfa;
+  --color-accent-hover: #8b5cf6;
+
+  /* Dark mode flame colors */
+  --color-flame: #fb923c;
+  --color-flame-hover: #f97316;
+  --color-ember: #fcd34d;
+
+  --bg-primary: #0f172a;
+  --bg-secondary: #1e293b;
+  --bg-card: #1e293b;
+
+  --text-primary: #f1f5f9;
+  --text-secondary: #cbd5e1;
+  --text-muted: #94a3b8;
+
+  --border-subtle: #334155;
+  --border-accent: #60a5fa;
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.5);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.5);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.5);
+  --shadow-accent: 0 4px 14px 0 rgba(96, 165, 250, 0.4);
+
+  /* Syntax highlighting for dark mode */
+  --sh-class: #60a5fa;
+  --sh-identifier: #f1f5f9;
+  --sh-keyword: #a78bfa;
+  --sh-string: #34d399;
+}
+
+@media (prefers-color-scheme: dark) {
+  html {
+    color-scheme: dark;
+  }
+}
+
+/* Utility Classes */
+@layer utilities {
+  .text-primary-color {
+    color: var(--color-primary);
+  }
+  .text-accent {
+    color: var(--color-accent);
+  }
+  .text-flame {
+    color: var(--color-flame);
+  }
+  .bg-card {
+    background-color: var(--bg-card);
+  }
+  .border-accent {
+    border-color: var(--border-accent);
+  }
+  .shadow-accent {
+    box-shadow: var(--shadow-accent);
+  }
+
+  /* Flame glow effect */
+  .flame-glow {
+    filter: drop-shadow(0 0 8px var(--color-flame));
+    transition: filter 0.3s ease;
+  }
+
+  .flame-glow:hover {
+    filter: drop-shadow(0 0 12px var(--color-flame)) drop-shadow(0 0 20px var(--color-ember));
+  }
+
+  /* Animations */
+  .animate-fade-in {
+    animation: fadeIn 0.6s ease-in-out;
+  }
+
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+      transform: translateY(20px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  /* Flame flicker animation */
+  .animate-flicker {
+    animation: flicker 2s ease-in-out infinite;
+  }
+
+  @keyframes flicker {
+    0%, 100% {
+      opacity: 1;
+      transform: scale(1);
+    }
+    25% {
+      opacity: 0.9;
+      transform: scale(1.02);
+    }
+    50% {
+      opacity: 1;
+      transform: scale(0.98);
+    }
+    75% {
+      opacity: 0.95;
+      transform: scale(1.01);
+    }
+  }
+
+  /* Flame pulse animation */
+  .animate-flame-pulse {
+    animation: flamePulse 1.5s ease-in-out infinite;
+  }
+
+  @keyframes flamePulse {
+    0%, 100% {
+      opacity: 0.8;
+      filter: drop-shadow(0 0 4px var(--color-flame));
+    }
+    50% {
+      opacity: 1;
+      filter: drop-shadow(0 0 12px var(--color-flame)) drop-shadow(0 0 20px var(--color-ember));
+    }
+  }
+
+  .hover-lift {
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+  }
+
+  .hover-lift:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-accent);
+  }
+}
+
+/* Update selection color to match theme */
+::selection {
+  background-color: var(--color-primary);
+  color: #fefefe;
+}
+
+html {
+  min-width: 360px;
+}
+
+.prose .anchor {
+  @apply absolute invisible no-underline;
+
+  margin-left: -1em;
+  padding-right: 0.5em;
+  width: 80%;
+  max-width: 700px;
+  cursor: pointer;
+}
+
+.anchor:hover {
+  @apply visible;
+}
+
+.prose a {
+  @apply underline decoration-2 underline-offset-2 transition-all duration-200;
+  color: var(--color-primary);
+  text-decoration-color: var(--color-primary);
+}
+
+.prose a:hover {
+  color: var(--color-accent);
+  text-decoration-color: var(--color-accent);
+}
+
+.prose .anchor:after {
+  @apply text-neutral-300 dark:text-neutral-700;
+  content: '#';
+}
+
+.prose *:hover > .anchor {
+  @apply visible;
+}
+
+.prose pre {
+  @apply bg-slate-50 dark:bg-slate-900 rounded-lg overflow-x-auto py-2 px-3 text-sm;
+  border: 1px solid var(--border-subtle);
+  box-shadow: var(--shadow-sm);
+}
+
+.prose code {
+  @apply px-2 py-0.5 rounded-lg bg-slate-100 dark:bg-slate-800;
+  border: 1px solid var(--border-accent);
+  opacity: 0.8;
+}
+
+.prose pre code {
+  @apply p-0;
+  border: initial;
+  line-height: 1.5;
+}
+
+.prose code span {
+  @apply font-medium;
+}
+
+.prose blockquote {
+  @apply border-l-4 pl-4 italic;
+  border-color: var(--color-accent);
+  color: var(--text-secondary);
+}
+
+.prose img {
+  /* Don't apply styles to next/image */
+  @apply m-0;
+}
+
+.prose p {
+  @apply my-4 text-neutral-800 dark:text-neutral-200;
+}
+
+.prose h1 {
+  @apply text-4xl font-medium tracking-tight mt-6 mb-2;
+}
+
+.prose h2 {
+  @apply text-xl font-medium tracking-tight mt-6 mb-2;
+}
+
+.prose h3 {
+  @apply text-xl font-medium tracking-tight mt-6 mb-2;
+}
+
+.prose h4 {
+  @apply text-lg font-medium tracking-tight mt-6 mb-2;
+}
+
+.prose strong {
+  @apply font-medium;
+}
+
+.prose ul {
+  @apply list-disc pl-6;
+}
+
+.prose ol {
+  @apply list-decimal pl-6;
+}
+
+.prose > :first-child {
+  /* Override removing top margin, causing layout shift */
+  margin-top: 1.25em !important;
+  margin-bottom: 1.25em !important;
+}
+
+pre::-webkit-scrollbar {
+  display: none;
+}
+
+pre {
+  -ms-overflow-style: none; /* IE and Edge */
+  scrollbar-width: none; /* Firefox */
+}
+
+/* Remove Safari input shadow on mobile */
+input[type='text'],
+input[type='email'] {
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+}
+
+/* Fix textarea text color issues including autofill */
+textarea {
+  color: inherit;
+  -webkit-text-fill-color: inherit;
+}
+
+textarea:-webkit-autofill,
+textarea:-webkit-autofill:hover,
+textarea:-webkit-autofill:focus,
+textarea:-webkit-autofill:active {
+  -webkit-text-fill-color: var(--text-primary) !important;
+  -webkit-box-shadow: 0 0 0 1000px var(--bg-card) inset !important;
+  transition: background-color 5000s ease-in-out 0s;
+}
+
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active {
+  -webkit-text-fill-color: var(--text-primary) !important;
+  -webkit-box-shadow: 0 0 0 1000px var(--bg-card) inset !important;
+  transition: background-color 5000s ease-in-out 0s;
+}
+
+table {
+  display: block;
+  max-width: fit-content;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+.title {
+  text-wrap: balance;
+}
+
+/* Accessibility Improvements */
+
+/* Focus indicators for keyboard navigation */
+:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+a:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/* Enhanced focus for interactive elements in prose */
+.prose a:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 4px;
+  text-decoration: none;
+}
+
+/* Screen reader only utility */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+.sr-only:focus,
+.sr-only:active,
+.focus\:not-sr-only:focus {
+  position: static;
+  width: auto;
+  height: auto;
+  overflow: visible;
+  clip: auto;
+  white-space: normal;
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
