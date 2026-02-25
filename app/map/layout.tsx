@@ -26,9 +26,8 @@ export default function MapLayout({
     };
   }, []);
 
-  // Break out of the parent's max-w-4xl constraint using CSS
-  // Fill remaining viewport height: 100vh - body mt-8(32px) - main mt-6(24px) = 56px
-  // Navbar is hidden on map page for immersive experience
+  // Break out of any parent container constraints using CSS
+  // Fill full viewport height (standalone app — no navbar offset)
   // No overflow restriction so OpenLayers popups can render outside bounds
   // Fullscreen mode: fill entire viewport with fixed positioning
   return (
