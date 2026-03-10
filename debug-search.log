@@ -1,0 +1,123 @@
+[2026-02-25T04:46:33.260Z] Server starting
+{
+  "pid": 74429,
+  "startTime": "2026-02-25T04:46:33.258Z"
+}
+---
+[2026-02-25T04:46:33.266Z] Tools registered
+{
+  "toolCount": 15
+}
+---
+[2026-02-25T04:46:33.266Z] Creating stdio transport
+{}
+---
+[2026-02-25T04:46:34.837Z] Service initialization error
+{}
+---
+[2026-02-25T04:46:34.839Z] Connecting transport
+{}
+---
+[2026-02-25T04:46:34.840Z] Server connected and ready
+{
+  "pid": 74429
+}
+---
+[2026-02-25T04:46:34.843Z] Server stats [server-ready]
+{
+  "uptime": "2s",
+  "toolCallCount": 0,
+  "lastToolCall": null,
+  "memory": {
+    "heapUsed": "48MB",
+    "heapTotal": "75MB",
+    "rss": "58MB"
+  },
+  "pid": 74429
+}
+---
+[2026-02-26T02:42:18.884Z] SIGHUP received but ignored
+{}
+---
+[2026-02-26T02:42:18.967Z] SIGHUP received but ignored
+{}
+---
+[2026-02-26T02:42:18.985Z] Server stats [sighup-ignored]
+{
+  "uptime": "78946s",
+  "toolCallCount": 0,
+  "lastToolCall": null,
+  "memory": {
+    "heapUsed": "44MB",
+    "heapTotal": "47MB",
+    "rss": "15MB"
+  },
+  "pid": 74429
+}
+---
+[2026-02-26T02:42:18.986Z] Server stats [sighup-ignored]
+{
+  "uptime": "78946s",
+  "toolCallCount": 0,
+  "lastToolCall": null,
+  "memory": {
+    "heapUsed": "44MB",
+    "heapTotal": "47MB",
+    "rss": "15MB"
+  },
+  "pid": 74429
+}
+---
+[2026-02-26T02:42:18.992Z] SIGINT received but ignored - lifecycle managed by Claude Code
+{}
+---
+[2026-02-26T02:42:18.994Z] Server stats [sigint-ignored]
+{
+  "uptime": "78946s",
+  "toolCallCount": 0,
+  "lastToolCall": null,
+  "memory": {
+    "heapUsed": "44MB",
+    "heapTotal": "47MB",
+    "rss": "15MB"
+  },
+  "pid": 74429
+}
+---
+[2026-02-26T02:42:19.704Z] Server stats [shutdown-SIGTERM]
+{
+  "uptime": "78946s",
+  "toolCallCount": 0,
+  "lastToolCall": null,
+  "memory": {
+    "heapUsed": "44MB",
+    "heapTotal": "47MB",
+    "rss": "17MB"
+  },
+  "pid": 74429
+}
+---
+[2026-02-26T02:42:19.715Z] STDIN ended
+{}
+---
+[2026-02-26T02:42:19.722Z] STDIN closed - client disconnected
+{}
+---
+[2026-02-26T02:42:19.722Z] Server stats [stdin-end]
+{
+  "uptime": "78946s",
+  "toolCallCount": 0,
+  "lastToolCall": null,
+  "memory": {
+    "heapUsed": "44MB",
+    "heapTotal": "47MB",
+    "rss": "18MB"
+  },
+  "pid": 74429
+}
+---
+[2026-02-26T02:42:19.725Z] Shutdown complete
+{
+  "signal": "SIGTERM"
+}
+---
