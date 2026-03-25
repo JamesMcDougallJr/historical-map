@@ -3,7 +3,8 @@
 import { useEffect, useState, useRef, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import type { HistoricalLocation } from "./types";
-import { getLocations } from "./utils/storage";
+import { getLocations, saveEventsData } from "./utils/storage";
+import type { HistoricalEventsData } from "./types";
 import { MapView } from "./components/MapView";
 
 function MapContent(): JSX.Element {
@@ -22,7 +23,29 @@ function MapContent(): JSX.Element {
       "found:",
       loaded.length,
     );
-    setLocations(loaded);
+    if (loaded.length > 0) {
+      setLocations(loaded);
+      return;
+    }
+    // First visit: seed localStorage from server data
+    fetch("/api/data/locations")
+      .then((res) => (res.ok ? res.json() : null))
+      .then(
+        (
+          json: { locations: HistoricalLocation[]; lastUpdated: string } | null,
+        ) => {
+          if (json?.locations?.length) {
+            const seed: HistoricalEventsData = {
+              version: "1.0.0",
+              lastUpdated: json.lastUpdated,
+              locations: json.locations,
+            };
+            saveEventsData(seed);
+            setLocations(json.locations);
+          }
+        },
+      )
+      .catch(() => {});
   }, [refreshKey]);
 
   // Poll /api/data/locations every 5s to pick up changes from MCP server.

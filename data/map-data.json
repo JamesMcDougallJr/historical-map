@@ -1,14 +1,11 @@
 {
   "version": "1.0.0",
-  "lastUpdated": "2026-03-18T20:58:47.093Z",
+  "lastUpdated": "2026-03-24T00:00:00.000Z",
   "locations": [
     {
       "id": "salt-lake-city-utah-wsnl",
       "name": "Salt Lake City, Utah",
-      "coordinates": [
-        -111.891,
-        40.7608
-      ],
+      "coordinates": [-111.891, 40.7608],
       "events": [
         {
           "id": "event-1773867502355-ghc5rxp",
@@ -23,16 +20,27 @@
           "date": "1896-01-04",
           "description": "Utah is admitted to the Union as the 45th state, following decades of tension over polygamy practiced by members of the LDS Church. Utah's statehood came after Congress passed the Edmunds-Tucker Act and church leadership officially renounced polygamy in 1890.",
           "source": "Utah Division of State History"
+        },
+        {
+          "id": "event-seed-slc-temple",
+          "title": "Salt Lake Temple Completed",
+          "date": "1893-04-06",
+          "description": "After 40 years of construction, the Salt Lake Temple is dedicated. The granite structure, designed by Truman O. Angell, became the centerpiece of Temple Square and a symbol of the LDS Church's permanence in the West.",
+          "source": "Church History Library, LDS Church"
+        },
+        {
+          "id": "event-seed-slc-telegraph",
+          "title": "Transcontinental Telegraph Reaches Salt Lake City",
+          "date": "1861-10-18",
+          "description": "The transcontinental telegraph line is completed when the western and eastern lines meet in Salt Lake City. Brigham Young sends one of the first messages, and the telegraph effectively ends the Pony Express after just 18 months of operation.",
+          "source": "Utah Division of State History"
         }
       ]
     },
     {
       "id": "promontory-summit-utah-wvt1",
       "name": "Promontory Summit, Utah",
-      "coordinates": [
-        -112.549,
-        41.6205
-      ],
+      "coordinates": [-112.549, 41.6205],
       "events": [
         {
           "id": "event-1773867506438-e1kcgmc",
@@ -46,10 +54,7 @@
     {
       "id": "dinosaur-national-monument-utah-x2eh",
       "name": "Dinosaur National Monument, Utah",
-      "coordinates": [
-        -108.9878,
-        40.4378
-      ],
+      "coordinates": [-108.9878, 40.4378],
       "events": [
         {
           "id": "event-1773867514989-76t74r3",
@@ -57,16 +62,20 @@
           "date": "1776-07-29",
           "description": "The Domínguez–Escalante Expedition, led by Spanish Franciscan friars, enters present-day Utah near Dinosaur National Monument. They were the first Europeans to explore the interior of the Great Basin and recorded detailed accounts of the land and its Native peoples.",
           "source": "Utah Historical Quarterly"
+        },
+        {
+          "id": "event-seed-dino-quarry",
+          "title": "Earl Douglass Discovers Dinosaur Fossils",
+          "date": "1909-08-17",
+          "description": "Paleontologist Earl Douglass of the Carnegie Museum discovers eight tail bones of an Apatosaurus in the Morrison Formation near Jensen, Utah. The site would yield thousands of fossils and became Dinosaur National Monument in 1915.",
+          "source": "National Park Service - Dinosaur National Monument"
         }
       ]
     },
     {
       "id": "fort-douglas-salt-lake-city-x5b4",
       "name": "Fort Douglas, Salt Lake City",
-      "coordinates": [
-        -111.8285,
-        40.7739
-      ],
+      "coordinates": [-111.8285, 40.7739],
       "events": [
         {
           "id": "event-1773867518753-c171g5f",
@@ -80,10 +89,7 @@
     {
       "id": "zion-national-park-utah-x8gy",
       "name": "Zion National Park, Utah",
-      "coordinates": [
-        -113.0263,
-        37.2982
-      ],
+      "coordinates": [-113.0263, 37.2982],
       "events": [
         {
           "id": "event-1773867522851-rzuibpv",
@@ -97,10 +103,7 @@
     {
       "id": "bingham-canyon-mine-utah-xbqs",
       "name": "Bingham Canyon Mine, Utah",
-      "coordinates": [
-        -112.1494,
-        40.525
-      ],
+      "coordinates": [-112.1494, 40.525],
       "events": [
         {
           "id": "event-1773867527093-5vrrhxu",
@@ -108,6 +111,440 @@
           "date": "1957-01-01",
           "description": "The Kennecott Bingham Canyon Mine, one of the world's largest open-pit copper mines, reaches full modern production. Mining operations began in 1906 and the mine has produced more copper than any other mine in history, also yielding gold, silver, and molybdenum.",
           "source": "Kennecott Utah Copper / Rio Tinto"
+        }
+      ]
+    },
+    {
+      "id": "mesa-verde-region-southeast-utah-s001",
+      "name": "Comb Ridge, Southeast Utah",
+      "coordinates": [-109.6625, 37.3500],
+      "events": [
+        {
+          "id": "event-seed-ancestral-puebloan",
+          "title": "Ancestral Puebloan Settlement Flourishes",
+          "date": "1200-01-01",
+          "description": "Ancestral Puebloan peoples build extensive cliff dwellings, granaries, and rock art panels along Comb Ridge and throughout Cedar Mesa in southeast Utah. These communities were part of a vast cultural network stretching across the Four Corners region before a prolonged drought contributed to migration south by the late 1200s.",
+          "source": "Bureau of Land Management - Bears Ears Region"
+        }
+      ]
+    },
+    {
+      "id": "fremont-indian-state-park-utah-s002",
+      "name": "Fremont Indian State Park, Utah",
+      "coordinates": [-112.3328, 38.5942],
+      "events": [
+        {
+          "id": "event-seed-fremont-culture",
+          "title": "Fremont Culture Villages in Clear Creek Canyon",
+          "date": "0900-01-01",
+          "description": "The Fremont people establish villages in Clear Creek Canyon, leaving behind one of the largest collections of rock art in Utah. The Fremont culture, distinct from the Ancestral Puebloans to the south, practiced a mix of farming and foraging across much of present-day Utah from roughly 200 to 1300 CE.",
+          "source": "Utah Division of State Parks - Fremont Indian State Park"
+        }
+      ]
+    },
+    {
+      "id": "great-salt-lake-utah-s003",
+      "name": "Great Salt Lake, Utah",
+      "coordinates": [-112.3473, 41.1700],
+      "events": [
+        {
+          "id": "event-seed-gsl-stansbury",
+          "title": "Stansbury Expedition Surveys Great Salt Lake",
+          "date": "1850-06-01",
+          "description": "Captain Howard Stansbury of the U.S. Army Corps of Topographical Engineers completes the first detailed survey and map of the Great Salt Lake and surrounding valley. His report brought national attention to the region's geography and resources.",
+          "source": "U.S. Army Corps of Topographical Engineers"
+        },
+        {
+          "id": "event-seed-gsl-fremont-explorer",
+          "title": "John C. Frémont Explores the Great Salt Lake",
+          "date": "1843-09-06",
+          "description": "Explorer John C. Frémont and Kit Carson reach the Great Salt Lake on Frémont's second western expedition. Frémont's widely published reports helped popularize the West and encouraged emigration along what became the Oregon and California trails.",
+          "source": "Utah Historical Quarterly"
+        }
+      ]
+    },
+    {
+      "id": "bear-river-massacre-site-idaho-s004",
+      "name": "Bear River Massacre Site, Preston, Idaho",
+      "coordinates": [-111.8390, 42.1006],
+      "events": [
+        {
+          "id": "event-seed-bear-river",
+          "title": "Bear River Massacre",
+          "date": "1863-01-29",
+          "description": "Colonel Patrick Connor leads federal troops from Camp Douglas in an attack on a Northwestern Shoshone winter camp along the Bear River (near present-day Preston, Idaho, then part of Washington Territory). An estimated 250–400 Shoshone men, women, and children are killed, making it one of the deadliest massacres of Native Americans in U.S. history.",
+          "source": "National Park Service - National Historic Landmark"
+        }
+      ]
+    },
+    {
+      "id": "mountain-meadows-utah-s005",
+      "name": "Mountain Meadows, Utah",
+      "coordinates": [-113.6167, 37.4825],
+      "events": [
+        {
+          "id": "event-seed-mountain-meadows",
+          "title": "Mountain Meadows Massacre",
+          "date": "1857-09-11",
+          "description": "A wagon train of Arkansas emigrants bound for California is attacked at Mountain Meadows in southern Utah. Local Mormon militia members and some Paiute allies killed approximately 120 men, women, and older children. The massacre occurred during the Utah War tensions between the LDS Church and the federal government. John D. Lee was later tried and executed for his role.",
+          "source": "Utah Division of State History"
+        }
+      ]
+    },
+    {
+      "id": "park-city-utah-s006",
+      "name": "Park City, Utah",
+      "coordinates": [-111.4980, 40.6461],
+      "events": [
+        {
+          "id": "event-seed-park-city-silver",
+          "title": "Silver Mining Boom in Park City",
+          "date": "1868-01-01",
+          "description": "Soldiers from Fort Douglas discover silver ore in the mountains above Park City, launching one of Utah's richest mining districts. By the 1880s, Park City was producing millions of dollars in silver, lead, and zinc, and the Ontario Mine became one of the most profitable silver mines in the country.",
+          "source": "Park City Historical Society & Museum"
+        },
+        {
+          "id": "event-seed-park-city-olympics",
+          "title": "2002 Winter Olympics in Utah",
+          "date": "2002-02-08",
+          "description": "The XIX Olympic Winter Games open in Salt Lake City, with alpine, cross-country, ski jumping, and bobsled events held at venues in and around Park City. The Games were a major economic and cultural milestone for Utah, attracting athletes from 77 nations.",
+          "source": "Utah Olympic Legacy Foundation"
+        }
+      ]
+    },
+    {
+      "id": "topaz-utah-s007",
+      "name": "Topaz, Millard County, Utah",
+      "coordinates": [-112.7717, 39.4050],
+      "events": [
+        {
+          "id": "event-seed-topaz-internment",
+          "title": "Topaz Japanese American Internment Camp Opens",
+          "date": "1942-09-11",
+          "description": "The Central Utah Relocation Center (Topaz) opens in the desert west of Delta, Utah, as one of ten War Relocation Authority camps for Japanese Americans forcibly relocated from the West Coast during World War II. At its peak, over 8,000 people were confined at Topaz in harsh conditions until the camp closed in October 1945.",
+          "source": "Topaz Museum, Delta, Utah"
+        }
+      ]
+    },
+    {
+      "id": "bryce-canyon-utah-s008",
+      "name": "Bryce Canyon, Utah",
+      "coordinates": [-112.1871, 37.5930],
+      "events": [
+        {
+          "id": "event-seed-bryce-canyon",
+          "title": "Bryce Canyon Becomes a National Park",
+          "date": "1928-02-25",
+          "description": "Bryce Canyon is designated a national park, protecting its iconic amphitheaters of red, orange, and white hoodoos formed by frost weathering and stream erosion. Ebenezer Bryce, a Scottish Mormon pioneer who homesteaded nearby in the 1870s, reportedly described the canyon as \"a hell of a place to lose a cow.\"",
+          "source": "National Park Service - Bryce Canyon"
+        }
+      ]
+    },
+    {
+      "id": "arches-utah-s009",
+      "name": "Arches National Park, Utah",
+      "coordinates": [-109.5925, 38.7331],
+      "events": [
+        {
+          "id": "event-seed-arches-monument",
+          "title": "Arches Designated a National Monument",
+          "date": "1929-04-12",
+          "description": "President Herbert Hoover designates Arches as a national monument, protecting over 2,000 natural stone arches near Moab. Hungarian-born prospector Alexander Ringhoffer first brought the area's formations to the attention of the Rio Grande Western Railroad, which lobbied for protection. Arches became a national park in 1971.",
+          "source": "National Park Service - Arches"
+        }
+      ]
+    },
+    {
+      "id": "capitol-reef-utah-s010",
+      "name": "Capitol Reef, Utah",
+      "coordinates": [-111.2615, 38.2000],
+      "events": [
+        {
+          "id": "event-seed-capitol-reef",
+          "title": "Capitol Reef Becomes a National Park",
+          "date": "1971-12-18",
+          "description": "Capitol Reef is elevated from national monument to national park, protecting the Waterpocket Fold — a 100-mile geologic monocline. The area was home to the Fremont people and later served as a hideout for Butch Cassidy. Mormon settlers planted orchards in the Fruita area that visitors still harvest today.",
+          "source": "National Park Service - Capitol Reef"
+        }
+      ]
+    },
+    {
+      "id": "canyonlands-utah-s011",
+      "name": "Canyonlands National Park, Utah",
+      "coordinates": [-109.9025, 38.3269],
+      "events": [
+        {
+          "id": "event-seed-canyonlands",
+          "title": "Canyonlands Established as a National Park",
+          "date": "1964-09-12",
+          "description": "President Lyndon Johnson signs legislation creating Canyonlands National Park, preserving 337,598 acres of dramatic desert landscape carved by the Colorado and Green Rivers. Secretary of the Interior Stewart Udall championed the park after visiting the area by river.",
+          "source": "National Park Service - Canyonlands"
+        }
+      ]
+    },
+    {
+      "id": "bears-ears-utah-s012",
+      "name": "Bears Ears, San Juan County, Utah",
+      "coordinates": [-109.8561, 37.6261],
+      "events": [
+        {
+          "id": "event-seed-bears-ears",
+          "title": "Bears Ears National Monument Designated",
+          "date": "2016-12-28",
+          "description": "President Barack Obama designates Bears Ears National Monument, protecting 1.35 million acres of culturally significant landscape in southeastern Utah. The monument was the result of an unprecedented proposal by a coalition of five Native American tribes — the Hopi, Navajo, Ute Mountain Ute, Ute Indian Tribe, and Zuni — to protect over 100,000 archaeological and cultural sites.",
+          "source": "Bureau of Land Management"
+        }
+      ]
+    },
+    {
+      "id": "ogden-utah-s013",
+      "name": "Ogden, Utah",
+      "coordinates": [-111.9738, 41.2230],
+      "events": [
+        {
+          "id": "event-seed-ogden-junction",
+          "title": "Ogden Becomes the Railroad Crossroads of the West",
+          "date": "1870-03-08",
+          "description": "The Utah Central Railroad connects Salt Lake City to Ogden, making Ogden the junction point for the transcontinental railroad. For decades, nearly every train crossing the continent passed through Ogden's Union Station, earning the city the nickname \"Junction City.\"",
+          "source": "Union Station Museums, Ogden"
+        },
+        {
+          "id": "event-seed-ogden-trapper",
+          "title": "Peter Skene Ogden Traps the Weber River Region",
+          "date": "1825-05-01",
+          "description": "Hudson's Bay Company fur brigade leader Peter Skene Ogden leads an expedition trapping beaver along the Weber River in the Ogden Valley region. American free trappers confronted the British party, part of the ongoing competition for the lucrative fur trade. The city of Ogden was later named for him.",
+          "source": "Utah Historical Quarterly"
+        }
+      ]
+    },
+    {
+      "id": "provo-utah-s014",
+      "name": "Provo, Utah",
+      "coordinates": [-111.6585, 40.2338],
+      "events": [
+        {
+          "id": "event-seed-provo-settlement",
+          "title": "Fort Utah Established at Provo",
+          "date": "1849-04-01",
+          "description": "Mormon settlers establish Fort Utah on the Provo River, one of the earliest settlements outside Salt Lake City. Conflict with the Timpanogos Ute people quickly followed, culminating in the Battle at Fort Utah in early 1850, which resulted in the displacement of the Ute from Utah Valley.",
+          "source": "Utah Division of State History"
+        },
+        {
+          "id": "event-seed-byu-founded",
+          "title": "Brigham Young Academy Founded",
+          "date": "1875-10-16",
+          "description": "Brigham Young establishes Brigham Young Academy in Provo, which would eventually become Brigham Young University — one of the largest private universities in the United States. The school's founding reflected the LDS Church's emphasis on education in the developing Utah Territory.",
+          "source": "Brigham Young University Archives"
+        }
+      ]
+    },
+    {
+      "id": "silver-reef-utah-s015",
+      "name": "Silver Reef, Washington County, Utah",
+      "coordinates": [-113.3833, 37.2500],
+      "events": [
+        {
+          "id": "event-seed-silver-reef",
+          "title": "Silver Discovered in Sandstone at Silver Reef",
+          "date": "1866-01-01",
+          "description": "Silver is discovered in sandstone formations near present-day Silver Reef — a geological anomaly, since silver in sandstone was thought impossible. By the late 1870s, Silver Reef was a booming mining town of 1,500 people, one of the few non-Mormon settlements in southern Utah. The town declined rapidly after silver prices crashed in the 1880s.",
+          "source": "Silver Reef Museum, Leeds, Utah"
+        }
+      ]
+    },
+    {
+      "id": "bonneville-salt-flats-utah-s016",
+      "name": "Bonneville Salt Flats, Utah",
+      "coordinates": [-113.8117, 40.7556],
+      "events": [
+        {
+          "id": "event-seed-bonneville-speed",
+          "title": "Ab Jenkins Sets Land Speed Record at Bonneville",
+          "date": "1935-08-01",
+          "description": "Utah native Ab Jenkins sets a 24-hour endurance speed record on the Bonneville Salt Flats, averaging over 135 mph. The vast, perfectly flat salt beds of ancient Lake Bonneville had been used for racing since 1914 and would become the world's premier land speed record venue.",
+          "source": "Utah Division of State History"
+        }
+      ]
+    },
+    {
+      "id": "green-river-utah-s017",
+      "name": "Green River, Utah",
+      "coordinates": [-110.1590, 38.9864],
+      "events": [
+        {
+          "id": "event-seed-powell-expedition",
+          "title": "John Wesley Powell Launches Colorado River Expedition",
+          "date": "1869-05-24",
+          "description": "Civil War veteran and geologist John Wesley Powell departs Green River Station, Wyoming Territory, with nine men and four wooden boats on a three-month expedition down the Green and Colorado Rivers through the Grand Canyon. The expedition passed through present-day Green River, Utah, and became one of the great exploration feats of the American West.",
+          "source": "U.S. Geological Survey / Smithsonian Institution"
+        }
+      ]
+    },
+    {
+      "id": "dugway-proving-ground-utah-s018",
+      "name": "Dugway Proving Ground, Utah",
+      "coordinates": [-113.0278, 40.1856],
+      "events": [
+        {
+          "id": "event-seed-dugway",
+          "title": "Dugway Proving Ground Established",
+          "date": "1942-03-01",
+          "description": "The U.S. Army establishes Dugway Proving Ground in the western Utah desert to test chemical and biological weapons during World War II. The remote 800,000-acre facility also tested incendiary bombs. A 1968 nerve agent test at Dugway killed thousands of sheep in nearby Skull Valley, triggering a national outcry and contributing to Nixon's 1969 ban on biological weapons.",
+          "source": "U.S. Army Dugway Proving Ground"
+        }
+      ]
+    },
+    {
+      "id": "cedar-city-utah-s019",
+      "name": "Cedar City, Utah",
+      "coordinates": [-113.0619, 37.6775],
+      "events": [
+        {
+          "id": "event-seed-iron-mission",
+          "title": "Iron Mission Established at Cedar City",
+          "date": "1851-11-11",
+          "description": "Brigham Young sends a company of 35 men to establish an iron works near Cedar City, aiming to make Utah self-sufficient in iron production. Though the Iron Mission struggled with technical challenges, it established Cedar City as a permanent settlement and demonstrated the ambition of early Mormon colonization.",
+          "source": "Iron Mission State Park Museum, Cedar City"
+        }
+      ]
+    },
+    {
+      "id": "golden-spike-tower-utah-s020",
+      "name": "Corinne, Utah",
+      "coordinates": [-112.1108, 41.5503],
+      "events": [
+        {
+          "id": "event-seed-corinne",
+          "title": "Corinne Founded as a Non-Mormon Railroad Town",
+          "date": "1869-03-25",
+          "description": "The town of Corinne is founded along the Central Pacific Railroad as a deliberately non-Mormon commercial center, nicknamed \"The Gentile Capital of Utah.\" Corinne briefly boomed as a freight hub and was home to Utah's first Gentile (non-LDS) newspaper, but declined after the railroad junction moved to Ogden.",
+          "source": "Utah Historical Quarterly"
+        }
+      ]
+    },
+    {
+      "id": "moab-utah-s021",
+      "name": "Moab, Utah",
+      "coordinates": [-109.5498, 38.5733],
+      "events": [
+        {
+          "id": "event-seed-moab-uranium",
+          "title": "Charlie Steen Strikes Uranium Near Moab",
+          "date": "1952-07-06",
+          "description": "Geologist Charlie Steen discovers a massive uranium deposit at his Mi Vida mine southeast of Moab, triggering a uranium boom across the Colorado Plateau. Moab transformed overnight from a quiet ranching town into a boomtown of prospectors and miners, driven by Cold War demand for nuclear weapons material.",
+          "source": "Moab Museum"
+        }
+      ]
+    },
+    {
+      "id": "wendover-utah-s022",
+      "name": "Wendover, Utah",
+      "coordinates": [-114.0372, 40.7369],
+      "events": [
+        {
+          "id": "event-seed-wendover-airfield",
+          "title": "Wendover Airfield: Training Site for the Enola Gay Crew",
+          "date": "1944-09-01",
+          "description": "The 509th Composite Group, commanded by Colonel Paul Tibbets, begins secret training at Wendover Army Airfield in preparation for the atomic bombing missions over Japan. The remote Utah desert location was chosen for its isolation. The Enola Gay crew practiced long-range overwater flights and precision bombing at Wendover before deploying to Tinian Island in 1945.",
+          "source": "Historic Wendover Airfield Museum"
+        }
+      ]
+    },
+    {
+      "id": "st-george-utah-s023",
+      "name": "St. George, Utah",
+      "coordinates": [-113.5841, 37.1041],
+      "events": [
+        {
+          "id": "event-seed-st-george-cotton",
+          "title": "Cotton Mission Established in St. George",
+          "date": "1861-11-01",
+          "description": "Brigham Young calls 309 families to settle St. George and grow cotton in Utah's \"Dixie\" region, aiming to produce cotton for the territory as the Civil War disrupted Southern supply. The harsh desert conditions made cotton farming difficult, but the settlement became the major population center of southern Utah.",
+          "source": "St. George Historical Society"
+        },
+        {
+          "id": "event-seed-st-george-temple",
+          "title": "St. George Temple Dedicated",
+          "date": "1877-04-06",
+          "description": "The St. George Temple is dedicated as the first LDS temple completed in Utah and the first operational temple since the Nauvoo Temple. Brigham Young personally oversaw much of its construction; he died just months after its dedication.",
+          "source": "Church History Library, LDS Church"
+        }
+      ]
+    },
+    {
+      "id": "cache-valley-utah-s024",
+      "name": "Logan, Cache Valley, Utah",
+      "coordinates": [-111.8338, 41.7370],
+      "events": [
+        {
+          "id": "event-seed-rendezvous",
+          "title": "1826 Fur Trappers' Rendezvous in Cache Valley",
+          "date": "1826-07-01",
+          "description": "Mountain men gather in Cache Valley for the annual fur trade rendezvous, one of several held in the region during the 1820s. Trappers including Jim Bridger, Jedediah Smith, and others from the Rocky Mountain Fur Company traded beaver pelts, resupplied, and exchanged information about the geography of the West.",
+          "source": "Museum of the Mountain Man / Utah Historical Quarterly"
+        }
+      ]
+    },
+    {
+      "id": "thistle-utah-s025",
+      "name": "Thistle, Utah County, Utah",
+      "coordinates": [-111.4975, 40.0072],
+      "events": [
+        {
+          "id": "event-seed-thistle-flood",
+          "title": "Thistle Landslide and Flood Destroy Town",
+          "date": "1983-04-14",
+          "description": "A massive landslide triggered by heavy snowmelt dams Spanish Fork Canyon, creating a lake that submerges the town of Thistle. The disaster — the costliest landslide in U.S. history at the time ($200 million) — destroyed the Denver & Rio Grande Western Railroad mainline and U.S. Route 6, cutting a major east-west transportation corridor for months.",
+          "source": "Utah Geological Survey"
+        }
+      ]
+    },
+    {
+      "id": "helper-utah-s026",
+      "name": "Helper, Carbon County, Utah",
+      "coordinates": [-110.8557, 39.6836],
+      "events": [
+        {
+          "id": "event-seed-helper-coal",
+          "title": "Coal Mining Brings Immigrants to Carbon County",
+          "date": "1890-01-01",
+          "description": "The Denver & Rio Grande Western Railroad opens coal mines in Carbon County, attracting waves of immigrants from Greece, Italy, Japan, China, and Eastern Europe to work the mines. Helper became one of the most ethnically diverse towns in Utah, a stark contrast to the predominantly LDS settlements elsewhere in the state.",
+          "source": "Western Mining & Railroad Museum, Helper"
+        },
+        {
+          "id": "event-seed-castle-gate-mine",
+          "title": "Castle Gate Mine Disaster",
+          "date": "1924-03-08",
+          "description": "An explosion at the Castle Gate No. 2 coal mine near Helper kills 172 miners, making it one of the worst mining disasters in American history. Most victims were immigrant workers. The disaster highlighted the dangerous conditions in Utah's coal mines and galvanized labor organizing efforts.",
+          "source": "Utah Division of State History"
+        }
+      ]
+    },
+    {
+      "id": "rainbow-bridge-utah-s027",
+      "name": "Rainbow Bridge, San Juan County, Utah",
+      "coordinates": [-110.9644, 37.0778],
+      "events": [
+        {
+          "id": "event-seed-rainbow-bridge",
+          "title": "Rainbow Bridge Discovered by Non-Native Explorers",
+          "date": "1909-08-14",
+          "description": "A party led by Byron Cummings and W.B. Douglass, guided by Nasja Begay (Paiute) and Jim Mike (Ute), reaches Rainbow Bridge — the world's largest known natural bridge at 290 feet high. Sacred to the Navajo as Nonnezoshe (\"rainbow turned to stone\"), the site was designated a national monument by President Taft in 1910.",
+          "source": "National Park Service - Rainbow Bridge"
+        }
+      ]
+    },
+    {
+      "id": "spring-city-utah-s028",
+      "name": "Spring City, Sanpete County, Utah",
+      "coordinates": [-111.4964, 39.4822],
+      "events": [
+        {
+          "id": "event-seed-black-hawk-war",
+          "title": "Black Hawk War Erupts in Sanpete Valley",
+          "date": "1865-04-09",
+          "description": "Conflict between Mormon settlers and Ute, Paiute, and Navajo warriors begins in Sanpete County, triggered by disputes over land and cattle. The Black Hawk War, led by Ute war chief Antonga Black Hawk, lasted until 1872 and was the longest and most destructive conflict between settlers and Native Americans in Utah history, with over 70 settlers killed and many settlements temporarily abandoned.",
+          "source": "Utah Division of State History"
         }
       ]
     }
