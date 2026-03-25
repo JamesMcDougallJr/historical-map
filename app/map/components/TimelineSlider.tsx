@@ -1,6 +1,6 @@
-'use client';
+"use client";
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from "react";
 
 interface TimelineSliderProps {
   minYear: number;
@@ -21,6 +21,26 @@ export function TimelineSlider({
 }: TimelineSliderProps): JSX.Element {
   const [isExpanded, setIsExpanded] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Close on tap/click outside
+  useEffect(() => {
+    if (!isExpanded) return;
+    const handler = (e: MouseEvent | TouchEvent) => {
+      if (
+        containerRef.current &&
+        !containerRef.current.contains(e.target as Node)
+      ) {
+        setIsExpanded(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    document.addEventListener("touchstart", handler);
+    return () => {
+      document.removeEventListener("mousedown", handler);
+      document.removeEventListener("touchstart", handler);
+    };
+  }, [isExpanded]);
 
   // Calculate percentage for slider thumb position
   const percentage = ((value - minYear) / (maxYear - minYear)) * 100;
@@ -31,21 +51,21 @@ export function TimelineSlider({
       if (!isEnabled) return;
 
       const step = e.shiftKey ? 10 : 1;
-      if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') {
+      if (e.key === "ArrowLeft" || e.key === "ArrowDown") {
         e.preventDefault();
         onChange(Math.max(minYear, value - step));
-      } else if (e.key === 'ArrowRight' || e.key === 'ArrowUp') {
+      } else if (e.key === "ArrowRight" || e.key === "ArrowUp") {
         e.preventDefault();
         onChange(Math.min(maxYear, value + step));
-      } else if (e.key === 'Home') {
+      } else if (e.key === "Home") {
         e.preventDefault();
         onChange(minYear);
-      } else if (e.key === 'End') {
+      } else if (e.key === "End") {
         e.preventDefault();
         onChange(maxYear);
       }
     },
-    [isEnabled, minYear, maxYear, value, onChange]
+    [isEnabled, minYear, maxYear, value, onChange],
   );
 
   // Generate decade markers
@@ -56,15 +76,19 @@ export function TimelineSlider({
   }
 
   // Filter to show fewer markers on small screens
-  const visibleDecades = decades.filter((_, i) => i % 2 === 0 || decades.length <= 8);
+  const visibleDecades = decades.filter(
+    (_, i) => i % 2 === 0 || decades.length <= 8,
+  );
 
   return (
-    <div className="fixed bottom-4 left-4 z-20">
+    <div ref={containerRef} className="fixed bottom-4 left-4 z-20">
       {/* Toggle Button */}
       <button
         onClick={() => setIsExpanded(!isExpanded)}
         className={`flex items-center gap-2 px-4 py-2 backdrop-blur-sm rounded-lg text-white shadow-lg transition-colors ${
-          isEnabled ? 'bg-blue-600/80 hover:bg-blue-600' : 'bg-black/70 hover:bg-black/80'
+          isEnabled
+            ? "bg-blue-600/80 hover:bg-blue-600"
+            : "bg-black/70 hover:bg-black/80"
         }`}
         aria-label="Toggle timeline"
       >
@@ -83,7 +107,7 @@ export function TimelineSlider({
           <polyline points="12 6 12 12 16 14" />
         </svg>
         <span className="text-sm font-medium">
-          {isEnabled ? value : 'Timeline'}
+          {isEnabled ? value : "Timeline"}
         </span>
       </button>
 
@@ -105,10 +129,14 @@ export function TimelineSlider({
           </div>
 
           {/* Slider Content */}
-          <div className={`px-4 py-4 ${!isEnabled ? 'opacity-50 pointer-events-none' : ''}`}>
+          <div
+            className={`px-4 py-4 ${!isEnabled ? "opacity-50 pointer-events-none" : ""}`}
+          >
             {/* Year Display */}
             <div className="text-center mb-4">
-              <span className="text-3xl font-bold text-white tabular-nums">{value}</span>
+              <span className="text-3xl font-bold text-white tabular-nums">
+                {value}
+              </span>
               <p className="text-xs text-slate-400 mt-1">
                 Showing overlays active in this year
               </p>
@@ -144,13 +172,13 @@ export function TimelineSlider({
                       onClick={() => onChange(decade)}
                       className={`text-[10px] transition-colors ${
                         decade === value
-                          ? 'text-blue-400 font-medium'
-                          : 'text-slate-500 hover:text-slate-300'
+                          ? "text-blue-400 font-medium"
+                          : "text-slate-500 hover:text-slate-300"
                       }`}
                       style={{
-                        position: 'absolute',
+                        position: "absolute",
                         left: `${pos}%`,
-                        transform: 'translateX(-50%)',
+                        transform: "translateX(-50%)",
                       }}
                       disabled={!isEnabled}
                     >

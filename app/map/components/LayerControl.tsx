@@ -1,8 +1,8 @@
-'use client';
+"use client";
 
-import { useState, useRef } from 'react';
-import type { HistoricalOverlay, OverlaySource } from '../types';
-import { generateOverlayId, getSourceAttribution } from '../utils/overlays';
+import { useState, useRef, useEffect } from "react";
+import type { HistoricalOverlay, OverlaySource } from "../types";
+import { generateOverlayId, getSourceAttribution } from "../utils/overlays";
 
 interface LayerControlProps {
   overlays: HistoricalOverlay[];
@@ -25,12 +25,33 @@ export function LayerControl({
 }: LayerControlProps): JSX.Element {
   const [isExpanded, setIsExpanded] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
-  const [newOverlayUrl, setNewOverlayUrl] = useState('');
-  const [newOverlayName, setNewOverlayName] = useState('');
-  const [newOverlaySource, setNewOverlaySource] = useState<OverlaySource>('allmaps');
+  const [newOverlayUrl, setNewOverlayUrl] = useState("");
+  const [newOverlayName, setNewOverlayName] = useState("");
+  const [newOverlaySource, setNewOverlaySource] =
+    useState<OverlaySource>("allmaps");
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const dragCounter = useRef(0);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Close on tap/click outside
+  useEffect(() => {
+    if (!isExpanded) return;
+    const handler = (e: MouseEvent | TouchEvent) => {
+      if (
+        containerRef.current &&
+        !containerRef.current.contains(e.target as Node)
+      ) {
+        setIsExpanded(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    document.addEventListener("touchstart", handler);
+    return () => {
+      document.removeEventListener("mousedown", handler);
+      document.removeEventListener("touchstart", handler);
+    };
+  }, [isExpanded]);
 
   const handleAddOverlay = () => {
     if (!newOverlayUrl.trim() || !newOverlayName.trim()) return;
@@ -40,33 +61,35 @@ export function LayerControl({
       name: newOverlayName.trim(),
       yearRange: [1800, 2000],
       source: newOverlaySource,
-      annotationUrl: newOverlaySource === 'allmaps' ? newOverlayUrl.trim() : undefined,
-      tileUrl: newOverlaySource !== 'allmaps' ? newOverlayUrl.trim() : undefined,
+      annotationUrl:
+        newOverlaySource === "allmaps" ? newOverlayUrl.trim() : undefined,
+      tileUrl:
+        newOverlaySource !== "allmaps" ? newOverlayUrl.trim() : undefined,
       opacity: 0.7,
       attribution: getSourceAttribution(newOverlaySource),
       enabled: true,
     };
 
     onAddOverlay(overlay);
-    setNewOverlayUrl('');
-    setNewOverlayName('');
+    setNewOverlayUrl("");
+    setNewOverlayName("");
     setShowAddForm(false);
   };
 
   const handleDragStart = (e: React.DragEvent, id: string) => {
     setDraggedId(id);
-    e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('text/plain', id);
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", id);
     // Add slight delay for visual feedback
     setTimeout(() => {
       const target = e.target as HTMLElement;
-      target.style.opacity = '0.5';
+      target.style.opacity = "0.5";
     }, 0);
   };
 
   const handleDragEnd = (e: React.DragEvent) => {
     const target = e.target as HTMLElement;
-    target.style.opacity = '1';
+    target.style.opacity = "1";
     setDraggedId(null);
     setDragOverId(null);
     dragCounter.current = 0;
@@ -90,7 +113,7 @@ export function LayerControl({
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
+    e.dataTransfer.dropEffect = "move";
   };
 
   const handleDrop = (e: React.DragEvent, targetId: string) => {
@@ -131,7 +154,7 @@ export function LayerControl({
   const enabledCount = overlays.filter((o) => o.enabled).length;
 
   return (
-    <div className="fixed bottom-4 right-4 z-20">
+    <div ref={containerRef} className="fixed bottom-4 right-4 z-20">
       {/* Toggle Button */}
       <button
         onClick={() => setIsExpanded(!isExpanded)}
@@ -192,7 +215,9 @@ export function LayerControl({
             <div className="px-4 py-3 border-b border-slate-700 bg-slate-800/50">
               <div className="space-y-3">
                 <div>
-                  <label className="block text-xs text-slate-400 mb-1">Name</label>
+                  <label className="block text-xs text-slate-400 mb-1">
+                    Name
+                  </label>
                   <input
                     type="text"
                     value={newOverlayName}
@@ -202,10 +227,14 @@ export function LayerControl({
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-slate-400 mb-1">Source Type</label>
+                  <label className="block text-xs text-slate-400 mb-1">
+                    Source Type
+                  </label>
                   <select
                     value={newOverlaySource}
-                    onChange={(e) => setNewOverlaySource(e.target.value as OverlaySource)}
+                    onChange={(e) =>
+                      setNewOverlaySource(e.target.value as OverlaySource)
+                    }
                     className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded text-white text-sm focus:outline-none focus:border-blue-500"
                   >
                     <option value="allmaps">Allmaps (IIIF)</option>
@@ -214,16 +243,18 @@ export function LayerControl({
                 </div>
                 <div>
                   <label className="block text-xs text-slate-400 mb-1">
-                    {newOverlaySource === 'allmaps' ? 'Allmaps Annotation URL' : 'Tile URL'}
+                    {newOverlaySource === "allmaps"
+                      ? "Allmaps Annotation URL"
+                      : "Tile URL"}
                   </label>
                   <input
                     type="url"
                     value={newOverlayUrl}
                     onChange={(e) => setNewOverlayUrl(e.target.value)}
                     placeholder={
-                      newOverlaySource === 'allmaps'
-                        ? 'https://annotations.allmaps.org/maps/...'
-                        : 'https://tiles.example.com/{z}/{x}/{y}.png'
+                      newOverlaySource === "allmaps"
+                        ? "https://annotations.allmaps.org/maps/..."
+                        : "https://tiles.example.com/{z}/{x}/{y}.png"
                     }
                     className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded text-white text-sm placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
                   />
@@ -251,7 +282,15 @@ export function LayerControl({
           {onReorderOverlays && overlays.length > 1 && (
             <div className="px-4 py-2 bg-slate-800/30 border-b border-slate-700/50">
               <p className="text-xs text-slate-500 flex items-center gap-1">
-                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
                   <line x1="8" y1="6" x2="21" y2="6" />
                   <line x1="8" y1="12" x2="21" y2="12" />
                   <line x1="8" y1="18" x2="21" y2="18" />
@@ -289,9 +328,11 @@ export function LayerControl({
                   onDragOver={handleDragOver}
                   onDrop={(e) => handleDrop(e, overlay.id)}
                   className={`px-4 py-3 border-b border-slate-700/50 last:border-b-0 transition-all ${
-                    overlay.enabled ? 'bg-slate-800/30' : ''
-                  } ${dragOverId === overlay.id ? 'border-t-2 border-t-blue-500' : ''} ${
-                    onReorderOverlays ? 'cursor-grab active:cursor-grabbing' : ''
+                    overlay.enabled ? "bg-slate-800/30" : ""
+                  } ${dragOverId === overlay.id ? "border-t-2 border-t-blue-500" : ""} ${
+                    onReorderOverlays
+                      ? "cursor-grab active:cursor-grabbing"
+                      : ""
                   }`}
                 >
                   {/* Layer Header */}
@@ -300,7 +341,13 @@ export function LayerControl({
                       {/* Drag Handle */}
                       {onReorderOverlays && (
                         <div className="text-slate-500 mt-1 select-none">
-                          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                          <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            width="14"
+                            height="14"
+                            viewBox="0 0 24 24"
+                            fill="currentColor"
+                          >
                             <circle cx="9" cy="5" r="1.5" />
                             <circle cx="15" cy="5" r="1.5" />
                             <circle cx="9" cy="12" r="1.5" />
@@ -338,7 +385,8 @@ export function LayerControl({
                         )}
                       </div>
                     </div>
-                    {overlay.source === 'allmaps' || overlay.source === 'custom' ? (
+                    {overlay.source === "allmaps" ||
+                    overlay.source === "custom" ? (
                       <button
                         onClick={() => onRemoveOverlay(overlay.id)}
                         className="text-slate-500 hover:text-red-400 transition-colors p-1"
@@ -363,14 +411,19 @@ export function LayerControl({
                   {/* Opacity Slider - Only show when enabled */}
                   {overlay.enabled && (
                     <div className="flex items-center gap-3 mt-2 pl-12">
-                      <span className="text-xs text-slate-400 w-14">Opacity</span>
+                      <span className="text-xs text-slate-400 w-14">
+                        Opacity
+                      </span>
                       <input
                         type="range"
                         min="0"
                         max="100"
                         value={overlay.opacity * 100}
                         onChange={(e) =>
-                          onOpacityChange(overlay.id, parseInt(e.target.value) / 100)
+                          onOpacityChange(
+                            overlay.id,
+                            parseInt(e.target.value) / 100,
+                          )
                         }
                         className="flex-1 h-1 bg-slate-600 rounded-lg appearance-none cursor-pointer accent-blue-500"
                       />
@@ -394,7 +447,7 @@ export function LayerControl({
           {/* Footer Info */}
           <div className="px-4 py-2 border-t border-slate-700 bg-slate-800/50">
             <p className="text-xs text-slate-500">
-              Find maps at{' '}
+              Find maps at{" "}
               <a
                 href="https://editor.allmaps.org/"
                 target="_blank"
