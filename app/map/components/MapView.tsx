@@ -89,6 +89,8 @@ export function MapView({
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isPinned, setIsPinned] = useState(false);
   const isPinnedRef = useRef(false);
+  const isDraggingPopupRef = useRef(false);
+  const dragStartRef = useRef<{ x: number; y: number } | null>(null);
   const [overlays, setOverlays] = useState<HistoricalOverlay[]>(
     initialOverlays ?? DEFAULT_OVERLAYS,
   );
@@ -123,7 +125,7 @@ export function MapView({
     const overlay = new Overlay({
       element: popupRef.current,
       positioning: "bottom-center",
-      offset: [0, -10],
+      offset: [0, -32],
       autoPan: { animation: { duration: 250 } },
     });
     overlayRef.current = overlay;
@@ -245,6 +247,59 @@ export function MapView({
     setHoveredLocation(null);
     setIsPinned(false);
     overlayRef.current?.setPosition(undefined);
+  }, []);
+
+  // Drag-to-reposition for pinned popups
+  const handlePopupDragStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    isDraggingPopupRef.current = true;
+    dragStartRef.current = { x: e.clientX, y: e.clientY };
+
+    const overlay = overlayRef.current;
+    const map = mapRef.current;
+    if (!overlay || !map) return;
+
+    const startPosition = overlay.getPosition();
+    if (!startPosition) return;
+
+    const px = map.getPixelFromCoordinate(startPosition);
+    if (!px || px[0] == null || px[1] == null) return;
+    const startPixel: [number, number] = [px[0] as number, px[1] as number];
+
+    // Disable map pan while dragging popup
+    map.getInteractions().forEach((interaction) => {
+      if (interaction.constructor.name === "DragPan") {
+        interaction.setActive(false);
+      }
+    });
+
+    const onMouseMove = (moveEvt: MouseEvent) => {
+      if (!isDraggingPopupRef.current || !dragStartRef.current) return;
+      const dx = moveEvt.clientX - dragStartRef.current.x;
+      const dy = moveEvt.clientY - dragStartRef.current.y;
+      const newPixel: [number, number] = [
+        startPixel[0] + dx,
+        startPixel[1] + dy,
+      ];
+      const newCoord = map.getCoordinateFromPixel(newPixel);
+      if (newCoord) overlay.setPosition(newCoord);
+    };
+
+    const onMouseUp = () => {
+      isDraggingPopupRef.current = false;
+      dragStartRef.current = null;
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+      // Re-enable map pan
+      map.getInteractions().forEach((interaction) => {
+        if (interaction.constructor.name === "DragPan") {
+          interaction.setActive(true);
+        }
+      });
+    };
+
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
   }, []);
 
   const handleToggleHomeOverlay = () => {
@@ -589,7 +644,12 @@ export function MapView({
         onMouseEnter={handlePopupMouseEnter}
         onMouseLeave={handlePopupMouseLeave}
       >
-        <MapPopup location={hoveredLocation} onClose={handleClosePopup} />
+        <MapPopup
+          location={hoveredLocation}
+          onClose={handleClosePopup}
+          isPinned={isPinned}
+          onHeaderMouseDown={handlePopupDragStart}
+        />
       </div>
     </div>
   );

@@ -1,21 +1,28 @@
-'use client';
+"use client";
 
-import { useState, useMemo, useEffect, useRef } from 'react';
-import type { HistoricalLocation, HistoricalEvent } from '../types';
-import { getYear, sortByDate, groupByYear } from '../utils/date-utils';
-import { EventCard } from './EventCard';
-import { EventTabs } from './EventTabs';
-import { EventPagination } from './EventPagination';
-import { EVENTS_PER_PAGE } from '../constants';
+import { useState, useMemo, useEffect, useRef } from "react";
+import type { HistoricalLocation, HistoricalEvent } from "../types";
+import { getYear, sortByDate, groupByYear } from "../utils/date-utils";
+import { EventCard } from "./EventCard";
+import { EventTabs } from "./EventTabs";
+import { EventPagination } from "./EventPagination";
+import { EVENTS_PER_PAGE } from "../constants";
 
 interface MapPopupProps {
   location: HistoricalLocation | null;
   onClose: () => void;
+  isPinned?: boolean;
+  onHeaderMouseDown?: (e: React.MouseEvent) => void;
 }
 
-export function MapPopup({ location, onClose }: MapPopupProps) {
+export function MapPopup({
+  location,
+  onClose,
+  isPinned,
+  onHeaderMouseDown,
+}: MapPopupProps) {
   const popupRef = useRef<HTMLDivElement>(null);
-  const [activeYear, setActiveYear] = useState<string>('');
+  const [activeYear, setActiveYear] = useState<string>("");
   const [currentPage, setCurrentPage] = useState(0);
 
   // Sort events and group by year
@@ -35,7 +42,7 @@ export function MapPopup({ location, onClose }: MapPopupProps) {
   // Reset state when location changes
   useEffect(() => {
     if (location && years.length > 0) {
-      setActiveYear(years[0] ?? '');
+      setActiveYear(years[0] ?? "");
       setCurrentPage(0);
     }
   }, [location, years]);
@@ -71,8 +78,11 @@ export function MapPopup({ location, onClose }: MapPopupProps) {
       className="w-80 bg-white dark:bg-neutral-800 rounded-xl shadow-xl border border-neutral-200 dark:border-neutral-700 overflow-hidden"
       onMouseEnter={(e) => e.stopPropagation()}
     >
-      {/* Header */}
-      <div className="px-4 py-3 bg-gradient-to-r from-blue-500 to-purple-500 text-white">
+      {/* Header — drag handle when pinned */}
+      <div
+        className={`px-4 py-3 bg-gradient-to-r from-blue-500 to-purple-500 text-white ${isPinned ? "cursor-grab active:cursor-grabbing select-none" : ""}`}
+        onMouseDown={isPinned ? onHeaderMouseDown : undefined}
+      >
         <div className="flex items-center justify-between">
           <h3 className="font-semibold">{location.name}</h3>
           <button
@@ -96,7 +106,8 @@ export function MapPopup({ location, onClose }: MapPopupProps) {
           </button>
         </div>
         <p className="text-sm text-white/80">
-          {location.events.length} event{location.events.length !== 1 ? 's' : ''}
+          {location.events.length} event
+          {location.events.length !== 1 ? "s" : ""}
         </p>
       </div>
 
