@@ -90,8 +90,10 @@ export function MapPopup({
       <div className="flex items-center justify-between">
         <h3 className="font-semibold text-base md:text-sm">{location.name}</h3>
         <button
+          onMouseDown={(e) => e.stopPropagation()}
+          onTouchStart={(e) => e.stopPropagation()}
           onClick={onClose}
-          className="p-1 hover:bg-white/20 rounded transition-colors"
+          className="p-2 -m-1 hover:bg-white/20 rounded transition-colors"
           aria-label="Close popup"
         >
           <svg
