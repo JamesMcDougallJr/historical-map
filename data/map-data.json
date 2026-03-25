@@ -1,0 +1,115 @@
+{
+  "version": "1.0.0",
+  "lastUpdated": "2026-03-18T20:58:47.093Z",
+  "locations": [
+    {
+      "id": "salt-lake-city-utah-wsnl",
+      "name": "Salt Lake City, Utah",
+      "coordinates": [
+        -111.891,
+        40.7608
+      ],
+      "events": [
+        {
+          "id": "event-1773867502355-ghc5rxp",
+          "title": "Mormon Pioneers Arrive in Salt Lake Valley",
+          "date": "1847-07-24",
+          "description": "Brigham Young leads the first company of Mormon (LDS) pioneers into the Salt Lake Valley, famously declaring \"This is the right place.\" Over 70,000 pioneers would eventually follow the trail west to settle Utah.",
+          "source": "Church History Library, LDS Church"
+        },
+        {
+          "id": "event-1773867510516-ahgct30",
+          "title": "Utah Admitted to the Union as the 45th State",
+          "date": "1896-01-04",
+          "description": "Utah is admitted to the Union as the 45th state, following decades of tension over polygamy practiced by members of the LDS Church. Utah's statehood came after Congress passed the Edmunds-Tucker Act and church leadership officially renounced polygamy in 1890.",
+          "source": "Utah Division of State History"
+        }
+      ]
+    },
+    {
+      "id": "promontory-summit-utah-wvt1",
+      "name": "Promontory Summit, Utah",
+      "coordinates": [
+        -112.549,
+        41.6205
+      ],
+      "events": [
+        {
+          "id": "event-1773867506438-e1kcgmc",
+          "title": "Golden Spike: Transcontinental Railroad Completed",
+          "date": "1869-05-10",
+          "description": "The First Transcontinental Railroad is completed at Promontory Summit, Utah, when the Central Pacific and Union Pacific railroads are joined with a ceremonial golden spike. This landmark connected the East and West coasts of the United States by rail for the first time.",
+          "source": "National Park Service - Golden Spike National Historical Park"
+        }
+      ]
+    },
+    {
+      "id": "dinosaur-national-monument-utah-x2eh",
+      "name": "Dinosaur National Monument, Utah",
+      "coordinates": [
+        -108.9878,
+        40.4378
+      ],
+      "events": [
+        {
+          "id": "event-1773867514989-76t74r3",
+          "title": "Domínguez–Escalante Expedition Enters Utah",
+          "date": "1776-07-29",
+          "description": "The Domínguez–Escalante Expedition, led by Spanish Franciscan friars, enters present-day Utah near Dinosaur National Monument. They were the first Europeans to explore the interior of the Great Basin and recorded detailed accounts of the land and its Native peoples.",
+          "source": "Utah Historical Quarterly"
+        }
+      ]
+    },
+    {
+      "id": "fort-douglas-salt-lake-city-x5b4",
+      "name": "Fort Douglas, Salt Lake City",
+      "coordinates": [
+        -111.8285,
+        40.7739
+      ],
+      "events": [
+        {
+          "id": "event-1773867518753-c171g5f",
+          "title": "Camp Douglas (Fort Douglas) Established",
+          "date": "1862-07-26",
+          "description": "Colonel Patrick Connor leads U.S. Army troops to establish Camp Douglas near Salt Lake City to keep watch over the Mormon community during the Civil War and protect mail and telegraph lines along the Overland Trail.",
+          "source": "Fort Douglas Military Museum"
+        }
+      ]
+    },
+    {
+      "id": "zion-national-park-utah-x8gy",
+      "name": "Zion National Park, Utah",
+      "coordinates": [
+        -113.0263,
+        37.2982
+      ],
+      "events": [
+        {
+          "id": "event-1773867522851-rzuibpv",
+          "title": "Zion National Monument Proclaimed",
+          "date": "1916-05-31",
+          "description": "Zion National Park is established as Mukuntuweap National Monument in 1909 and redesignated as Zion National Monument in 1918, becoming a full national park in 1919. It is Utah's first national park, protecting the stunning Zion Canyon carved by the Virgin River.",
+          "source": "National Park Service"
+        }
+      ]
+    },
+    {
+      "id": "bingham-canyon-mine-utah-xbqs",
+      "name": "Bingham Canyon Mine, Utah",
+      "coordinates": [
+        -112.1494,
+        40.525
+      ],
+      "events": [
+        {
+          "id": "event-1773867527093-5vrrhxu",
+          "title": "Bingham Canyon: World's Largest Open-Pit Mine",
+          "date": "1957-01-01",
+          "description": "The Kennecott Bingham Canyon Mine, one of the world's largest open-pit copper mines, reaches full modern production. Mining operations began in 1906 and the mine has produced more copper than any other mine in history, also yielding gold, silver, and molybdenum.",
+          "source": "Kennecott Utah Copper / Rio Tinto"
+        }
+      ]
+    }
+  ]
+}

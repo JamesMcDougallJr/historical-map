@@ -1,1 +1,4 @@
 node_modules
+.next
+dist
+debug-search.log

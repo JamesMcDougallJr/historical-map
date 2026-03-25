@@ -1,6 +1,7 @@
 import "./global.css";
 import { GeistSans } from "geist/font/sans";
 import { GeistMono } from "geist/font/mono";
+import { headers } from "next/headers";
 
 const cx = (...classes: (string | boolean | undefined)[]): string =>
   classes.filter(Boolean).join(" ");
@@ -10,11 +11,12 @@ export const metadata = {
   description: "An interactive historical map viewer",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: {
   children: React.ReactNode;
-}): JSX.Element {
+}): Promise<JSX.Element> {
+  const nonce = (await headers()).get("x-nonce") ?? "";
   return (
     <html
       lang="en"
@@ -23,6 +25,7 @@ export default function RootLayout({
     >
       <head>
         <script
+          nonce={nonce}
           dangerouslySetInnerHTML={{
             __html: `
               (function() {
