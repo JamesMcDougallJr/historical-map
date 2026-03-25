@@ -14,6 +14,8 @@ interface MapPopupProps {
   onClose: () => void;
   isPinned?: boolean;
   onHeaderMouseDown?: (e: React.MouseEvent) => void;
+  acknowledgedIds?: Set<string>;
+  onAcknowledge?: (eventId: string) => void;
 }
 
 export function MapPopup({
@@ -21,6 +23,8 @@ export function MapPopup({
   onClose,
   isPinned,
   onHeaderMouseDown,
+  acknowledgedIds,
+  onAcknowledge,
 }: MapPopupProps) {
   const popupRef = useRef<HTMLDivElement>(null);
   const [activeYear, setActiveYear] = useState<string>("");
@@ -133,7 +137,12 @@ export function MapPopup({
           />
           <div className="space-y-4">
             {paginatedEvents.map((event) => (
-              <EventCard key={event.id} event={event} />
+              <EventCard
+                key={event.id}
+                event={event}
+                isAcknowledged={acknowledgedIds?.has(event.id)}
+                onAcknowledge={onAcknowledge}
+              />
             ))}
           </div>
           <EventPagination

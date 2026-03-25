@@ -1,12 +1,16 @@
 // localStorage read/write utilities for historical events
 
-import type { HistoricalEventsData, HistoricalLocation, HistoricalEvent } from '../types';
+import type {
+  HistoricalEventsData,
+  HistoricalLocation,
+  HistoricalEvent,
+} from "../types";
 
-const STORAGE_KEY = 'historical-events';
+const STORAGE_KEY = "historical-events";
 
 // Default data structure
 const DEFAULT_DATA: HistoricalEventsData = {
-  version: '1.0.0',
+  version: "1.0.0",
   lastUpdated: new Date().toISOString(),
   locations: [],
 };
@@ -15,7 +19,7 @@ const DEFAULT_DATA: HistoricalEventsData = {
  * Get all historical events data from localStorage
  */
 export function getEventsData(): HistoricalEventsData {
-  if (typeof window === 'undefined') return DEFAULT_DATA;
+  if (typeof window === "undefined") return DEFAULT_DATA;
 
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
@@ -24,7 +28,7 @@ export function getEventsData(): HistoricalEventsData {
     const data = JSON.parse(stored) as HistoricalEventsData;
     return data;
   } catch {
-    console.error('Failed to parse historical events from localStorage');
+    console.error("Failed to parse historical events from localStorage");
     return DEFAULT_DATA;
   }
 }
@@ -33,7 +37,7 @@ export function getEventsData(): HistoricalEventsData {
  * Save all historical events data to localStorage
  */
 export function saveEventsData(data: HistoricalEventsData): void {
-  if (typeof window === 'undefined') return;
+  if (typeof window === "undefined") return;
 
   try {
     const toSave: HistoricalEventsData = {
@@ -42,7 +46,7 @@ export function saveEventsData(data: HistoricalEventsData): void {
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
   } catch (error) {
-    console.error('Failed to save historical events to localStorage:', error);
+    console.error("Failed to save historical events to localStorage:", error);
   }
 }
 
@@ -56,8 +60,10 @@ export function getLocations(): HistoricalLocation[] {
 /**
  * Get a single location by ID
  */
-export function getLocation(locationId: string): HistoricalLocation | undefined {
-  return getLocations().find(loc => loc.id === locationId);
+export function getLocation(
+  locationId: string,
+): HistoricalLocation | undefined {
+  return getLocations().find((loc) => loc.id === locationId);
 }
 
 /**
@@ -65,7 +71,9 @@ export function getLocation(locationId: string): HistoricalLocation | undefined 
  */
 export function saveLocation(location: HistoricalLocation): void {
   const data = getEventsData();
-  const existingIndex = data.locations.findIndex(loc => loc.id === location.id);
+  const existingIndex = data.locations.findIndex(
+    (loc) => loc.id === location.id,
+  );
 
   if (existingIndex >= 0) {
     data.locations[existingIndex] = location;
@@ -81,21 +89,24 @@ export function saveLocation(location: HistoricalLocation): void {
  */
 export function deleteLocation(locationId: string): void {
   const data = getEventsData();
-  data.locations = data.locations.filter(loc => loc.id !== locationId);
+  data.locations = data.locations.filter((loc) => loc.id !== locationId);
   saveEventsData(data);
 }
 
 /**
  * Add events to a location
  */
-export function addEventsToLocation(locationId: string, events: HistoricalEvent[]): void {
+export function addEventsToLocation(
+  locationId: string,
+  events: HistoricalEvent[],
+): void {
   const data = getEventsData();
-  const location = data.locations.find(loc => loc.id === locationId);
+  const location = data.locations.find((loc) => loc.id === locationId);
 
   if (location) {
     // Merge events, avoiding duplicates by ID
-    const existingIds = new Set(location.events.map(e => e.id));
-    const newEvents = events.filter(e => !existingIds.has(e.id));
+    const existingIds = new Set(location.events.map((e) => e.id));
+    const newEvents = events.filter((e) => !existingIds.has(e.id));
     location.events = [...location.events, ...newEvents];
     saveEventsData(data);
   }
@@ -106,10 +117,10 @@ export function addEventsToLocation(locationId: string, events: HistoricalEvent[
  */
 export function updateEvent(locationId: string, event: HistoricalEvent): void {
   const data = getEventsData();
-  const location = data.locations.find(loc => loc.id === locationId);
+  const location = data.locations.find((loc) => loc.id === locationId);
 
   if (location) {
-    const eventIndex = location.events.findIndex(e => e.id === event.id);
+    const eventIndex = location.events.findIndex((e) => e.id === event.id);
     if (eventIndex >= 0) {
       location.events[eventIndex] = event;
       saveEventsData(data);
@@ -122,10 +133,10 @@ export function updateEvent(locationId: string, event: HistoricalEvent): void {
  */
 export function deleteEvent(locationId: string, eventId: string): void {
   const data = getEventsData();
-  const location = data.locations.find(loc => loc.id === locationId);
+  const location = data.locations.find((loc) => loc.id === locationId);
 
   if (location) {
-    location.events = location.events.filter(e => e.id !== eventId);
+    location.events = location.events.filter((e) => e.id !== eventId);
     saveEventsData(data);
   }
 }
@@ -136,7 +147,7 @@ export function deleteEvent(locationId: string, eventId: string): void {
 export function createLocationWithEvents(
   name: string,
   coordinates: [number, number],
-  events: HistoricalEvent[]
+  events: HistoricalEvent[],
 ): HistoricalLocation {
   const id = generateLocationId(name);
   const location: HistoricalLocation = {
@@ -155,8 +166,8 @@ export function createLocationWithEvents(
 export function generateLocationId(name: string): string {
   const base = name
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '');
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
   const suffix = Date.now().toString(36).slice(-4);
   return `${base}-${suffix}`;
 }
@@ -182,12 +193,12 @@ export function importFromJSON(json: string): boolean {
   try {
     const data = JSON.parse(json) as HistoricalEventsData;
     if (!data.version || !Array.isArray(data.locations)) {
-      throw new Error('Invalid data format');
+      throw new Error("Invalid data format");
     }
     saveEventsData(data);
     return true;
   } catch (error) {
-    console.error('Failed to import JSON:', error);
+    console.error("Failed to import JSON:", error);
     return false;
   }
 }
@@ -196,6 +207,39 @@ export function importFromJSON(json: string): boolean {
  * Clear all stored data
  */
 export function clearAllData(): void {
-  if (typeof window === 'undefined') return;
+  if (typeof window === "undefined") return;
   localStorage.removeItem(STORAGE_KEY);
+}
+
+// --- Progress / gamification ---
+
+const PROGRESS_KEY = "map-progress";
+
+export interface MapProgress {
+  acknowledgedEventIds: string[];
+  points: number;
+}
+
+const DEFAULT_PROGRESS: MapProgress = { acknowledgedEventIds: [], points: 0 };
+
+export function getProgress(): MapProgress {
+  if (typeof window === "undefined") return DEFAULT_PROGRESS;
+  try {
+    const stored = localStorage.getItem(PROGRESS_KEY);
+    if (!stored) return DEFAULT_PROGRESS;
+    return JSON.parse(stored) as MapProgress;
+  } catch {
+    return DEFAULT_PROGRESS;
+  }
+}
+
+export function acknowledgeEvent(eventId: string): MapProgress {
+  const progress = getProgress();
+  if (progress.acknowledgedEventIds.includes(eventId)) return progress;
+  progress.acknowledgedEventIds.push(eventId);
+  progress.points += 10;
+  if (typeof window !== "undefined") {
+    localStorage.setItem(PROGRESS_KEY, JSON.stringify(progress));
+  }
+  return { ...progress };
 }

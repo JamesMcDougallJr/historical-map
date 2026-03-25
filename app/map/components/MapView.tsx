@@ -8,7 +8,7 @@ import TileWMS from "ol/source/TileWMS";
 import VectorTileLayer from "ol/layer/VectorTile";
 import VectorTileSource from "ol/source/VectorTile";
 import MVT from "ol/format/MVT";
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { fromLonLat } from "ol/proj";
 import Point from "ol/geom/Point";
 import Style from "ol/style/Style";
@@ -20,8 +20,14 @@ import VectorSource from "ol/source/Vector";
 import type { HistoricalLocation, HistoricalOverlay } from "../types";
 import { DEFAULT_OVERLAYS } from "../utils/overlays";
 import { MapPopup } from "./MapPopup";
+import { ScoreBadge } from "./ScoreBadge";
 import { LayerControl } from "./LayerControl";
 import { TimelineSlider } from "./TimelineSlider";
+import {
+  getProgress,
+  acknowledgeEvent as ackEvent,
+  type MapProgress,
+} from "../utils/storage";
 import type BaseLayer from "ol/layer/Base";
 
 // Pin icon SVG as data URL for historical events (module scope - created once)
@@ -99,6 +105,22 @@ export function MapView({
   >({});
   const [selectedYear, setSelectedYear] = useState(1880);
   const [isTimelineEnabled, setIsTimelineEnabled] = useState(false);
+  const [progress, setProgress] = useState<MapProgress>(() => getProgress());
+
+  const totalEvents = useMemo(
+    () => locations.reduce((sum, loc) => sum + loc.events.length, 0),
+    [locations],
+  );
+
+  const acknowledgedIds = useMemo(
+    () => new Set(progress.acknowledgedEventIds),
+    [progress],
+  );
+
+  const handleAcknowledge = useCallback((eventId: string) => {
+    const updated = ackEvent(eventId);
+    setProgress(updated);
+  }, []);
 
   // Keep refs in sync
   useEffect(() => {
@@ -614,6 +636,13 @@ export function MapView({
         </button>
       </div>
 
+      {/* Score Badge */}
+      <ScoreBadge
+        points={progress.points}
+        acknowledged={progress.acknowledgedEventIds.length}
+        total={totalEvents}
+      />
+
       {/* Map Container */}
       <div ref={mapContainerRef} className="h-full w-full" />
 
@@ -649,6 +678,8 @@ export function MapView({
           onClose={handleClosePopup}
           isPinned={isPinned}
           onHeaderMouseDown={handlePopupDragStart}
+          acknowledgedIds={acknowledgedIds}
+          onAcknowledge={handleAcknowledge}
         />
       </div>
     </div>
