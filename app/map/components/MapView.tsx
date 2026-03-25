@@ -103,7 +103,9 @@ export function MapView({
   const [overlayLoadingState, setOverlayLoadingState] = useState<
     Record<string, boolean>
   >({});
-  const [selectedYear, setSelectedYear] = useState(1880);
+  const [timelineRange, setTimelineRange] = useState<[number, number]>([
+    1776, 2020,
+  ]);
   const [isTimelineEnabled, setIsTimelineEnabled] = useState(false);
   const [progress, setProgress] = useState<MapProgress>(() => getProgress());
 
@@ -532,7 +534,9 @@ export function MapView({
 
   const filteredOverlays = isTimelineEnabled
     ? overlays.filter(
-        (o) => selectedYear >= o.yearRange[0] && selectedYear <= o.yearRange[1],
+        (o) =>
+          o.yearRange[1] >= timelineRange[0] &&
+          o.yearRange[0] <= timelineRange[1],
       )
     : overlays;
 
@@ -650,8 +654,8 @@ export function MapView({
       <TimelineSlider
         minYear={minYear}
         maxYear={maxYear}
-        value={selectedYear}
-        onChange={setSelectedYear}
+        range={timelineRange}
+        onRangeChange={setTimelineRange}
         onToggle={setIsTimelineEnabled}
         isEnabled={isTimelineEnabled}
       />
