@@ -28,6 +28,7 @@ import {
   acknowledgeEvent as ackEvent,
   type MapProgress,
 } from "../utils/storage";
+import { getYear } from "../utils/date-utils";
 import type BaseLayer from "ol/layer/Base";
 
 // Pin icon SVG as data URL for historical events (module scope - created once)
@@ -36,6 +37,11 @@ const EVENT_PIN_SVG = `data:image/svg+xml,${encodeURIComponent(`
   <path fill="#3b82f6" d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
 </svg>
 `)}`;
+
+// Reusable pin style (module scope)
+const PIN_STYLE = new Style({
+  image: new Icon({ anchor: [0.5, 1], src: EVENT_PIN_SVG, scale: 1 }),
+});
 
 // Home marker and layer (module scope - created once)
 const homeMarker = new Feature({
@@ -124,6 +130,18 @@ export function MapView({
     setProgress(updated);
   }, []);
 
+  // Filter popup events to match timeline range
+  const displayLocation = useMemo(() => {
+    if (!hoveredLocation || !isTimelineEnabled) return hoveredLocation;
+    return {
+      ...hoveredLocation,
+      events: hoveredLocation.events.filter((evt) => {
+        const year = parseInt(getYear(evt.date), 10);
+        return year >= timelineRange[0] && year <= timelineRange[1];
+      }),
+    };
+  }, [hoveredLocation, isTimelineEnabled, timelineRange]);
+
   // Keep refs in sync
   useEffect(() => {
     hoveredLocationIdRef.current = hoveredLocation?.id ?? null;
@@ -160,11 +178,7 @@ export function MapView({
         locationId: location.id,
         locationData: location,
       });
-      feature.setStyle(
-        new Style({
-          image: new Icon({ anchor: [0.5, 1], src: EVENT_PIN_SVG, scale: 1 }),
-        }),
-      );
+      feature.setStyle(PIN_STYLE);
       return feature;
     });
 
@@ -251,6 +265,25 @@ export function MapView({
       map.setTarget(undefined);
     };
   }, [locations]);
+
+  // Filter pin visibility by timeline range
+  useEffect(() => {
+    const source = eventsLayerRef.current?.getSource();
+    if (!source) return;
+
+    source.getFeatures().forEach((feature) => {
+      if (!isTimelineEnabled) {
+        feature.setStyle(PIN_STYLE);
+        return;
+      }
+      const loc = feature.get("locationData") as HistoricalLocation;
+      const hasEventInRange = loc.events.some((evt) => {
+        const year = parseInt(getYear(evt.date), 10);
+        return year >= timelineRange[0] && year <= timelineRange[1];
+      });
+      feature.setStyle(hasEventInRange ? PIN_STYLE : new Style({}));
+    });
+  }, [timelineRange, isTimelineEnabled]);
 
   const handlePopupMouseEnter = useCallback(() => {
     if (hoverTimeoutRef.current) {
@@ -678,7 +711,7 @@ export function MapView({
         onMouseLeave={handlePopupMouseLeave}
       >
         <MapPopup
-          location={hoveredLocation}
+          location={displayLocation}
           onClose={handleClosePopup}
           isPinned={isPinned}
           onHeaderMouseDown={handlePopupDragStart}
