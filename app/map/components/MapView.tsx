@@ -578,33 +578,6 @@ export function MapView({
       {/* Floating Controls - Top Left */}
       {showNav && (
         <div className="absolute top-4 left-4 z-10 flex flex-wrap gap-2">
-          <a
-            href={homeHref}
-            className="flex items-center gap-2 px-4 py-2 bg-black/70 hover:bg-black/80 backdrop-blur-sm rounded-lg text-white shadow-lg transition-colors text-sm font-medium"
-            aria-label="Return to home"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M19 12H5M12 19l-7-7 7-7" />
-            </svg>
-            Home
-          </a>
-          <button
-            onClick={handleToggleHomeOverlay}
-            className="px-4 py-2 bg-primary-color hover:bg-blue-600 dark:hover:bg-blue-500 text-white rounded-lg transition-colors text-sm font-medium shadow-lg hover:shadow-xl backdrop-blur-sm"
-            aria-label="Toggle home marker"
-          >
-            {showHomeMarker ? "Hide" : "Show"} Home
-          </button>
           {onRefresh && (
             <button
               onClick={onRefresh}
