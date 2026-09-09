@@ -557,8 +557,10 @@ export function MapView({
     });
     mapRef.current = map;
 
-    // Dev-only handle for debugging hit detection and layer state from the
-    // console. Never exposed in production builds.
+    // Dev-only console handles, stripped from production builds: the map itself
+    // for hit testing and layer state, and the popup/hover refs, which React
+    // DevTools can't show. They're refs rather than state because OL's handlers
+    // are registered once and would close over stale values. See CLAUDE.md.
     if (process.env.NODE_ENV !== "production") {
       (window as unknown as { __olMap?: OlMap; __olDebug?: unknown }).__olMap =
         map;

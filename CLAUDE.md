@@ -28,6 +28,34 @@ looks exactly like broken layout CSS — collapsed heights, an OpenLayers
 styling diagnosis, `rm -rf .next` and hard-reload. Verify a stylesheet's real content with
 `fetch(href, { cache: 'reload' })`, not a plain `fetch`.
 
+### Dev-only map debug handles
+
+`MapView` publishes two globals behind `process.env.NODE_ENV !== "production"` (stripped from
+production builds):
+
+| Global | What it is |
+|---|---|
+| `window.__olMap` | The live OpenLayers `Map` — layers, sources, view, hit testing |
+| `window.__olDebug` | The popup/hover **refs** (read `.current`): `popupHovered`, `hoverTimeout`, `pinned`, `hoveredId` |
+
+They exist because the hover and popup state deliberately lives in refs rather than state —
+OpenLayers event handlers are registered once and would otherwise close over stale values
+(see `isPinnedRef`, `isPopupHoveredRef`). Refs are invisible to React DevTools, so without
+these handles the only way to reason about "is the pointer considered inside the popup?" or
+"is a close timer armed?" is to infer it from behaviour, which is slow and gets it wrong.
+
+```js
+__olDebug.popupHovered.current          // is the map standing down for the popup?
+!!__olDebug.hoverTimeout.current        // is a close timer armed?
+__olMap.getLayers().getArray().map(l => l.get("eventLayerId"))
+```
+
+**Hit testing needs a rendered frame.** `forEachFeatureAtPixel` reads the last rendered frame,
+and a backgrounded tab has `requestAnimationFrame` paused, so it returns `null` for pins that
+are demonstrably there. Call `__olMap.renderSync()` first, and re-render immediately before
+dispatching a synthetic `pointermove` — otherwise the pixel you probed and the frame the
+handler reads can disagree.
+
 ## Architecture
 
 **Next.js App Router** app with one major feature — an interactive historical map — exposed
