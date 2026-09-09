@@ -356,10 +356,16 @@ export function MapView({
   const [isTimelineEnabled, setIsTimelineEnabled] = useState(false);
   const [progress, setProgress] = useState<MapProgress>(() => getProgress());
 
-  const totalEvents = useMemo(
-    () => locations.reduce((sum, loc) => sum + loc.events.length, 0),
-    [locations],
-  );
+  /**
+   * How much is actually drawn on the map.
+   *
+   * Not derived from the `locations` prop: on /map that comes from
+   * localStorage, while the pins come from the event layers, and the two
+   * disagree the moment localStorage is stale. Counting the rendered features
+   * is the only answer that matches what the user is looking at.
+   */
+  const [pinStats, setPinStats] = useState({ locations: 0, events: 0 });
+  const totalEvents = pinStats.events;
 
   const acknowledgedIds = useMemo(
     () => new Set(progress.acknowledgedEventIds),
@@ -501,6 +507,29 @@ export function MapView({
     // Kept for the timeline effect, which needs a concrete vector source.
     eventsLayerRef.current =
       (pinLayers.find((l) => l instanceof VectorLayer) as VectorLayer) ?? null;
+
+    // Recount whenever a source finishes loading — vector sources fetch lazily
+    // on first render, so the counts are zero until then. Tiled (MVT) sources
+    // are fetched per tile and have no total to read, so they sit this out.
+    const countableSources = pinLayers
+      .filter((l): l is VectorLayer => l instanceof VectorLayer)
+      .map((l) => l.getSource())
+      .filter((s): s is VectorSource => s !== null);
+
+    const recountPins = () => {
+      let locationCount = 0;
+      let eventCount = 0;
+      for (const source of countableSources) {
+        for (const feature of source.getFeatures()) {
+          locationCount += 1;
+          eventCount += (feature.get("event_count") as number) ?? 0;
+        }
+      }
+      setPinStats({ locations: locationCount, events: eventCount });
+    };
+
+    countableSources.forEach((s) => s.on("change", recountPins));
+    recountPins();
 
     const map = new OlMap({
       layers: [
@@ -654,6 +683,7 @@ export function MapView({
       if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
       popupEl.removeEventListener("mouseenter", onPopupEnter);
       popupEl.removeEventListener("mouseleave", onPopupLeave);
+      countableSources.forEach((s) => s.un("change", recountPins));
       map.setTarget(undefined);
     };
   }, [locations, eventLayers, loadLocationDetail]);
@@ -1003,13 +1033,18 @@ export function MapView({
         </div>
       )}
 
-      {/* Stats & Fullscreen - Top Right */}
+      {/* Stats, score and fullscreen — one row, so they can't overlap. Both used
+          to position themselves absolutely in the same corner and collide. */}
       <div className="absolute top-4 right-4 z-10 flex items-center gap-2">
-        <div className="bg-black/60 backdrop-blur-sm px-3 py-2 rounded-lg text-sm text-white shadow-lg">
-          {locations.length} location{locations.length !== 1 ? "s" : ""},{" "}
-          {locations.reduce((sum, loc) => sum + loc.events.length, 0)} total
-          events
+        <div className="bg-black/60 backdrop-blur-sm px-3 py-2 rounded-lg text-sm text-white shadow-lg whitespace-nowrap">
+          {pinStats.locations} location{pinStats.locations !== 1 ? "s" : ""},{" "}
+          {pinStats.events} event{pinStats.events !== 1 ? "s" : ""}
         </div>
+        <ScoreBadge
+          points={progress.points}
+          acknowledged={progress.acknowledgedEventIds.length}
+          total={totalEvents}
+        />
         <button
           onClick={() => setIsFullscreen(!isFullscreen)}
           className="p-2 bg-black/60 hover:bg-black/80 backdrop-blur-sm rounded-lg text-white shadow-lg transition-colors"
@@ -1052,13 +1087,6 @@ export function MapView({
           )}
         </button>
       </div>
-
-      {/* Score Badge */}
-      <ScoreBadge
-        points={progress.points}
-        acknowledged={progress.acknowledgedEventIds.length}
-        total={totalEvents}
-      />
 
       {/* Map Container */}
       <div ref={mapContainerRef} className="h-full w-full" />

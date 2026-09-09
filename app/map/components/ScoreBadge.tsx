@@ -9,8 +9,10 @@ interface ScoreBadgeProps {
 export function ScoreBadge({ points, acknowledged, total }: ScoreBadgeProps) {
   const pct = total > 0 ? Math.round((acknowledged / total) * 100) : 0;
 
+  // Deliberately unpositioned: the caller places it. It used to position itself
+  // in the same corner as the map's stats row and cover it.
   return (
-    <div className="absolute top-3 right-3 z-10 bg-white/90 dark:bg-neutral-800/90 backdrop-blur-sm rounded-xl shadow-lg border border-neutral-200 dark:border-neutral-700 px-3 py-2 flex items-center gap-3 select-none">
+    <div className="bg-white/90 dark:bg-neutral-800/90 backdrop-blur-sm rounded-xl shadow-lg border border-neutral-200 dark:border-neutral-700 px-3 py-2 flex items-center gap-3 select-none">
       {/* Points */}
       <div className="flex items-center gap-1.5">
         <span className="text-lg">⭐</span>
