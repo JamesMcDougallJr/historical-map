@@ -12,6 +12,9 @@ npm run format       # Prettier
 npm run build:mcp    # Bundle the MCP App iframe → mcp/dist/mcp-app.html
 npm run mcp          # Run the stdio MCP server (no output; it speaks stdio)
 npm run seed:db      # Seed Postgres from data/map-data.json (needs POSTGRES_URL)
+npm run type-check:all  # Nx fan-out: type-check every workspace
+npm run build:all       # Nx fan-out: build every workspace
+npm run graph           # Nx dependency graph
 ```
 
 No test suite is configured. **`npm run lint` is broken** — it calls `next lint`, which
@@ -87,6 +90,31 @@ handler reads can disagree.
 through two surfaces: the web app at `/map`, and an MCP server that renders the same map
 inline in Claude.
 
+### Monorepo layout
+
+npm workspaces, with **Nx as a package-based task runner only** — it owns no build, and every
+target it runs is a plain `package.json` script.
+
+| Path | What |
+|---|---|
+| `/` | **Root package = the Next.js web app.** Not under `apps/` — see below. |
+| `packages/domain` | `@historical-map/domain` — event + ingestion types shared with the workers. |
+| `services/` | Ingestion workers (planned — see `plans/`). |
+| `plans/` | Phased plan for the ingestion engine. |
+
+**The web app is deliberately the root package.** Moving it to `apps/web` would require
+flipping the Vercel project's Root Directory, which is project-wide rather than per-branch —
+so PR previews and production cannot both stay green across the change.
+
+`vercel.json` **pins `installCommand` and `buildCommand`**. Vercel infers its build from
+detected monorepo tooling, and there is now an `nx.json` for it to detect; pinning means adding
+a workspace can never silently reroute the web build. Don't remove those two keys.
+
+`packages/domain` ships **TypeScript source, not a build artifact** — Next compiles it via
+`transpilePackages`, resolved through the `@historical-map/domain` tsconfig path. Nothing has
+to build it first and there is no `dist/` to go stale. `app/map/types.ts` re-exports it with
+`export type *` (which erases at compile time), so every `@/app/map/types` import still works.
+
 ### The three storage tiers
 
 This is the least obvious part of the codebase. Three separate stores hold the same
@@ -155,9 +183,13 @@ Overlays are filtered by `yearRange` when the timeline slider is active.
 
 ### Import feature (`/map/import`)
 
-Multi-step document import: paste text or upload PDF → AI parse (Claude API via `/api/parse`)
-→ review events → save to localStorage. PDF extraction uses `unpdf` on the server
-(`serverExternalPackages: ['unpdf']`).
+Multi-step document import: paste text or upload PDF → parse → review events → save to
+localStorage. PDF extraction uses `unpdf` on the server (`serverExternalPackages: ['unpdf']`).
+
+**`/api/parse` does not call an LLM.** It runs `parseDocument()` from
+`app/map/import/services/processing-service.ts` — the local `regex` and `structured` parsers.
+There is no Claude API call and no `@anthropic-ai/sdk` dependency anywhere in the repo today;
+the first one arrives with the ingestion engine's `extract` worker (`plans/08-extract-worker.md`).
 
 ### API routes
 

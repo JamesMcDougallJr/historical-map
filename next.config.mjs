@@ -4,6 +4,13 @@ const nextConfig = {
 
   serverExternalPackages: ['unpdf'],
 
+  // `packages/domain` ships TypeScript source, not a build artifact, so neither
+  // the web app nor the Nest workspace has to build it first. Next therefore
+  // has to compile it itself. Today every import of it is `import type` and is
+  // erased before bundling — this exists so the first runtime export added to
+  // the package (a shared zod schema, say) doesn't fail resolution.
+  transpilePackages: ['@historical-map/domain'],
+
   // The MCP App bundle is read at runtime, so Next's tracer can't see it.
   // Built by `npm run build:mcp`, which `prebuild` runs ahead of `next build`.
   outputFileTracingIncludes: {

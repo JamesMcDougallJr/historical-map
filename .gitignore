@@ -3,3 +3,7 @@ node_modules
 dist
 debug-search.log
 pg_data
+.nx
+*.tsbuildinfo
+.env.dev
+.env.prod
