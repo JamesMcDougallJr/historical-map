@@ -47,11 +47,14 @@ because they are being designed in rather than retrofitted:
 
 ## Storage
 
-Per the recommendation in phase 2: **store extracted text in Postgres**, not object storage.
-Tens of KB per document, and it removes MinIO plus a class of "which host has the file"
-failures. The `StorageService` interface stays in `libs/common` as the escape hatch if a source
-turns out to serve very large artefacts.
+**Extracted text goes in a Postgres column. There is no object storage** (decided — see phase
+2). Tens of KB per document, so a `text` column is the right tool, and it removes MinIO, the
+`S3_*` config, and the whole "which host has the file" class of failure.
 
-Keep the *original* bytes only if there is a reason to — for most sources the URL is stable and
-re-fetchable, so storing the source PDF is duplicating an archive that already exists and is
-someone else's job to preserve.
+Do **not** keep the original bytes. For every source under consideration the URL is stable and
+re-fetchable, so storing the source PDF duplicates an archive that already exists and whose
+preservation is someone else's job. Storing the extracted text plus the `etag` is enough to
+know both what we read and whether it has changed since.
+
+Write the text through a single function so that if some future source does serve very large
+artefacts, introducing storage touches one call site rather than the design.

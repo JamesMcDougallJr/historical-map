@@ -16,7 +16,7 @@ network failure without manual intervention.
 | State Affairs | Here | What changed |
 |---|---|---|
 | `detect` — poll MI House/Senate video portals | `detect` — poll historical-source catalogues | Nothing structural. `SourceAdapter` gets a new implementation per source. |
-| `download` — `ffmpeg` stream → 16kHz WAV → S3 | `fetch` — HTTP/PDF/IIIF → extracted text → object storage | No `ffmpeg`. Text extraction reuses `unpdf`, already a dependency of the web app. |
+| `download` — `ffmpeg` stream → 16kHz WAV → S3 | `fetch` — HTTP/PDF/IIIF → extracted text → Postgres | No `ffmpeg` and no object storage. Text extraction reuses `unpdf`, already a dependency of the web app. |
 | `transcribe` — Groq Whisper → transcript | `extract` — Claude API → `ParsedEvent[]` | Different engine, identical shape: a chunked, retryable, interface-backed transformation behind a DI token. |
 | — | `publish` — geocode, dedupe, write | **New stage.** See below. |
 
@@ -41,8 +41,8 @@ working agreement as `~/Code/StateAffairs/plans/00-README.md`.
    deploys unchanged. **Implemented.**
 2. [02-ingest-scaffold.md](./02-ingest-scaffold.md) — `services/ingest` as a Nest monorepo;
    config/env validation; `docker-compose` gains Redis.
-3. [03-database-layer.md](./03-database-layer.md) — ingestion tables in the existing Postgres,
-   alongside what `lib/postgres-storage.ts` already reads.
+3. [03-database-layer.md](./03-database-layer.md) — TypeORM entities + migrations for the
+   ingestion tables, in the existing Postgres alongside what `lib/postgres-storage.ts` reads.
 4. [04-queue-layer.md](./04-queue-layer.md) — BullMQ contracts, deterministic job IDs, the
    detection Job Scheduler.
 5. [05-source-adapters.md](./05-source-adapters.md) — `SourceAdapter` implementations. The
@@ -74,6 +74,13 @@ Do not relitigate without discussion.
   PostGIS + Martin, and `lib/postgres-storage.ts` already reads map data from it. Ingestion
   writes into the *same* database, adding its own tables. No second datastore, and no API hop
   between the workers and the map.
+- **ORM: TypeORM, for both entities and migrations.** No Prisma — the State Affairs
+  Prisma-schema-plus-hand-mirrored-entities split is not carried over. One tool owns the
+  `ingest_*` tables. `synchronize` stays `false` in every environment. See
+  [03-database-layer.md](./03-database-layer.md).
+- **No object storage.** `fetch` produces extracted *text* — tens of KB — which goes in a
+  Postgres column. No MinIO, no S3, no `StorageService` abstraction. The compose stack gains
+  one service (Redis), not four. See [02-ingest-scaffold.md](./02-ingest-scaffold.md).
 - **Extraction: Claude API via `@anthropic-ai/sdk`**, behind an `ExtractionEngine` interface
   and an `EXTRACTION_ENGINE` DI token — so the engine is swappable without touching the
   worker, the queue contract, or storage. Model and parameters in

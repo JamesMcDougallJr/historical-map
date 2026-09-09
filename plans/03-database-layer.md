@@ -42,28 +42,45 @@ confident* the extraction was. Published events should carry a foreign key back 
 designing the column in now even if nothing renders it in v1 — backfilling provenance after
 the fact is not possible.
 
-## Migration tooling — decide in the phase discussion
+## Migration tooling — **decided: TypeORM, for everything**
 
-State Affairs used **Prisma Migrate for the schema plus hand-mirrored TypeORM entities as the
-query layer**, deliberately, with no codegen bridge. That is a defensible tradeoff there and
-was well documented.
+**No Prisma.** TypeORM owns both halves: entities are the query layer, and TypeORM migrations
+own the schema. One tool, one source of truth about the ingestion tables' shape.
 
-It is likely the wrong call here, for one specific reason: this repo's existing Postgres access
-(`lib/postgres-storage.ts`) uses the **`postgres`** library — plain tagged-template SQL, no ORM
-— and the schema those queries read is created on demand by `ensureSchema()`. Introducing two
-*more* schema tools alongside that gives one database three sources of truth about its shape.
+This drops the State Affairs arrangement — Prisma Migrate for the schema plus hand-mirrored
+TypeORM entities, with no codegen bridge between them. That existed because Prisma's migration
+DX is better than TypeORM's; the cost was two tools describing one database and a hand-sync
+obligation between them. Given this repo already has its own schema owner (below), adding a
+fourth tool to the pile was the wrong trade.
 
-Options, in the order I'd argue for them:
+Concretely:
 
-1. **Plain SQL migrations** run by a small runner, with `postgres` as the query layer in the
-   workers too. One library, one dialect, consistent with what the repo already does. The
-   `db/martin-functions.sql` precedent shows raw SQL is already a normal artifact here.
-2. **Prisma Migrate + TypeORM entities** — the State Affairs shape. Better DX for schema
-   evolution and a genuinely nicer NestJS query layer, at the cost of a third and fourth tool
-   over one database.
-3. TypeORM alone — migrations and entities from one tool, but its migration DX is the thing
-   State Affairs moved off in the first place.
+- Entities in `libs/database/src/entities/`, one per table, decorated as the query layer.
+  TypeORM's repository pattern and query builder fit NestJS's DI well — that half of the State
+  Affairs reasoning still holds.
+- Migrations in `libs/database/src/migrations/`, generated with
+  `typeorm migration:generate` and reviewed by hand before landing. Generated migrations are a
+  starting point, not an artifact to trust unread — check the diff for accidental drops.
+- **`synchronize` is `false`. Always, in every environment.** It is the single most dangerous
+  TypeORM setting; it will silently drop columns to make the database match the entities.
+  Migrations are the only way the schema changes.
 
-Recommendation: **option 1**, and fold the existing `ensureSchema()` into the same migration
-set so the whole database has one owner. This is the biggest open decision in the plan and
-deserves an explicit call before phase 3 starts.
+### Boundary with the existing schema owner
+
+`lib/postgres-storage.ts` (the web app) uses the **`postgres`** library — plain tagged-template
+SQL — and creates its tables on demand via `ensureSchema()`. That does not change in this
+phase.
+
+So the split is: **TypeORM owns the `ingest_*` tables; `ensureSchema()` keeps owning the map
+tables.** One database, two owners, but with a clean table-level boundary rather than two tools
+fighting over the same tables — which is the failure mode actually worth avoiding.
+
+The consequence to keep in view: when `publish` (phase 9) writes events into the *map* tables,
+it is writing to tables TypeORM does not own. Either give `publish` entities for them
+explicitly declared as read/write-but-not-migrated (TypeORM can map an existing table without
+managing it), or have `publish` call the same `postgres`-library path the web app uses. Settle
+that in the phase 9 discussion — it does not block phase 3.
+
+Folding the map tables into TypeORM migrations later is possible and would give the database a
+single owner, but it means changing the deployed web app's storage layer. That is its own
+deliberate change, not a rider on the ingestion work.
