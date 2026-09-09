@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import type { HistoricalOverlay, OverlaySource } from "../types";
+import type { EventLayer, HistoricalOverlay, OverlaySource } from "../types";
 import { generateOverlayId, getSourceAttribution } from "../utils/overlays";
 
 interface LayerControlProps {
@@ -12,6 +12,9 @@ interface LayerControlProps {
   onRemoveOverlay: (id: string) => void;
   onReorderOverlays?: (overlays: HistoricalOverlay[]) => void;
   isLoading?: Record<string, boolean>;
+  /** Event source layers, rendered as their own section above the overlays. */
+  eventLayers?: EventLayer[];
+  onToggleEventLayer?: (id: string) => void;
 }
 
 export function LayerControl({
@@ -22,6 +25,8 @@ export function LayerControl({
   onRemoveOverlay,
   onReorderOverlays,
   isLoading = {},
+  eventLayers = [],
+  onToggleEventLayer,
 }: LayerControlProps): JSX.Element {
   const [isExpanded, setIsExpanded] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
@@ -187,6 +192,42 @@ export function LayerControl({
       {/* Expanded Panel */}
       {isExpanded && (
         <div className="absolute bottom-12 right-0 w-80 bg-slate-900/95 backdrop-blur-sm rounded-lg shadow-xl border border-slate-700 overflow-hidden">
+          {/* Event layers — one per publisher. `kind` is surfaced so it's
+              obvious which is live PostGIS and which is the static demo. */}
+          {eventLayers.length > 0 && (
+            <div className="border-b border-slate-700">
+              <div className="px-4 py-3 border-b border-slate-700">
+                <h3 className="text-white font-medium">Event Sources</h3>
+              </div>
+              {eventLayers.map((layer) => (
+                <label
+                  key={layer.id}
+                  className="px-4 py-2.5 flex items-center gap-3 hover:bg-slate-800/50 cursor-pointer"
+                >
+                  <input
+                    type="checkbox"
+                    checked={layer.enabled}
+                    onChange={() => onToggleEventLayer?.(layer.id)}
+                    className="w-4 h-4 rounded border-slate-600 bg-slate-700 text-blue-500 focus:ring-blue-500 focus:ring-offset-0"
+                  />
+                  <span
+                    className="w-2.5 h-2.5 rounded-full shrink-0"
+                    style={{ backgroundColor: layer.color ?? "#3b82f6" }}
+                    aria-hidden="true"
+                  />
+                  <span className="flex-1 min-w-0">
+                    <span className="block text-sm text-white truncate">
+                      {layer.name}
+                    </span>
+                    <span className="block text-xs text-slate-400 uppercase tracking-wide">
+                      {layer.kind === "mvt" ? "vector tiles" : "geojson"}
+                    </span>
+                  </span>
+                </label>
+              ))}
+            </div>
+          )}
+
           {/* Header */}
           <div className="px-4 py-3 border-b border-slate-700 flex items-center justify-between">
             <h3 className="text-white font-medium">Historical Overlays</h3>

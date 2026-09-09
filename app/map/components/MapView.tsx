@@ -8,8 +8,16 @@ import TileWMS from "ol/source/TileWMS";
 import VectorTileLayer from "ol/layer/VectorTile";
 import VectorTileSource from "ol/source/VectorTile";
 import MVT from "ol/format/MVT";
-import { useEffect, useRef, useState, useCallback, useMemo } from "react";
-import { fromLonLat } from "ol/proj";
+import { defaults as defaultControls } from "ol/control/defaults";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useCallback,
+  useMemo,
+} from "react";
+import { fromLonLat, toLonLat } from "ol/proj";
 import Point from "ol/geom/Point";
 import Style from "ol/style/Style";
 import Icon from "ol/style/Icon";
@@ -17,8 +25,21 @@ import Fill from "ol/style/Fill";
 import Stroke from "ol/style/Stroke";
 import VectorLayer from "ol/layer/Vector";
 import VectorSource from "ol/source/Vector";
-import type { HistoricalLocation, HistoricalOverlay } from "../types";
+import GeoJSON from "ol/format/GeoJSON";
+import type {
+  EventLayer,
+  HistoricalEvent,
+  HistoricalLocation,
+  HistoricalOverlay,
+} from "../types";
 import { DEFAULT_OVERLAYS } from "../utils/overlays";
+import { getEventLayers, mvtQueryString } from "../utils/event-layers";
+import {
+  choosePopupPlacement,
+  verticalSpace,
+  POPUP_PIN_GAP,
+  POPUP_MIN_BODY_HEIGHT,
+} from "../utils/popup-placement";
 import { MapPopup } from "./MapPopup";
 import { ScoreBadge } from "./ScoreBadge";
 import { LayerControl } from "./LayerControl";
@@ -30,6 +51,10 @@ import {
 } from "../utils/storage";
 import { getYear } from "../utils/date-utils";
 import type BaseLayer from "ol/layer/Base";
+import type { FeatureLike } from "ol/Feature";
+// Positions OL's controls, overlays and attribution. Imported here rather than
+// in a layout so both consumers get it — the Next app and the MCP App bundle.
+import "ol/ol.css";
 
 // Pin icon SVG as data URL for historical events (module scope - created once)
 const EVENT_PIN_SVG = `data:image/svg+xml,${encodeURIComponent(`
@@ -68,9 +93,165 @@ function createOHMStyle() {
   });
 }
 
+/**
+ * useLayoutEffect, minus the server warning.
+ *
+ * Placement has to run before paint or the popup shows for a frame in the wrong
+ * spot, but MapView is server-rendered for the initial HTML and React warns that
+ * useLayoutEffect does nothing there.
+ */
+const useIsomorphicLayoutEffect =
+  typeof window !== "undefined" ? useLayoutEffect : useEffect;
+
+/** Lon/lat of a pin, whichever feature flavour the layer produced. */
+function featureLonLat(feature: FeatureLike): [number, number] | null {
+  const geometry = feature.getGeometry();
+  if (!geometry) return null;
+
+  // MVT tiles yield RenderFeature, which has no getCoordinates() — its
+  // coordinates come out flat. Plain Feature (geojson/inline) has the geometry.
+  const flat =
+    "getCoordinates" in geometry
+      ? (geometry as Point).getCoordinates()
+      : (
+          geometry as unknown as { getFlatCoordinates(): number[] }
+        ).getFlatCoordinates();
+
+  if (!flat || flat.length < 2) return null;
+  const [lon, lat] = toLonLat([flat[0]!, flat[1]!]);
+  return [lon!, lat!];
+}
+
+/**
+ * The location a pin refers to, as far as can be told from the feature alone.
+ *
+ * Returns a stub carrying id, name and position but no events — MVT properties
+ * are flat scalars, so events never ride along in the tile. Callers fill events
+ * in from `byId` (already-loaded locations, which is all the MCP App has) or by
+ * fetching detail; see loadLocationDetail.
+ */
+function resolveLocation(
+  feature: FeatureLike,
+  byId: Map<string, HistoricalLocation>,
+): HistoricalLocation | null {
+  const id = feature.get("location_id") as string | undefined;
+  if (!id) return null;
+
+  // GeoJSON pins carry their events inline (see the /api/sources route), so the
+  // popup is complete immediately. MVT pins can't, and come back with none —
+  // those get filled in by loadLocationDetail.
+  //
+  // Checked before `byId`, which is seeded from localStorage and can be stale:
+  // the feature came from the same request that drew the pin, so when it has
+  // events they are the ones that belong to it.
+  let events: HistoricalEvent[] = [];
+  const encoded = feature.get("events") as string | undefined;
+  if (encoded) {
+    try {
+      events = JSON.parse(encoded) as HistoricalEvent[];
+    } catch {
+      events = [];
+    }
+  }
+
+  const known = byId.get(id);
+  if (events.length === 0 && known) return known;
+
+  const coords = featureLonLat(feature);
+  if (!coords) return known ?? null;
+
+  return {
+    id,
+    name: (feature.get("name") as string) ?? id,
+    coordinates: coords,
+    events,
+  };
+}
+
+/** Pin style in a layer's own colour, so sources are distinguishable. */
+function pinStyleFor(color: string | undefined): Style {
+  if (!color) return PIN_STYLE;
+  const svg = `data:image/svg+xml,${encodeURIComponent(`
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="32" height="32">
+  <path fill="${color}" d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
+</svg>
+`)}`;
+  return new Style({
+    image: new Icon({ anchor: [0.5, 1], src: svg, scale: 1 }),
+  });
+}
+
+/**
+ * Builds an OpenLayers layer for an event source, switching on how it's served
+ * — directly parallel to createOverlayLayer below.
+ *
+ * Both kinds emit the same feature properties (location_id, source_id, name,
+ * min_year, max_year, event_count), so everything downstream is kind-agnostic.
+ */
+function buildEventLayer(
+  layer: EventLayer,
+  locations: HistoricalLocation[],
+): BaseLayer {
+  const style = pinStyleFor(layer.color);
+
+  if (layer.kind === "inline") {
+    const features = locations.map((location) => {
+      const years = location.events
+        .map((e) => parseInt(getYear(e.date), 10))
+        .filter(Number.isFinite);
+      return new Feature({
+        geometry: new Point(fromLonLat(location.coordinates)),
+        // Same property names the other two kinds emit, so hover, click and
+        // the timeline treat all three identically.
+        location_id: location.id,
+        source_id: layer.id,
+        name: location.name,
+        min_year: years.length ? Math.min(...years) : 0,
+        max_year: years.length ? Math.max(...years) : 0,
+        event_count: location.events.length,
+      });
+    });
+    const inlineLayer = new VectorLayer({
+      source: new VectorSource({ features }),
+      style,
+    });
+    inlineLayer.set("eventLayerId", layer.id);
+    inlineLayer.set("layerId", "events");
+    return inlineLayer;
+  }
+
+  const olLayer =
+    layer.kind === "mvt"
+      ? new VectorTileLayer({
+          source: new VectorTileSource({
+            format: new MVT(),
+            url: layer.url,
+            attributions: layer.attribution,
+          }),
+          style,
+        })
+      : new VectorLayer({
+          source: new VectorSource({
+            url: layer.url,
+            format: new GeoJSON({ featureProjection: "EPSG:3857" }),
+            attributions: layer.attribution,
+          }),
+          style,
+        });
+
+  olLayer.set("eventLayerId", layer.id);
+  olLayer.set("layerId", "events");
+  return olLayer;
+}
+
 export interface MapViewProps {
   locations: HistoricalLocation[];
   initialOverlays?: HistoricalOverlay[];
+  /**
+   * Event layers to render. Defaults to the registry in utils/event-layers.
+   * The MCP App passes an `inline` layer, since it has no origin to fetch from.
+   */
+  initialEventLayers?: EventLayer[];
   /** Show navigation controls (Home link, Import Events link). Defaults true. */
   showNav?: boolean;
   homeHref?: string;
@@ -81,6 +262,7 @@ export interface MapViewProps {
 export function MapView({
   locations,
   initialOverlays,
+  initialEventLayers,
   showNav = true,
   homeHref = "/",
   importHref = "/map/import",
@@ -91,9 +273,68 @@ export function MapView({
   const overlayRef = useRef<Overlay | null>(null);
   const eventsLayerRef = useRef<VectorLayer | null>(null);
   const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  /**
+   * Whether the pointer is inside the popup itself.
+   *
+   * The popup lives inside the map viewport, so moving through it still fires
+   * pointermove on the map — which hit-tests to no pin and schedules the close.
+   * Clearing the timer on mouseenter isn't enough, because the very next move
+   * re-arms it; the map handler has to stand down entirely while we're in here.
+   */
+  const isPopupHoveredRef = useRef(false);
   const hoveredLocationIdRef = useRef<string | null>(null);
   const overlayLayersRef = useRef<Map<string, BaseLayer>>(new Map());
+  const eventLayersRef = useRef<Map<string, BaseLayer>>(new Map());
   const mapRef = useRef<OlMap | null>(null);
+
+  const [eventLayers, setEventLayers] = useState<EventLayer[]>(
+    () => initialEventLayers ?? getEventLayers(),
+  );
+
+  // Tile/GeoJSON features carry only location_id — the nested location object
+  // can't survive MVT encoding, whose properties are flat scalars. Popups
+  // resolve detail through this map, identically for both layer kinds.
+  const locationsById = useMemo(
+    () => new Map(locations.map((l) => [l.id, l])),
+    [locations],
+  );
+  const locationsByIdRef = useRef(locationsById);
+  useEffect(() => {
+    locationsByIdRef.current = locationsById;
+  }, [locationsById]);
+
+  // Detail fetched on demand for pins whose events aren't already in memory.
+  const locationCacheRef = useRef<Map<string, HistoricalLocation>>(new Map());
+
+  /**
+   * A pin's full detail, fetched by id when it didn't travel with the feature.
+   *
+   * Tile pins carry only scalars, so their events live behind a request. Falls
+   * back to the stub when there's nothing to fetch from — offline, or the MCP
+   * App's sandbox, which has no origin.
+   */
+  const loadLocationDetail = useCallback(
+    async (stub: HistoricalLocation): Promise<HistoricalLocation> => {
+      const cached = locationCacheRef.current.get(stub.id);
+      if (cached) return cached;
+
+      try {
+        const res = await fetch(
+          `/api/data/locations/${encodeURIComponent(stub.id)}`,
+        );
+        if (!res.ok) return stub;
+        const { location } = (await res.json()) as {
+          location: HistoricalLocation;
+        };
+        if (!location) return stub;
+        locationCacheRef.current.set(stub.id, location);
+        return location;
+      } catch {
+        return stub;
+      }
+    },
+    [],
+  );
 
   const [hoveredLocation, setHoveredLocation] =
     useState<HistoricalLocation | null>(null);
@@ -145,7 +386,80 @@ export function MapView({
   // Keep refs in sync
   useEffect(() => {
     hoveredLocationIdRef.current = hoveredLocation?.id ?? null;
+    // The popup can go away with the pointer still over where it was (the close
+    // button, or the timeline filtering its events out), and then no mouseleave
+    // ever arrives. Without this the map would stay stood down for good.
+    if (!hoveredLocation) isPopupHoveredRef.current = false;
   }, [hoveredLocation]);
+
+  /**
+   * Places the popup where it actually fits: above the pin by default, flipped
+   * below when there's no room, and anchored to a side when it would run off a
+   * left/right edge.
+   *
+   * A layout effect because placement needs the card's measured size, which
+   * isn't known when openPopup sets the location — the content hasn't rendered
+   * yet. Keyed on displayLocation rather than hoveredLocation because that's
+   * what actually gets rendered (the timeline can filter events out, changing
+   * the height).
+   */
+  useIsomorphicLayoutEffect(() => {
+    const overlay = overlayRef.current;
+    const map = mapRef.current;
+    const el = popupRef.current;
+    if (!overlay || !map || !el || !displayLocation) return;
+
+    const place = () => {
+      // Dragging moves the anchor continuously; re-flipping mid-drag would make
+      // the card jump out from under the cursor.
+      if (isDraggingPopupRef.current) return;
+
+      const position = overlay.getPosition();
+      const size = map.getSize();
+      if (!position || !size) return;
+      const pixel = map.getPixelFromCoordinate(position);
+      if (!pixel) return;
+
+      const [anchorX, anchorY] = [pixel[0] as number, pixel[1] as number];
+      const [mapWidth, mapHeight] = [size[0] as number, size[1] as number];
+
+      // The cap applies to the scrolling body, so take the header out of it —
+      // measured rather than assumed, since a long location name wraps.
+      const headerHeight =
+        (el.firstElementChild?.firstElementChild as HTMLElement | undefined)
+          ?.offsetHeight ?? 0;
+      const capBody = (total: number) =>
+        el.style.setProperty(
+          "--popup-body-max-h",
+          `${Math.max(POPUP_MIN_BODY_HEIGHT, total - headerHeight)}px`,
+        );
+
+      // Cap to whichever side has more room *before* measuring, so the height
+      // we measure is the one that will actually be rendered.
+      const { above, below } = verticalSpace(anchorY, mapHeight);
+      capBody(Math.max(above, below));
+
+      const placement = choosePopupPlacement({
+        anchorX,
+        anchorY,
+        mapWidth,
+        mapHeight,
+        popupWidth: el.offsetWidth,
+        popupHeight: el.offsetHeight,
+      });
+
+      capBody(placement.maxHeight);
+      overlay.setPositioning(placement.positioning);
+      overlay.setOffset(placement.offset);
+    };
+
+    place();
+    // A pinned popup would otherwise drift off-screen as the user pans or zooms.
+    map.on("moveend", place);
+    return () => {
+      map.un("moveend", place);
+    };
+  }, [displayLocation, isPinned]);
 
   useEffect(() => {
     isPinnedRef.current = isPinned;
@@ -164,48 +478,125 @@ export function MapView({
   useEffect(() => {
     if (!mapContainerRef.current || !popupRef.current) return;
 
+    // Positioning and offset are the defaults; the placement effect below
+    // overrides both once it can measure the card. Deliberately no autoPan —
+    // it exists to compensate for fixed placement by sliding the whole map,
+    // which moves pins out from under the cursor and fights that effect.
     const overlay = new Overlay({
       element: popupRef.current,
       positioning: "bottom-center",
-      offset: [0, -32],
-      autoPan: { animation: { duration: 250 } },
+      offset: [0, -POPUP_PIN_GAP],
     });
     overlayRef.current = overlay;
 
-    const eventFeatures = locations.map((location) => {
-      const feature = new Feature({
-        geometry: new Point(fromLonLat(location.coordinates)),
-        locationId: location.id,
-        locationData: location,
+    eventLayersRef.current.clear();
+    const pinLayers = eventLayers
+      .filter((l) => l.enabled)
+      .map((l) => {
+        const olLayer = buildEventLayer(l, locations);
+        eventLayersRef.current.set(l.id, olLayer);
+        return olLayer;
       });
-      feature.setStyle(PIN_STYLE);
-      return feature;
-    });
 
-    const eventsLayer = new VectorLayer({
-      source: new VectorSource({ features: eventFeatures }),
-    });
-    eventsLayer.set("layerId", "events");
-    eventsLayerRef.current = eventsLayer;
+    // Kept for the timeline effect, which needs a concrete vector source.
+    eventsLayerRef.current =
+      (pinLayers.find((l) => l instanceof VectorLayer) as VectorLayer) ?? null;
 
     const map = new OlMap({
       layers: [
         new TileLayer({
           source: new OSM(),
         }),
-        eventsLayer,
+        ...pinLayers,
       ],
       overlays: [overlay],
       view: new View({
         center: fromLonLat([-111.8881, 40.7606]),
         zoom: 8,
       }),
+      // Drop OL's zoom/rotate buttons. The attribution stays: OSM's ODbL
+      // requires it, and ol/source/OSM sets attributionsCollapsible:false so
+      // OpenLayers keeps it visible. Deliberately not passing `collapsible` —
+      // doing so overrides that safeguard and drops the credit entirely.
+      // Compactness is handled by .map-attribution in global.css.
+      controls: defaultControls({
+        zoom: false,
+        rotate: false,
+        attributionOptions: { className: "ol-attribution map-attribution" },
+      }),
       target: mapContainerRef.current,
     });
     mapRef.current = map;
 
+    // Dev-only handle for debugging hit detection and layer state from the
+    // console. Never exposed in production builds.
+    if (process.env.NODE_ENV !== "production") {
+      (window as unknown as { __olMap?: OlMap; __olDebug?: unknown }).__olMap =
+        map;
+      (window as unknown as { __olDebug?: unknown }).__olDebug = {
+        popupHovered: isPopupHoveredRef,
+        hoverTimeout: hoverTimeoutRef,
+        pinned: isPinnedRef,
+        hoveredId: hoveredLocationIdRef,
+      };
+    }
+
+    /**
+     * Opens the popup on a pin, once there is something to show in it.
+     *
+     * Pins whose events travelled with them (geojson, inline) open on the spot.
+     * Tile pins carry only an id, so we wait for the detail rather than opening
+     * on a stub, which showed an empty popup for a frame before correcting
+     * itself. A pin implies events, so if none arrive we open nothing at all.
+     */
+    const openPopup = async (
+      stub: HistoricalLocation,
+      pinned: boolean,
+    ): Promise<void> => {
+      const full =
+        stub.events.length > 0 ? stub : await loadLocationDetail(stub);
+      // The pointer may have moved on while the detail was in flight.
+      if (hoveredLocationIdRef.current !== stub.id) return;
+      // Nothing to say about this pin: leave the popup shut rather than open an
+      // empty one. Shouldn't happen — a pin implies events — but if the detail
+      // request fails we show nothing instead of claiming there are no events.
+      if (full.events.length === 0) return;
+
+      setHoveredLocation(full);
+      overlay.setPosition(fromLonLat(full.coordinates));
+      if (pinned) setIsPinned(true);
+    };
+
+    // Keep the popup up while the pointer is inside it, so a card can be read
+    // without pinning it.
+    //
+    // Native listeners rather than React's onMouseEnter/onMouseLeave: OL moves
+    // this element into its own overlay container, and React's synthetic
+    // enter/leave did not fire for it there. Plain mouseenter/mouseleave on the
+    // element do, verified against the live map.
+    const popupEl = popupRef.current;
+    const onPopupEnter = () => {
+      isPopupHoveredRef.current = true;
+      if (hoverTimeoutRef.current) {
+        clearTimeout(hoverTimeoutRef.current);
+        hoverTimeoutRef.current = null;
+      }
+    };
+    const onPopupLeave = () => {
+      isPopupHoveredRef.current = false;
+      if (isPinnedRef.current) return;
+      hoverTimeoutRef.current = setTimeout(() => {
+        setHoveredLocation(null);
+        overlay.setPosition(undefined);
+      }, 300);
+    };
+    popupEl.addEventListener("mouseenter", onPopupEnter);
+    popupEl.addEventListener("mouseleave", onPopupLeave);
+
     map.on("pointermove", (evt) => {
       if (evt.dragging) return;
+      // Browsing inside the popup — leave it alone until the pointer exits it.
+      if (isPopupHoveredRef.current) return;
 
       if (hoverTimeoutRef.current) {
         clearTimeout(hoverTimeoutRef.current);
@@ -223,10 +614,10 @@ export function MapView({
       }
 
       if (feature) {
-        const locationData = feature.get("locationData") as HistoricalLocation;
+        const locationData = resolveLocation(feature, locationsByIdRef.current);
         if (locationData && locationData.id !== hoveredLocationIdRef.current) {
-          setHoveredLocation(locationData);
-          overlay.setPosition(fromLonLat(locationData.coordinates));
+          hoveredLocationIdRef.current = locationData.id;
+          void openPopup(locationData, false);
         }
         map.getTargetElement().style.cursor = "pointer";
       } else {
@@ -245,11 +636,10 @@ export function MapView({
       });
 
       if (feature) {
-        const locationData = feature.get("locationData") as HistoricalLocation;
+        const locationData = resolveLocation(feature, locationsByIdRef.current);
         if (locationData) {
-          setHoveredLocation(locationData);
-          setIsPinned(true);
-          overlay.setPosition(fromLonLat(locationData.coordinates));
+          hoveredLocationIdRef.current = locationData.id;
+          void openPopup(locationData, true);
         }
       } else {
         if (isPinnedRef.current) {
@@ -262,45 +652,62 @@ export function MapView({
 
     return () => {
       if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
+      popupEl.removeEventListener("mouseenter", onPopupEnter);
+      popupEl.removeEventListener("mouseleave", onPopupLeave);
       map.setTarget(undefined);
     };
-  }, [locations]);
+  }, [locations, eventLayers, loadLocationDetail]);
 
-  // Filter pin visibility by timeline range
+  // Filter pins by timeline range.
+  //
+  // Each layer kind applies the same range its own way: geojson layers hide
+  // out-of-range features in memory, MVT layers re-request tiles with the range
+  // as query params so the filtering happens in PostGIS. TimelineSlider is
+  // unaware of either.
   useEffect(() => {
-    const source = eventsLayerRef.current?.getSource();
-    if (!source) return;
+    const [fromYear, toYear] = timelineRange;
 
-    source.getFeatures().forEach((feature) => {
-      if (!isTimelineEnabled) {
-        feature.setStyle(PIN_STYLE);
-        return;
+    for (const layer of eventLayers) {
+      const olLayer = eventLayersRef.current.get(layer.id);
+      if (!olLayer) continue;
+
+      if (layer.kind === "mvt") {
+        const source = (olLayer as VectorTileLayer).getSource();
+        if (!source) continue;
+        const qs = isTimelineEnabled
+          ? mvtQueryString({ fromYear, toYear })
+          : "";
+        source.setUrl(`${layer.url}${qs}`);
+        source.refresh();
+        continue;
       }
-      const loc = feature.get("locationData") as HistoricalLocation;
-      const hasEventInRange = loc.events.some((evt) => {
-        const year = parseInt(getYear(evt.date), 10);
-        return year >= timelineRange[0] && year <= timelineRange[1];
-      });
-      feature.setStyle(hasEventInRange ? PIN_STYLE : new Style({}));
-    });
-  }, [timelineRange, isTimelineEnabled]);
 
-  const handlePopupMouseEnter = useCallback(() => {
-    if (hoverTimeoutRef.current) {
-      clearTimeout(hoverTimeoutRef.current);
-      hoverTimeoutRef.current = null;
+      const source = (olLayer as VectorLayer).getSource();
+      if (!source) continue;
+      const style = pinStyleFor(layer.color);
+      source.getFeatures().forEach((feature) => {
+        if (!isTimelineEnabled) {
+          feature.setStyle(style);
+          return;
+        }
+        // Pins carry their own year span, so this works without the full
+        // event list — the same properties the MVT function emits.
+        const min = (feature.get("min_year") as number) ?? -Infinity;
+        const max = (feature.get("max_year") as number) ?? Infinity;
+        const inRange = max >= fromYear && min <= toYear;
+        feature.setStyle(inRange ? style : new Style({}));
+      });
     }
+  }, [timelineRange, isTimelineEnabled, eventLayers]);
+
+  const handleToggleEventLayer = useCallback((id: string) => {
+    setEventLayers((prev) =>
+      prev.map((l) => (l.id === id ? { ...l, enabled: !l.enabled } : l)),
+    );
   }, []);
 
-  const handlePopupMouseLeave = useCallback(() => {
-    if (isPinned) return;
-    hoverTimeoutRef.current = setTimeout(() => {
-      setHoveredLocation(null);
-      overlayRef.current?.setPosition(undefined);
-    }, 300);
-  }, [isPinned]);
-
   const handleClosePopup = useCallback(() => {
+    isPopupHoveredRef.current = false;
     setHoveredLocation(null);
     setIsPinned(false);
     overlayRef.current?.setPosition(undefined);
@@ -668,6 +1075,8 @@ export function MapView({
 
       {/* Layer Control */}
       <LayerControl
+        eventLayers={eventLayers}
+        onToggleEventLayer={handleToggleEventLayer}
         overlays={filteredOverlays}
         onToggleOverlay={handleToggleOverlay}
         onOpacityChange={handleOpacityChange}
@@ -678,11 +1087,8 @@ export function MapView({
       />
 
       {/* Popup */}
-      <div
-        ref={popupRef}
-        onMouseEnter={handlePopupMouseEnter}
-        onMouseLeave={handlePopupMouseLeave}
-      >
+      {/* Hover in/out is wired natively in the map effect — see onPopupEnter. */}
+      <div ref={popupRef}>
         <MapPopup
           location={displayLocation}
           onClose={handleClosePopup}

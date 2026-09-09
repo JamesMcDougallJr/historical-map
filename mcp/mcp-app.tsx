@@ -7,12 +7,31 @@ import {
   applyHostFonts,
 } from "@modelcontextprotocol/ext-apps";
 import { MapView } from "../app/map/components/MapView";
-import type { HistoricalLocation } from "../app/map/types";
+import type { EventLayer, HistoricalLocation } from "../app/map/types";
 import "ol/ol.css";
 import "../app/global.css";
 
-// In the sandboxed iframe, window.location.origin is "null"
-const isMcpApp = window.location.origin === "null";
+// The host always renders the App in an iframe. Opening dist/mcp-app.html
+// directly (for debugging) is top-level, and skips the handshake.
+//
+// Deliberately not keyed off `window.location.origin === "null"`: declaring
+// `_meta.ui.domain` on the resource gives the sandbox a real origin, which
+// would silently disable the handshake.
+const isFramed = window.parent !== window;
+
+// The App's events arrive via structuredContent, and the sandbox has no origin
+// to resolve a relative URL against — so render pins from memory rather than
+// fetching them the way the web app does.
+const INLINE_LAYERS: EventLayer[] = [
+  {
+    id: "mcp-inline",
+    name: "Historical Events",
+    kind: "inline",
+    url: "",
+    color: "#3b82f6",
+    enabled: true,
+  },
+];
 
 interface McpAppParams {
   locations?: HistoricalLocation[];
@@ -26,36 +45,43 @@ async function main() {
 
   const root = createRoot(rootEl);
 
-  // Render immediately with empty data to avoid blank iframe
-  root.render(
-    <StrictMode>
-      <MapView locations={[]} showNav={false} />
-    </StrictMode>,
-  );
+  const render = (locations: HistoricalLocation[]) =>
+    root.render(
+      <StrictMode>
+        <MapView
+          locations={locations}
+          initialEventLayers={INLINE_LAYERS}
+          showNav={false}
+        />
+      </StrictMode>,
+    );
 
-  if (isMcpApp) {
-    const mcpApp = new App({ name: "historical-map", version: "1.0.0" });
+  // Render immediately with empty data to avoid a blank iframe
+  render([]);
 
-    // All handlers must be registered BEFORE connect()
-    mcpApp.ontoolresult = (result) => {
-      const params = (result.structuredContent as McpAppParams | null) ?? {};
-      root.render(
-        <StrictMode>
-          <MapView locations={params.locations ?? []} showNav={false} />
-        </StrictMode>,
-      );
-    };
+  if (!isFramed) return;
 
-    mcpApp.onhostcontextchanged = (ctx) => {
-      if (ctx.theme) applyDocumentTheme(ctx.theme);
-      if (ctx.styles?.variables) applyHostStyleVariables(ctx.styles.variables);
-      if (ctx.styles?.css?.fonts) applyHostFonts(ctx.styles.css.fonts);
-    };
+  const mcpApp = new App({ name: "historical-map", version: "1.0.0" });
 
-    mcpApp.onteardown = async () => ({});
+  // All handlers must be registered BEFORE connect()
+  mcpApp.ontoolresult = (result) => {
+    const params = (result.structuredContent as McpAppParams | null) ?? {};
+    render(params.locations ?? []);
+  };
 
-    await mcpApp.connect(); // defaults to PostMessageTransport(window.parent)
-  }
+  mcpApp.onhostcontextchanged = (ctx) => {
+    if (ctx.theme) applyDocumentTheme(ctx.theme);
+    if (ctx.styles?.variables) applyHostStyleVariables(ctx.styles.variables);
+    if (ctx.styles?.css?.fonts) applyHostFonts(ctx.styles.css.fonts);
+    if (ctx.safeAreaInsets) {
+      const { top, right, bottom, left } = ctx.safeAreaInsets;
+      document.body.style.padding = `${top}px ${right}px ${bottom}px ${left}px`;
+    }
+  };
+
+  mcpApp.onteardown = async () => ({});
+
+  await mcpApp.connect(); // defaults to PostMessageTransport(window.parent)
 }
 
 main().catch(console.error);

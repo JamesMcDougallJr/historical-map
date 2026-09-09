@@ -13,8 +13,8 @@ export async function GET(req: NextRequest) {
   if (!checkApiKey(req)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const locations = storage.getLocations();
-  const data = storage.readData();
+  const locations = await storage.getLocations();
+  const data = await storage.readData();
   return NextResponse.json({ locations, lastUpdated: data.lastUpdated });
 }
 
@@ -42,7 +42,7 @@ export async function POST(req: NextRequest) {
       events: body.events ?? [],
     };
 
-    storage.upsertLocation(location);
+    await storage.upsertLocation(location);
     return NextResponse.json({ location }, { status: 201 });
   } catch {
     return NextResponse.json(

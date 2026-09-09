@@ -418,3 +418,35 @@ button:focus-visible {
   }
 }
 
+
+/* OpenLayers attribution — OSM's ODbL requires visible, user-dismissible credit.
+   Stacked directly above the LayerControl button (fixed bottom-4 right-4)
+   rather than beside it, so the collapsed "i" can't be overlapped when that
+   button's label changes width. */
+.ol-attribution.map-attribution {
+  left: 50%;
+  transform: translateX(-50%);
+  right: auto;
+  bottom: 1rem;
+  top: auto;
+  z-index: 20;
+  max-width: calc(100% - 16rem);
+  background: rgb(0 0 0 / 0.6);
+  border-radius: 0.5rem;
+  padding: 0.125rem;
+}
+
+.ol-attribution.map-attribution ul {
+  color: #e5e5e5;
+  font-size: 0.6875rem;
+  text-shadow: none;
+}
+
+.ol-attribution.map-attribution a {
+  color: #93c5fd;
+}
+
+.ol-attribution.map-attribution button {
+  background: transparent;
+  color: #e5e5e5;
+}

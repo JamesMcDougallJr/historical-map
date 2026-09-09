@@ -27,8 +27,20 @@ export function MapPopup({
   onAcknowledge,
 }: MapPopupProps) {
   const popupRef = useRef<HTMLDivElement>(null);
-  const [activeYear, setActiveYear] = useState<string>("");
-  const [currentPage, setCurrentPage] = useState(0);
+  /**
+   * Which year/page the user picked, and the location it was picked for.
+   *
+   * Tagged with the location id so the choice can be *derived* during render
+   * rather than reset from an effect. An effect runs after the first paint for
+   * a new location, so the tab selection would still be pointing at the
+   * previous pin's year for one frame — long enough to render an empty event
+   * list before correcting itself.
+   */
+  const [selection, setSelection] = useState<{
+    locationId: string;
+    year: string;
+    page: number;
+  } | null>(null);
   const [isMobile, setIsMobile] = useState(false);
 
   useEffect(() => {
@@ -53,13 +65,15 @@ export function MapPopup({
     return Array.from(eventsByYear.keys()).sort();
   }, [eventsByYear]);
 
-  // Reset state when location changes
-  useEffect(() => {
-    if (location && years.length > 0) {
-      setActiveYear(years[0] ?? "");
-      setCurrentPage(0);
-    }
-  }, [location, years]);
+  // The selection applies only to the location it was made on; any other
+  // location falls back to its own first year, computed in the same render
+  // that receives it. No effect, so no intermediate empty frame.
+  const locationId = location?.id ?? "";
+  // Only honour the selection if its year still exists — the timeline can
+  // filter the year the user was on out from under them.
+  const selectionApplies =
+    selection?.locationId === locationId && eventsByYear.has(selection.year);
+  const activeYear = selectionApplies ? selection.year : (years[0] ?? "");
 
   // Get events for current year
   const currentYearEvents = useMemo(() => {
@@ -68,6 +82,9 @@ export function MapPopup({
 
   // Pagination
   const totalPages = Math.ceil(currentYearEvents.length / EVENTS_PER_PAGE);
+  const currentPage = selectionApplies
+    ? Math.min(selection.page, Math.max(0, totalPages - 1))
+    : 0;
   const paginatedEvents = useMemo(() => {
     const start = currentPage * EVENTS_PER_PAGE;
     return currentYearEvents.slice(start, start + EVENTS_PER_PAGE);
@@ -75,16 +92,19 @@ export function MapPopup({
 
   // Handle year change
   const handleYearChange = (year: string) => {
-    setActiveYear(year);
-    setCurrentPage(0);
+    setSelection({ locationId, year, page: 0 });
   };
 
   // Handle page change
   const handlePageChange = (page: number) => {
-    setCurrentPage(page);
+    setSelection({ locationId, year: activeYear, page });
   };
 
-  if (!location) return null;
+  // A pin is on the map because it has events, so a popup with none is not a
+  // state worth representing. Rendering nothing — rather than an empty shell
+  // that fills in a frame later — means no ordering of renders can produce the
+  // flash of an empty popup, whatever upstream hands us.
+  if (!location || location.events.length === 0) return null;
 
   const header = (
     <div
@@ -124,47 +144,47 @@ export function MapPopup({
 
   const content = (
     <div className="p-4">
-      {location.events.length === 0 ? (
-        <p className="text-neutral-500 dark:text-neutral-400 text-sm text-center py-4">
-          No events at this location yet.
-        </p>
-      ) : (
-        <>
-          <EventTabs
-            years={years}
-            activeYear={activeYear}
-            onYearChange={handleYearChange}
+      <EventTabs
+        years={years}
+        activeYear={activeYear}
+        onYearChange={handleYearChange}
+      />
+      <div className="space-y-4">
+        {paginatedEvents.map((event) => (
+          <EventCard
+            key={event.id}
+            event={event}
+            isAcknowledged={acknowledgedIds?.has(event.id)}
+            onAcknowledge={onAcknowledge}
           />
-          <div className="space-y-4">
-            {paginatedEvents.map((event) => (
-              <EventCard
-                key={event.id}
-                event={event}
-                isAcknowledged={acknowledgedIds?.has(event.id)}
-                onAcknowledge={onAcknowledge}
-              />
-            ))}
-          </div>
-          <EventPagination
-            currentPage={currentPage}
-            totalPages={totalPages}
-            onPageChange={handlePageChange}
-          />
-        </>
-      )}
+        ))}
+      </div>
+      <EventPagination
+        currentPage={currentPage}
+        totalPages={totalPages}
+        onPageChange={handlePageChange}
+      />
     </div>
   );
 
   return (
     <>
-      {/* Desktop: positioned overlay popup */}
+      {/* Desktop: positioned overlay popup.
+          The height cap lives on the body, not the card, so the display utility
+          stays `md:block`. Changing it to `md:flex` made a stale CSS chunk (see
+          CLAUDE.md) collapse the card to display:none — `hidden` with nothing to
+          override it. Capping the body instead degrades to "uncapped popup"
+          rather than "no popup".
+          --popup-body-max-h is set by MapView's placement effect to the room
+          actually available beside the pin, less the header. */}
       <div
         ref={popupRef}
-        className="hidden md:block w-80 bg-white dark:bg-neutral-800 rounded-xl shadow-xl border border-neutral-200 dark:border-neutral-700 overflow-hidden"
-        onMouseEnter={(e) => e.stopPropagation()}
+        className="hidden md:block w-96 max-w-[90vw] bg-white dark:bg-neutral-800 rounded-xl shadow-xl border border-neutral-200 dark:border-neutral-700 overflow-hidden"
       >
         {header}
-        {content}
+        <div className="overflow-y-auto max-h-[var(--popup-body-max-h,60vh)]">
+          {content}
+        </div>
       </div>
 
       {/* Mobile: bottom sheet modal (portaled to body to escape OL overlay) */}

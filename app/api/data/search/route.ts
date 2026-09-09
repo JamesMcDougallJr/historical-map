@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as storage from "@/lib/server-storage";
+import { parseEventQuery } from "@/app/map/utils/event-query";
 
 function checkApiKey(req: NextRequest): boolean {
   const key = process.env["MAP_API_KEY"];
@@ -12,15 +13,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { searchParams } = req.nextUrl;
-  const q = searchParams.get("q") ?? "";
-  const from = searchParams.get("from");
-  const to = searchParams.get("to");
-
-  const results = storage.searchEvents(
-    q,
-    from ? parseInt(from, 10) : undefined,
-    to ? parseInt(to, 10) : undefined,
+  const results = await storage.searchEvents(
+    parseEventQuery(req.nextUrl.searchParams),
   );
 
   return NextResponse.json({ results });

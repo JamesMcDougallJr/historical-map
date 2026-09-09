@@ -7,7 +7,28 @@ export interface HistoricalEvent {
   date: string; // ISO 8601: "1869-05-10"
   imageUrl?: string;
   tags?: string[];
+  /** Free-text citation for this specific event, e.g. a page reference. */
   source?: string;
+  /** EventSource.id — which publisher this event came from. */
+  sourceId?: string;
+}
+
+/**
+ * A publisher of events — one organisation or dataset, e.g. the Utah Historical
+ * Society. Events are grouped by source, and each source surfaces as its own
+ * toggleable layer on the map.
+ *
+ * Distinct from EventLayer, which describes how a source's events are *served*.
+ */
+export interface EventSource {
+  id: string;
+  name: string;
+  description?: string;
+  homepageUrl?: string;
+  /** Rendered while this source's layer is visible. */
+  attribution?: string;
+  /** Pin colour, so layers are visually distinguishable. */
+  color?: string;
 }
 
 export interface HistoricalLocation {
@@ -21,6 +42,35 @@ export interface HistoricalEventsData {
   version: string;
   lastUpdated: string;
   locations: HistoricalLocation[];
+  sources?: EventSource[];
+}
+
+/**
+ * How a source's events reach the map.
+ *
+ * `geojson` — a static FeatureCollection from a Next API route. No database,
+ * nothing to hammer; this is what the deployed demo ships.
+ * `mvt` — vector tiles from Martin, backed by PostGIS, with filtering pushed
+ * down into the database.
+ * `inline` — built from the `locations` already in memory, fetching nothing.
+ * Used by the MCP App, whose events arrive via structuredContent and which runs
+ * in a sandboxed iframe where a relative URL has no origin to resolve against.
+ *
+ * Both kinds emit the same feature properties, so everything downstream of
+ * layer construction treats them identically.
+ */
+export type EventLayerKind = "geojson" | "mvt" | "inline";
+
+export interface EventLayer {
+  /** Matches the EventSource this layer serves. */
+  id: string;
+  name: string;
+  kind: EventLayerKind;
+  /** Static endpoint for `geojson`, Martin tile template for `mvt`. */
+  url: string;
+  attribution?: string;
+  color?: string;
+  enabled: boolean;
 }
 
 // Parser Types
@@ -36,7 +86,7 @@ export interface ParsedEvent {
 
 export interface ProcessingJob {
   id: string;
-  status: 'pending' | 'processing' | 'completed' | 'failed';
+  status: "pending" | "processing" | "completed" | "failed";
   progress: number; // 0-100
   totalChunks: number;
   completedChunks: number;
@@ -55,11 +105,11 @@ export interface EventProcessingService {
 }
 
 // Parser strategy type
-export type ParserStrategy = 'regex' | 'structured';
+export type ParserStrategy = "regex" | "structured";
 
 // Historical Map Overlay Types
 
-export type OverlaySource = 'allmaps' | 'ohm' | 'usgs' | 'nypl' | 'custom';
+export type OverlaySource = "allmaps" | "ohm" | "usgs" | "nypl" | "custom";
 
 export interface HistoricalOverlay {
   id: string;

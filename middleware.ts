@@ -82,8 +82,13 @@ export function middleware(request: NextRequest): NextResponse {
   const { pathname } = request.nextUrl;
   const isApiRoute = pathname.startsWith("/api/");
 
+  // The MCP connector is spoken to by MCP clients and proxies (mcp-remote, the
+  // Inspector) whose User-Agents look exactly like the ones we block below.
+  const isMcpRoute =
+    pathname === "/api/mcp" || pathname.startsWith("/api/mcp/");
+
   // 1. Bot filtering (API routes only)
-  if (isApiRoute) {
+  if (isApiRoute && !isMcpRoute) {
     const ua = request.headers.get("user-agent") ?? "";
     if (BLOCKED_UA.test(ua)) {
       return new NextResponse("Forbidden", { status: 403 });
@@ -107,12 +112,17 @@ export function middleware(request: NextRequest): NextResponse {
     }
   }
 
-  // 3. CSP nonce — apply to all non-asset routes
+  // 3. CSP nonce — apply to all non-asset routes.
+  // The nonce must go on the *request* headers, not just the response: server
+  // components read it via headers().get("x-nonce") (see app/layout.tsx). With
+  // it only on the response, the layout rendered nonce="" — leaving the inline
+  // theme script unnonced (and so blocked by script-src) and producing a
+  // hydration mismatch against the nonce Next injects from the CSP header.
   const nonce = generateNonce();
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set("x-nonce", nonce);
   const response = NextResponse.next({
-    request: {
-      headers: new Headers(request.headers),
-    },
+    request: { headers: requestHeaders },
   });
 
   response.headers.set("x-nonce", nonce);

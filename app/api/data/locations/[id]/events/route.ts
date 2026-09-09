@@ -18,7 +18,7 @@ export async function POST(
   }
 
   const { id } = await params;
-  if (!storage.getLocation(id)) {
+  if (!(await storage.getLocation(id))) {
     return NextResponse.json({ error: "Location not found" }, { status: 404 });
   }
 
@@ -46,7 +46,7 @@ export async function POST(
       imageUrl: body.imageUrl,
     };
 
-    const location = storage.addEventsToLocation(id, [event]);
+    const location = await storage.addEventsToLocation(id, [event]);
     return NextResponse.json({ location }, { status: 201 });
   } catch {
     return NextResponse.json(

@@ -1,0 +1,41 @@
+# Local geospatial stack: PostGIS + Martin vector tile server.
+#
+#   docker compose up -d
+#   POSTGRES_URL=postgres://postgres:password@localhost:5433/db npm run seed:db
+#   NEXT_PUBLIC_MARTIN_URL=http://localhost:3001 npm run dev
+#
+# The deployed demo runs neither of these — it serves static GeoJSON from
+# data/map-data.json via /api/sources/[id]/features. See mcp/README.md.
+
+services:
+  db:
+    # imresamu/* is the multi-arch rebuild of postgis/postgis — the official
+    # image publishes amd64 only, which won't run natively on Apple Silicon.
+    image: imresamu/postgis:17-3.5-alpine
+    restart: unless-stopped
+    ports:
+      # 5433 on the host — 5432 is commonly taken by a local Postgres install.
+      - "5433:5432"
+    environment:
+      - POSTGRES_DB=db
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=password
+    volumes:
+      - ./pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  martin:
+    image: ghcr.io/maplibre/martin:1.16.0
+    restart: unless-stopped
+    # 3001 on the host — Next dev owns 3000.
+    ports:
+      - "3001:3000"
+    environment:
+      - DATABASE_URL=postgres://postgres:password@db/db
+    depends_on:
+      db:
+        condition: service_healthy
