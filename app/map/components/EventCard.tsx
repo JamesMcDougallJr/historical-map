@@ -43,9 +43,12 @@ export function EventCard({
               </div>
             )}
           </div>
+          {/* No "Read more" on the title — the ellipsis is enough, and three
+              labels per card drowned out the one that matters. Click toggles. */}
           <ExpandableText
             text={event.title}
             maxLines={1}
+            showIndicator={false}
             className="font-medium text-neutral-900 dark:text-neutral-100"
           />
           <ExpandableText
@@ -93,9 +96,11 @@ export function EventCard({
       )}
       {event.source && (
         <div className="mt-2">
+          {/* Label-less for the same reason as the title. */}
           <ExpandableText
             text={`Source: ${event.source}`}
             maxLines={1}
+            showIndicator={false}
             className="text-xs text-neutral-500 dark:text-neutral-500 italic"
           />
         </div>
