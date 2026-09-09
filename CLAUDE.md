@@ -20,13 +20,38 @@ Next 16 removed, and there is no `eslint.config.js`. Use `npm run type-check` in
 `npm run build:mcp` must be re-run after changing anything the MCP App renders
 (`MapView` and its imports); the bundle is a build artifact, not live code.
 
-### Debugging note
+### Debugging note — stale chunks
 
-`next dev` (Turbopack) can serve a **stale CSS chunk under an unchanged filename**, which
-looks exactly like broken layout CSS — collapsed heights, an OpenLayers
-`"map container's width or height are 0"` warning, and a blank map. Before believing any
-styling diagnosis, `rm -rf .next` and hard-reload. Verify a stylesheet's real content with
-`fetch(href, { cache: 'reload' })`, not a plain `fetch`.
+`next dev` (Turbopack) reuses **the same chunk filename across recompiles**, for both CSS and
+JS. Nothing in the URL changes, so the browser can keep serving a cached copy indefinitely.
+**Before believing any diagnosis, rule this out first** — it has repeatedly looked like a
+logic bug and eaten hours.
+
+The two present differently:
+
+- **Stale CSS** — new utility classes are simply absent, so anything relying on one silently
+  loses. A card written `hidden md:flex` collapsed to `display: none`, because the cached
+  sheet had `.hidden` but not the newly added `.md\:flex` — the popup rendered with correct
+  content and no box. Also looks like broken layout: collapsed heights, an OpenLayers
+  `"map container's width or height are 0"` warning, a blank map.
+- **Stale JS** — edits appear to have no effect. A newly added global read `undefined` at
+  runtime while being plainly present in the file the server returned for that exact URL.
+
+Verifying what is *actually applied* (not what the server would send):
+
+| Ask | Do |
+|---|---|
+| Which CSS rules are in force | Walk `document.styleSheets` → `cssRules` (CSSOM reflects the applied sheet) |
+| What the server would send now | `fetch(href, { cache: 'reload' })` — a plain `fetch` can be served from cache |
+| Is the running JS current | Check for a symbol you just added, at runtime, not in the fetched text |
+
+Server content and applied content disagreeing for the same URL *is* the bug — that
+comparison is the fastest way to confirm it rather than infer it.
+
+`rm -rf .next && npm run dev` is the reliable fix — it changes the chunk hashes, so the
+browser has to fetch new URLs. A hard reload (`Cmd+Shift+R`) cleared the JS case but **not**
+the CSS one, which needed the stylesheet re-requested under a cache-busting query. Don't
+assume a plain refresh picked up your change.
 
 ### Dev-only map debug handles
 
