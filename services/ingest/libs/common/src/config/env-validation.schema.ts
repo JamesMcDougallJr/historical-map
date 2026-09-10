@@ -23,8 +23,29 @@ export const envSchema = z.object({
   REDIS_HOST: z.string().default("localhost"),
   REDIS_PORT: z.coerce.number().int().positive().default(6379),
 
+  /**
+   * Directory the `local-directory` source scans. Relative paths resolve
+   * against the process cwd, so a worker started from the repo root picks up
+   * `./corpus` without configuration.
+   */
+  INGEST_CORPUS_DIR: z.string().min(1).default("./corpus"),
+
   // Required only by `extract`; optional here so the other apps boot without it.
-  ANTHROPIC_API_KEY: z.string().min(1).optional(),
+  GROQ_API_KEY: z.string().min(1).optional(),
+  GROQ_MODEL: z.string().min(1).default("openai/gpt-oss-120b"),
+
+  /**
+   * Input-token budget per extraction chunk. Chunks are cut on segment
+   * boundaries, so this is a target rather than a hard cap — a single page
+   * larger than this is still sent whole rather than split mid-page.
+   *
+   * Sized against the free tier's 8,000 tokens/minute: ~3K in leaves room for
+   * the response and a little headroom inside a one-minute window.
+   */
+  EXTRACT_CHUNK_TOKENS: z.coerce.number().int().positive().default(3000),
+
+  /** Tokens/minute to throttle against. Raise this on a paid key. */
+  GROQ_TOKENS_PER_MINUTE: z.coerce.number().int().positive().default(8000),
 
   // Read via process.env in @Processor() options (which evaluate at module-load
   // time, before DI exists) — validated here purely so a bad value fails fast.

@@ -10,6 +10,7 @@
     "migrate:revert": "tsx scripts/migrate.ts --revert",
     "db:verify": "tsx scripts/verify-database.ts",
     "queue:verify": "tsx scripts/verify-queue.ts",
+    "sources:verify": "tsx scripts/verify-sources.ts",
     "queue:inspect": "tsx scripts/queue-inspect.ts",
     "queue:requeue": "tsx scripts/queue-requeue.ts",
     "start:api": "nest start api --watch",
@@ -32,6 +33,7 @@
     "pg": "^8.13.1",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
+    "unpdf": "^1.4.0",
     "typeorm": "^0.3.20",
     "zod": "^4.3.6"
   },

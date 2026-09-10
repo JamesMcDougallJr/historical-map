@@ -66,6 +66,20 @@
       "entryFile": "index",
       "sourceRoot": "libs/queue/src",
       "compilerOptions": { "tsConfigPath": "libs/queue/tsconfig.lib.json" }
+    },
+    "parsers": {
+      "type": "library",
+      "root": "libs/parsers",
+      "entryFile": "index",
+      "sourceRoot": "libs/parsers/src",
+      "compilerOptions": { "tsConfigPath": "libs/parsers/tsconfig.lib.json" }
+    },
+    "sources": {
+      "type": "library",
+      "root": "libs/sources",
+      "entryFile": "index",
+      "sourceRoot": "libs/sources/src",
+      "compilerOptions": { "tsConfigPath": "libs/sources/tsconfig.lib.json" }
     }
   }
 }

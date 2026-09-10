@@ -1,0 +1,4 @@
+# Source documents are large and often licensed — keep them out of the repo.
+*
+!.gitignore
+!README.md

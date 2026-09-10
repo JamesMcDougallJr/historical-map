@@ -104,19 +104,49 @@ export type DatePrecision =
   | "circa";
 
 /**
- * What the `extract` worker produces: the parsed events plus the place strings
- * they were attributed to. Geocoding happens in `publish`, deliberately later —
- * it is a separate rate-limited external dependency and should not be able to
- * fail an otherwise-good extraction.
+ * An event as an LLM extraction pass produces it.
+ *
+ * Deliberately a separate type rather than extra fields on `ParsedEvent`: the
+ * web import flow (`/map/import`) produces `ParsedEvent` from regex parsers
+ * that cannot populate any of these, so widening the shared type would either
+ * lie about what those parsers return or force every field optional and lose
+ * the guarantee that extraction always sets them.
+ */
+export interface ExtractedEvent extends ParsedEvent {
+  /**
+   * The date exactly as the document wrote it — "Spring 1847", "circa 1850".
+   * Preserved verbatim so the map can cite what the source actually said rather
+   * than only the day we picked to represent it.
+   */
+  dateText: string;
+
+  /**
+   * A representative day, or null when the text gives nothing datable.
+   * `events.date` is `date NOT NULL`, so `publish` derives one from
+   * `datePrecision` when this is null — and sends the event to review when it
+   * cannot.
+   */
+  dateIso: string | null;
+
+  /** How much of `dateIso` to believe. */
+  datePrecision: DatePrecision;
+
+  /**
+   * Free-text place as written, e.g. "Promontory Summit". Never coordinates —
+   * geocoding is `publish`'s job, and a model guessing latitude/longitude
+   * produces plausible, unverifiable, wrong pins.
+   */
+  placeName: string | null;
+}
+
+/**
+ * What the `extract` worker produces. Geocoding happens in `publish`,
+ * deliberately later — it is a separate rate-limited external dependency and
+ * should not be able to fail an otherwise-good extraction.
  */
 export interface ExtractionResult {
   documentId: string;
-  events: Array<
-    ParsedEvent & {
-      /** Free-text place as written in the document, e.g. "Promontory Summit". */
-      placeName?: string;
-    }
-  >;
+  events: ExtractedEvent[];
   /** Model identifier, for reproducing or re-running an extraction. */
   model: string;
   extractedAt: string;
