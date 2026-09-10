@@ -1,4 +1,31 @@
-# Phase 8 — `extract` worker
+# Phase 8 — `extract` worker · **Implemented (Groq, not Claude)**
+
+**This document's premise is superseded.** The engine is Groq
+(`openai/gpt-oss-120b`) with strict structured outputs. Three instructions below
+are wrong for Groq and were deliberately not followed:
+
+- **Streaming is forbidden** with strict structured outputs, as is tool use — so
+  the "stream with `.finalMessage()`" advice does not apply.
+- **`strict` defaults to `false`** and must be passed explicitly. Without it the
+  response is best-effort schema matching that can also 400.
+- The schema must be **strict-mode-native**: every property in `required`,
+  `additionalProperties: false` on every object, nullable unions instead of
+  optionals, and no `pattern`/`minLength`/`oneOf`. `scripts/verify-extraction.ts`
+  audits this offline, because a violation is a 400 on *every* request rather
+  than a degraded result.
+
+What carried over verbatim: the interface/token/module triad, the marker-error
+retry loop, and per-chunk checkpointing. Two deliberate improvements on the
+pipeline this is modelled on — `Retry-After` is honoured rather than doubling a
+fixed delay, and chunk checkpointing was built in from the start rather than
+left as a documented limitation.
+
+Verified against the live API: the schema is accepted, and precision is
+correctly differentiated ("May 10, 1869" → `day`, "July 1847" → `month`).
+
+---
+
+## Original notes, retained for the rationale
 
 Turn document text into `ParsedEvent[]` via the Claude API. Structurally the analogue of State
 Affairs' `transcribe` worker: an expensive, chunked, retryable transformation behind an

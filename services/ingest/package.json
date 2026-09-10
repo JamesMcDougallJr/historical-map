@@ -18,7 +18,9 @@
     "start:detect": "nest start detect --watch",
     "start:fetch": "nest start fetch --watch",
     "start:extract": "nest start extract --watch",
-    "start:publish": "nest start publish --watch"
+    "start:publish": "nest start publish --watch",
+    "extract:verify": "tsx scripts/verify-extraction.ts",
+    "detect:trigger": "tsx scripts/trigger-detect.ts"
   },
   "dependencies": {
     "@historical-map/domain": "*",

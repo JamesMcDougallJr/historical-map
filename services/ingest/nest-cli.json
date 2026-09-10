@@ -16,70 +16,99 @@
       "root": "apps/api",
       "entryFile": "main",
       "sourceRoot": "apps/api/src",
-      "compilerOptions": { "tsConfigPath": "apps/api/tsconfig.app.json" }
+      "compilerOptions": {
+        "tsConfigPath": "apps/api/tsconfig.app.json"
+      }
     },
     "detect": {
       "type": "application",
       "root": "apps/workers/detect",
       "entryFile": "main",
       "sourceRoot": "apps/workers/detect/src",
-      "compilerOptions": { "tsConfigPath": "apps/workers/detect/tsconfig.app.json" }
+      "compilerOptions": {
+        "tsConfigPath": "apps/workers/detect/tsconfig.app.json"
+      }
     },
     "fetch": {
       "type": "application",
       "root": "apps/workers/fetch",
       "entryFile": "main",
       "sourceRoot": "apps/workers/fetch/src",
-      "compilerOptions": { "tsConfigPath": "apps/workers/fetch/tsconfig.app.json" }
+      "compilerOptions": {
+        "tsConfigPath": "apps/workers/fetch/tsconfig.app.json"
+      }
     },
     "extract": {
       "type": "application",
       "root": "apps/workers/extract",
       "entryFile": "main",
       "sourceRoot": "apps/workers/extract/src",
-      "compilerOptions": { "tsConfigPath": "apps/workers/extract/tsconfig.app.json" }
+      "compilerOptions": {
+        "tsConfigPath": "apps/workers/extract/tsconfig.app.json"
+      }
     },
     "publish": {
       "type": "application",
       "root": "apps/workers/publish",
       "entryFile": "main",
       "sourceRoot": "apps/workers/publish/src",
-      "compilerOptions": { "tsConfigPath": "apps/workers/publish/tsconfig.app.json" }
+      "compilerOptions": {
+        "tsConfigPath": "apps/workers/publish/tsconfig.app.json"
+      }
     },
     "common": {
       "type": "library",
       "root": "libs/common",
       "entryFile": "index",
       "sourceRoot": "libs/common/src",
-      "compilerOptions": { "tsConfigPath": "libs/common/tsconfig.lib.json" }
+      "compilerOptions": {
+        "tsConfigPath": "libs/common/tsconfig.lib.json"
+      }
     },
     "database": {
       "type": "library",
       "root": "libs/database",
       "entryFile": "index",
       "sourceRoot": "libs/database/src",
-      "compilerOptions": { "tsConfigPath": "libs/database/tsconfig.lib.json" }
+      "compilerOptions": {
+        "tsConfigPath": "libs/database/tsconfig.lib.json"
+      }
     },
     "queue": {
       "type": "library",
       "root": "libs/queue",
       "entryFile": "index",
       "sourceRoot": "libs/queue/src",
-      "compilerOptions": { "tsConfigPath": "libs/queue/tsconfig.lib.json" }
+      "compilerOptions": {
+        "tsConfigPath": "libs/queue/tsconfig.lib.json"
+      }
     },
     "parsers": {
       "type": "library",
       "root": "libs/parsers",
       "entryFile": "index",
       "sourceRoot": "libs/parsers/src",
-      "compilerOptions": { "tsConfigPath": "libs/parsers/tsconfig.lib.json" }
+      "compilerOptions": {
+        "tsConfigPath": "libs/parsers/tsconfig.lib.json"
+      }
     },
     "sources": {
       "type": "library",
       "root": "libs/sources",
       "entryFile": "index",
       "sourceRoot": "libs/sources/src",
-      "compilerOptions": { "tsConfigPath": "libs/sources/tsconfig.lib.json" }
+      "compilerOptions": {
+        "tsConfigPath": "libs/sources/tsconfig.lib.json"
+      }
+    },
+    "extraction": {
+      "type": "library",
+      "root": "libs/extraction",
+      "entryFile": "index",
+      "sourceRoot": "libs/extraction/src",
+      "compilerOptions": {
+        "tsConfigPath": "libs/extraction/tsconfig.lib.json"
+      }
     }
   }
 }

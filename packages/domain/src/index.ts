@@ -7,5 +7,6 @@
 // `transpilePackages` in next.config.mjs; the Nest workspace picks it up
 // through a tsconfig path mapping. Neither has to build this package first.
 
+export * from "./dates";
 export * from "./events";
 export * from "./ingestion";

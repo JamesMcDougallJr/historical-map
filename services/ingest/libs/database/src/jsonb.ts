@@ -10,6 +10,6 @@
  * This is that impedance mismatch and nothing else. It does not skip
  * validation, because there is none to skip: the column accepts any JSON.
  */
-export function jsonb(value: Record<string, unknown>): never {
+export function jsonb(value: object): never {
   return value as never;
 }
