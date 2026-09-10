@@ -1,4 +1,5 @@
 import { InitIngestSchema1757808000000 } from "./1757808000000-init-ingest-schema";
+import { AddPublishTables1757894400000 } from "./1757894400000-add-publish-tables";
 
 /**
  * Explicit imports, in order. **Do not replace this with a glob.**
@@ -12,4 +13,7 @@ import { InitIngestSchema1757808000000 } from "./1757808000000-init-ingest-schem
  * Ordering here is the execution order; TypeORM also sorts by the numeric
  * timestamp prefix, so keep the two consistent.
  */
-export const INGEST_MIGRATIONS = [InitIngestSchema1757808000000];
+export const INGEST_MIGRATIONS = [
+  InitIngestSchema1757808000000,
+  AddPublishTables1757894400000,
+];

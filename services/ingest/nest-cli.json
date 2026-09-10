@@ -109,6 +109,15 @@
       "compilerOptions": {
         "tsConfigPath": "libs/extraction/tsconfig.lib.json"
       }
+    },
+    "geocoding": {
+      "type": "library",
+      "root": "libs/geocoding",
+      "entryFile": "index",
+      "sourceRoot": "libs/geocoding/src",
+      "compilerOptions": {
+        "tsConfigPath": "libs/geocoding/tsconfig.lib.json"
+      }
     }
   }
 }

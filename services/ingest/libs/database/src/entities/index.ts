@@ -1,8 +1,17 @@
+import { GeocodeCache } from "./geocode-cache.entity";
 import { IngestDocument } from "./ingest-document.entity";
 import { IngestExtraction } from "./ingest-extraction.entity";
+import { IngestReviewItem } from "./ingest-review-item.entity";
 import { IngestSource } from "./ingest-source.entity";
 
-export { IngestDocument, IngestExtraction, IngestSource };
+export {
+  GeocodeCache,
+  IngestDocument,
+  IngestExtraction,
+  IngestReviewItem,
+  IngestSource,
+};
+export type { ReviewReason } from "./ingest-review-item.entity";
 
 /**
  * Explicit list rather than a glob. Two reasons, and the second is the one that
@@ -14,4 +23,10 @@ export { IngestDocument, IngestExtraction, IngestSource };
  * Those belong to the web app's `ensureSchema()`. This connection must never be
  * able to migrate them.
  */
-export const INGEST_ENTITIES = [IngestSource, IngestDocument, IngestExtraction];
+export const INGEST_ENTITIES = [
+  IngestSource,
+  IngestDocument,
+  IngestExtraction,
+  GeocodeCache,
+  IngestReviewItem,
+];

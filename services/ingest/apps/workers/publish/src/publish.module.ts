@@ -1,17 +1,16 @@
 import { Module } from "@nestjs/common";
 import { AppConfigModule, HealthController } from "@app/common";
 import { DatabaseModule } from "@app/database";
+import { QueueModule } from "@app/queue";
+import { PublishingModule } from "./publishing/publishing.module";
 
-/**
- * Root module for the `publish` app. AppConfigModule must come first — it is
- * `isGlobal`, and DatabaseModule's factory injects the ConfigService it
- * publishes.
- *
- * Queues, processors and feature modules are added in later phases; today this
- * boots, validates its environment, connects to Postgres, and idles.
- */
 @Module({
-  imports: [AppConfigModule, DatabaseModule],
+  imports: [
+    AppConfigModule,
+    DatabaseModule,
+    QueueModule.forRoot(),
+    PublishingModule,
+  ],
   controllers: [HealthController],
 })
 export class PublishModule {}

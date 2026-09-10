@@ -47,6 +47,28 @@ export const envSchema = z.object({
   /** Tokens/minute to throttle against. Raise this on a paid key. */
   GROQ_TOKENS_PER_MINUTE: z.coerce.number().int().positive().default(8000),
 
+  /**
+   * Below this, an extracted event goes to the review queue instead of the map.
+   * The map's value is being trustworthy about the past, so the default leans
+   * toward withholding rather than publishing a guess.
+   */
+  PUBLISH_CONFIDENCE_MIN: z.coerce.number().min(0).max(1).default(0.6),
+
+  /**
+   * Nominatim requires a genuine identifying User-Agent and at most one request
+   * per second. Both are policy, not guidance — exceeding them gets an IP
+   * blocked from free public infrastructure.
+   */
+  GEOCODER_USER_AGENT: z.string().min(1).optional(),
+  GEOCODER_MIN_INTERVAL_MS: z.coerce.number().int().positive().default(1100),
+
+  /**
+   * Comma-separated ISO country codes to restrict geocoding to, e.g. "us".
+   * Per-corpus knowledge and the cheapest accuracy win available — unset means
+   * the whole world, which is how "Sutter's Mill" resolves to Idaho.
+   */
+  GEOCODER_COUNTRY_CODES: z.string().min(1).optional(),
+
   // Read via process.env in @Processor() options (which evaluate at module-load
   // time, before DI exists) — validated here purely so a bad value fails fast.
   DETECT_CONCURRENCY: z.coerce.number().int().positive().default(1),
