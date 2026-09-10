@@ -2,6 +2,8 @@ import { Global, Module } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { TypeOrmModule } from "@nestjs/typeorm";
 import { DatabaseHealthService } from "./database.service";
+import { INGEST_ENTITIES } from "./entities";
+import { INGEST_MIGRATIONS } from "./migrations";
 
 /**
  * TypeORM owns both the entities and the migrations for the `ingest_*` tables.
@@ -23,12 +25,17 @@ import { DatabaseHealthService } from "./database.service";
       useFactory: (config: ConfigService) => ({
         type: "postgres" as const,
         url: config.get<string>("POSTGRES_URL"),
-        // Filled in by phase 3. Explicit list rather than autoLoadEntities so
-        // what this connection can touch is readable in one place.
-        entities: [],
-        migrations: [],
+        // Explicit lists, never globs or autoLoadEntities — neither survives
+        // the webpack bundling `nest build` does. See migrations/index.ts.
+        entities: INGEST_ENTITIES,
+        migrations: INGEST_MIGRATIONS,
         synchronize: false,
         autoLoadEntities: false,
+        // Migrations are run by the `migrate` script / init-container, never
+        // by an app on boot: five apps racing to migrate the same database on
+        // a rolling deploy is a deadlock waiting to happen.
+        migrationsRun: false,
+        migrationsTableName: "ingest_migrations",
       }),
     }),
   ],

@@ -6,6 +6,9 @@
   "scripts": {
     "build": "nest build api && nest build detect && nest build fetch && nest build extract && nest build publish",
     "type-check": "tsc --noEmit -p tsconfig.json",
+    "migrate": "tsx scripts/migrate.ts",
+    "migrate:revert": "tsx scripts/migrate.ts --revert",
+    "db:verify": "tsx scripts/verify-database.ts",
     "start:api": "nest start api --watch",
     "start:detect": "nest start detect --watch",
     "start:fetch": "nest start fetch --watch",

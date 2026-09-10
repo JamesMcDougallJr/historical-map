@@ -35,6 +35,6 @@
       "@historical-map/domain/*": ["../../packages/domain/src/*"]
     }
   },
-  "include": ["apps/**/*.ts", "libs/**/*.ts"],
+  "include": ["apps/**/*.ts", "libs/**/*.ts", "scripts/**/*.ts"],
   "exclude": ["node_modules", "dist"]
 }

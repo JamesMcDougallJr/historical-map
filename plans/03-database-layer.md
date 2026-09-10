@@ -1,4 +1,23 @@
-# Phase 3 — Database layer
+# Phase 3 — Database layer · **Implemented**
+
+Built as described below, with one deliberate exception to the ownership
+boundary and one addition, both recorded here:
+
+- **The migration adds three columns to `events`** (`date_precision`,
+  `date_text`, `document_id`) — a table this connection otherwise must never
+  touch. `document_id` is a foreign key *into* `ingest_documents`, so it cannot
+  exist before this migration runs; the other two exist only to serve
+  ingestion. Every statement is `IF NOT EXISTS`, so the migration and the web
+  app's `ensureSchema()` can run in either order.
+- **`ingest_extractions` is keyed `(document_id, model_run, chunk_index)`** —
+  it *is* the chunk-level checkpoint from phase 8, not just an audit log.
+- `DocumentStatus` gained **`skipped`**, distinct from `failed`: a scan with no
+  OCR layer was fetched correctly and simply has no text, so retrying can never
+  help.
+
+Verified against a real database: 7/7 `db:verify` checks pass, the migration is
+idempotent on re-run, and `down` cleanly reverses it with all 44 existing events
+intact throughout.
 
 Ingestion writes into **the Postgres the map already reads**, adding its own tables beside the
 existing ones. No second datastore, no API hop between the workers and the map.

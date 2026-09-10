@@ -63,8 +63,13 @@ export interface SourceAdapter {
 
 /**
  * Where a document is in the pipeline. Only ever advanced by the worker that
- * owns that stage, and only flipped to FAILED once the queue has exhausted its
- * configured attempts — not on every transient blip.
+ * owns that stage, and only flipped to `failed` once the queue has exhausted
+ * its configured attempts — not on every transient blip.
+ *
+ * `skipped` is deliberately distinct from `failed`: a scanned page with no OCR
+ * layer was fetched perfectly well and simply has no text to extract. Retrying
+ * it can never succeed, so conflating the two would burn the whole retry budget
+ * on documents that are already in their terminal, correct state.
  */
 export type DocumentStatus =
   | "discovered"
@@ -73,7 +78,30 @@ export type DocumentStatus =
   | "extracting"
   | "extracted"
   | "published"
+  | "skipped"
   | "failed";
+
+/** Terminal states — nothing further will be enqueued for these documents. */
+export const TERMINAL_DOCUMENT_STATUSES = [
+  "published",
+  "skipped",
+  "failed",
+] as const satisfies readonly DocumentStatus[];
+
+/**
+ * How precisely a source dated an event. Historical text is routinely vague
+ * ("Spring 1847", "circa 1850"), and `events.date` is a `date NOT NULL` column,
+ * so a representative day always gets stored — this records how much of it to
+ * believe, and lets the timeline widen a range rather than assert a precision
+ * the source never had.
+ */
+export type DatePrecision =
+  | "day"
+  | "month"
+  | "season"
+  | "year"
+  | "decade"
+  | "circa";
 
 /**
  * What the `extract` worker produces: the parsed events plus the place strings
