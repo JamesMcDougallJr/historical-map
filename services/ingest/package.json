@@ -21,7 +21,8 @@
     "start:publish": "nest start publish --watch",
     "extract:verify": "tsx scripts/verify-extraction.ts",
     "detect:trigger": "tsx scripts/trigger-detect.ts",
-    "geocode:review": "tsx scripts/geocode-review.ts"
+    "geocode:review": "tsx scripts/geocode-review.ts",
+    "cleaning:verify": "tsx scripts/verify-cleaning.ts"
   },
   "dependencies": {
     "@bull-board/api": "^6.5.0",

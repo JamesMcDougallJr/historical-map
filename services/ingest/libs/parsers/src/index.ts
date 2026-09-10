@@ -1,3 +1,4 @@
+export * from "./cleaning";
 export * from "./document-parser.interface";
 export * from "./parser-registry.service";
 export * from "./parsers.module";
