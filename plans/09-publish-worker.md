@@ -1,4 +1,18 @@
-# Phase 9 — `publish` worker
+# Phase 9 — `publish` worker · **Implemented**
+
+Built as described, with the cross-source dedup deliberately **not** built: v1
+dedupes only on the deterministic event id (same source + document + title +
+date). "Bias toward under-merging" taken to its conclusion — a duplicate pin is
+visible and fixable, a wrong merge silently destroys information, and matching
+across sources needs real corpora to tune against.
+
+The confidence gate writes rejects to `ingest_review_items` with a reason
+rather than dropping them, because a gate whose rejects vanish is a silent
+delete.
+
+**Geocoding turned out to be the weakest link, demonstrated not theorised** —
+see the note in CLAUDE.md. `geocode:review` is the mitigation the cache makes
+cheap.
 
 The stage with no State Affairs equivalent. Turns an `ExtractionResult` into rows the map
 actually renders: geocode the place names, deduplicate against what already exists, write.

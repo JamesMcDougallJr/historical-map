@@ -83,6 +83,13 @@ export const envSchema = z.object({
    */
   DETECTION_LOOKBACK_DAYS: z.coerce.number().int().positive().default(365),
 
+  /**
+   * Bull Board credentials. With no password the dashboard returns 503 rather
+   * than mounting openly — it exposes every job payload and a Remove button.
+   */
+  BULL_BOARD_USER: z.string().min(1).default("admin"),
+  BULL_BOARD_PASSWORD: z.string().min(1).optional(),
+
   PORT: z.coerce.number().int().positive().optional(),
 });
 

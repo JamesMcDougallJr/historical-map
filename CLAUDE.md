@@ -147,8 +147,28 @@ npm run seed:sources --workspace=services/ingest   # creates the local-directory
 # drop .pdf/.txt/.md/.html into ./corpus, then run the detect + fetch workers
 ```
 
-Offline verifiers, none of which need network or an API key: `sources:verify`
-(adapter + all three parsers against fixtures), `db:verify`, `queue:verify`.
+Verifiers (`--workspace=services/ingest`): `sources:verify` and `extract:verify`
+need nothing at all; `db:verify` needs Postgres, `queue:verify` needs Redis.
+`extract:verify -- --live` additionally makes one real Groq call.
+
+Operator scripts: `detect:trigger`, `queue:inspect`, `queue:requeue`,
+`geocode:review`, `seed:sources`.
+
+Deploy is `docker-compose.prod.yml` layered on `docker-compose.yml`. The web app
+is **not** in it — it stays on Vercel; these workers are long-lived processes
+holding a blocking Redis poll, which is the opposite shape to a serverless
+function. Both halves share one Postgres, and `POSTGRES_URL` pointing at the
+same database the web app reads is the single most important value: a worker
+aimed elsewhere ingests happily into a void with no error anywhere.
+
+**Geocoding is the least trustworthy part of the pipeline.** Nominatim is a
+*modern* gazetteer, so historical place names resolve to whatever bears that
+name today — observed on the first real run: "Sutter's Mill" → Kuna, Idaho
+(really Coloma, California) and "Promontory Summit" → a ranch in Summit County
+(really Box Elder). Both look entirely plausible on a map. Because every place
+is resolved once and cached, `geocode:review` lists what each matched and
+`--set` corrects it for the whole corpus at once. Treat a new corpus's first
+`geocode:review` output as a required review step, not an optional one.
 
 Two invariants that are easy to break and fail silently:
 

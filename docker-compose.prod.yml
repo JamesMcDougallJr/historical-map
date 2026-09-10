@@ -1,0 +1,120 @@
+# Production overlay for the ingestion workers.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.prod up -d
+#
+# Layered on docker-compose.yml, which provides db/redis/martin. The web app is
+# NOT here — it deploys to Vercel. These workers are long-lived processes
+# holding a blocking Redis poll, which is the opposite shape to a serverless
+# function, and they share one Postgres with the web app.
+#
+# POSTGRES_URL must point at the SAME database the web app reads. It is the
+# single most important value in this file and the one whose failure is silent:
+# workers aimed elsewhere ingest happily into a void.
+
+services:
+  # One-shot migration. Every app waits for this to finish successfully, so a
+  # fresh database cannot crash-loop five workers racing to migrate it.
+  # Reuses the api image's `build` stage because that stage already has the
+  # source and dev dependencies (tsx) the migration script needs.
+  migrate:
+    build:
+      context: .
+      dockerfile: services/ingest/apps/api/Dockerfile
+      target: build
+    working_dir: /repo/services/ingest
+    command: npx tsx scripts/migrate.ts
+    environment:
+      POSTGRES_URL: ${POSTGRES_URL}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  ingest-api:
+    build:
+      context: .
+      dockerfile: services/ingest/apps/api/Dockerfile
+    environment: &ingest-env
+      NODE_ENV: production
+      POSTGRES_URL: ${POSTGRES_URL}
+      REDIS_HOST: ${REDIS_HOST:-redis}
+      REDIS_PORT: ${REDIS_PORT:-6379}
+      GROQ_API_KEY: ${GROQ_API_KEY}
+      GROQ_MODEL: ${GROQ_MODEL:-openai/gpt-oss-120b}
+      GROQ_TOKENS_PER_MINUTE: ${GROQ_TOKENS_PER_MINUTE:-8000}
+      INGEST_CORPUS_DIR: /corpus
+      GEOCODER_USER_AGENT: ${GEOCODER_USER_AGENT}
+      GEOCODER_COUNTRY_CODES: ${GEOCODER_COUNTRY_CODES:-}
+      PUBLISH_CONFIDENCE_MIN: ${PUBLISH_CONFIDENCE_MIN:-0.6}
+      PORT: 3100
+      BULL_BOARD_USER: ${BULL_BOARD_USER:-admin}
+      BULL_BOARD_PASSWORD: ${BULL_BOARD_PASSWORD:-}
+    ports:
+      - "${INGEST_API_PORT:-3100}:3100"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  ingest-detect:
+    build:
+      context: .
+      dockerfile: services/ingest/apps/workers/detect/Dockerfile
+    environment:
+      <<: *ingest-env
+      PORT: 3101
+    volumes:
+      # Read-only: the pipeline reads a corpus, it never writes to one.
+      - ${INGEST_CORPUS_DIR:-./corpus}:/corpus:ro
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  ingest-fetch:
+    build:
+      context: .
+      dockerfile: services/ingest/apps/workers/fetch/Dockerfile
+    environment:
+      <<: *ingest-env
+      PORT: 3102
+    volumes:
+      - ${INGEST_CORPUS_DIR:-./corpus}:/corpus:ro
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  ingest-extract:
+    build:
+      context: .
+      dockerfile: services/ingest/apps/workers/extract/Dockerfile
+    environment:
+      <<: *ingest-env
+      PORT: 3103
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  ingest-publish:
+    build:
+      context: .
+      dockerfile: services/ingest/apps/workers/publish/Dockerfile
+    environment:
+      <<: *ingest-env
+      PORT: 3104
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    restart: unless-stopped

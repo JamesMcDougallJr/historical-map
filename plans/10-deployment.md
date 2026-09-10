@@ -1,4 +1,16 @@
-# Phase 10 — Deployment
+# Phase 10 — Deployment · **Implemented**
+
+Per-app Dockerfiles (build context is the **repo root**, since the workspace
+root owns the lockfile and `packages/domain` ships TS source webpack must
+compile in), `docker-compose.prod.yml` layered on the dev compose, and a
+one-shot `migrate` init-container every worker gates on — so a fresh database
+cannot crash-loop five workers racing to migrate it.
+
+Bull Board is mounted at `/queues` **behind HTTP Basic auth that fails closed**:
+with no `BULL_BOARD_PASSWORD` it returns 503 rather than mounting openly. The
+pipeline this is modelled on left it unauthenticated, which is fine on
+localhost and not fine anywhere reachable — it exposes every job payload and a
+Remove button on each one.
 
 The web app is on Vercel. **The workers cannot be**, and that constraint shapes this phase.
 
