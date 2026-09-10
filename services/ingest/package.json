@@ -1,0 +1,37 @@
+{
+  "name": "@historical-map/ingest",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Ingestion engine — detect, fetch, extract, publish historical events from external archives.",
+  "scripts": {
+    "build": "nest build api && nest build detect && nest build fetch && nest build extract && nest build publish",
+    "type-check": "tsc --noEmit -p tsconfig.json",
+    "start:api": "nest start api --watch",
+    "start:detect": "nest start detect --watch",
+    "start:fetch": "nest start fetch --watch",
+    "start:extract": "nest start extract --watch",
+    "start:publish": "nest start publish --watch"
+  },
+  "dependencies": {
+    "@historical-map/domain": "*",
+    "@nestjs/common": "^11.0.1",
+    "@nestjs/config": "^4.0.0",
+    "@nestjs/core": "^11.0.1",
+    "@nestjs/platform-express": "^11.0.1",
+    "@nestjs/typeorm": "^11.0.0",
+    "bullmq": "^5.28.0",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.14.1",
+    "pg": "^8.13.1",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1",
+    "typeorm": "^0.3.20",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@nestjs/cli": "^11.0.0",
+    "@nestjs/schematics": "^11.0.0",
+    "@types/express": "^5.0.0",
+    "ts-loader": "^9.5.2"
+  }
+}

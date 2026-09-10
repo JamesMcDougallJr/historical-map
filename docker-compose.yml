@@ -1,11 +1,14 @@
-# Local geospatial stack: PostGIS + Martin vector tile server.
+# Local stack: PostGIS + Martin vector tiles, plus Redis for the ingestion queues.
 #
 #   docker compose up -d
 #   POSTGRES_URL=postgres://postgres:password@localhost:5433/db npm run seed:db
 #   NEXT_PUBLIC_MARTIN_URL=http://localhost:3001 npm run dev
 #
-# The deployed demo runs neither of these — it serves static GeoJSON from
+# The deployed demo runs none of these — it serves static GeoJSON from
 # data/map-data.json via /api/sources/[id]/features. See mcp/README.md.
+#
+# The ingestion workers (services/ingest) run on the host against these, and
+# share the same `db` — one database, one POSTGRES_URL. See plans/.
 
 services:
   db:
@@ -28,6 +31,24 @@ services:
       timeout: 5s
       retries: 10
 
+  # BullMQ's backing store. Redis owns the detection schedule, so it survives a
+  # restart of whichever worker registered it — and multiple worker replicas
+  # can register the same schedule without producing duplicate ticks.
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # appendonly so a restart doesn't drop queued jobs on the floor.
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   martin:
     image: ghcr.io/maplibre/martin:1.16.0
     restart: unless-stopped
@@ -39,3 +60,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+
+volumes:
+  # Named volume, unlike db's ./pg_data bind mount — there is nothing in the
+  # queue state worth browsing from the host.
+  redis_data:

@@ -99,7 +99,7 @@ target it runs is a plain `package.json` script.
 |---|---|
 | `/` | **Root package = the Next.js web app.** Not under `apps/` — see below. |
 | `packages/domain` | `@historical-map/domain` — event + ingestion types shared with the workers. |
-| `services/` | Ingestion workers (planned — see `plans/`). |
+| `services/ingest` | `@historical-map/ingest` — NestJS monorepo: apps `api`/`detect`/`fetch`/`extract`/`publish`, libs under `@app/*`. |
 | `plans/` | Phased plan for the ingestion engine. |
 
 **The web app is deliberately the root package.** Moving it to `apps/web` would require
@@ -114,6 +114,37 @@ a workspace can never silently reroute the web build. Don't remove those two key
 `transpilePackages`, resolved through the `@historical-map/domain` tsconfig path. Nothing has
 to build it first and there is no `dist/` to go stale. `app/map/types.ts` re-exports it with
 `export type *` (which erases at compile time), so every `@/app/map/types` import still works.
+
+#### `services/ingest` needs a monorepo-aware webpack config
+
+`services/ingest/webpack.config.js` exists because **Nest's default externals handling is
+wrong in a workspaces monorepo, and fails at runtime rather than at build time.**
+
+`nest build` externalizes `node_modules` via `webpack-node-externals`, which scans exactly one
+directory — the one beside the build. npm hoists most packages to the repo root but leaves some
+nested under `services/ingest/node_modules`. With only the local directory scanned, hoisted
+packages aren't recognised as externals and get **bundled**, while nested ones stay **external**.
+`@nestjs/core` (hoisted → bundled) and `@nestjs/typeorm` (nested → external) then hold different
+`ModuleRef` class objects, and since Nest's DI matches by class identity, boot dies with:
+
+```
+Nest can't resolve dependencies of the TypeOrmCoreModule (TypeOrmModuleOptions, ?)
+```
+
+The config scans **both** directories, which fixes it and drops each bundle from ~2.8MB to
+~19KB. `@historical-map/*` is allowlisted so it stays *bundled* — those packages are TS source,
+so an external `require()` would resolve to a `.ts` file Node can't load.
+
+#### Nx in a worktree
+
+Nx opens a daemon socket under the workspace path; from `.claude/worktrees/<name>` that path
+exceeds the OS socket-length limit and `nx run-many` fails. Run it with a short socket dir:
+
+```bash
+NX_SOCKET_DIR=$TMPDIR/nxs npx nx run-many -t type-check
+```
+
+Not an issue from the main checkout, whose path is short enough.
 
 ### The three storage tiers
 

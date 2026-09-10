@@ -7,6 +7,15 @@ import { getLocations, saveEventsData } from "./utils/storage";
 import type { HistoricalEventsData } from "./types";
 import { MapView } from "./components/MapView";
 
+/**
+ * `x-api-key` for /api/data/* when one is configured. The routes treat a
+ * missing MAP_API_KEY as "allow", so an empty header set is correct locally.
+ */
+function apiKeyHeaders(): Record<string, string> {
+  const apiKey = process.env["NEXT_PUBLIC_MAP_API_KEY"];
+  return apiKey ? { "x-api-key": apiKey } : {};
+}
+
 function MapContent(): JSX.Element {
   const [locations, setLocations] = useState<HistoricalLocation[]>([]);
   const lastUpdatedRef = useRef<string | null>(null);
@@ -27,8 +36,10 @@ function MapContent(): JSX.Element {
       setLocations(loaded);
       return;
     }
-    // First visit: seed localStorage from server data
-    fetch("/api/data/locations")
+    // First visit: seed localStorage from server data.
+    // The key must be sent here too — /api/data/locations is gated on
+    // MAP_API_KEY, so an unauthenticated seed 401s wherever it is configured.
+    fetch("/api/data/locations", { headers: apiKeyHeaders() })
       .then((res) => (res.ok ? res.json() : null))
       .then(
         (
@@ -64,7 +75,7 @@ function MapContent(): JSX.Element {
       if (paused) return;
       try {
         const res = await fetch("/api/data/locations", {
-          headers: apiKey ? { "x-api-key": apiKey } : {},
+          headers: apiKeyHeaders(),
         });
         if (!res.ok) return;
         const json = (await res.json()) as {
@@ -74,6 +85,14 @@ function MapContent(): JSX.Element {
         if (json.lastUpdated && json.lastUpdated !== lastUpdatedRef.current) {
           lastUpdatedRef.current = json.lastUpdated;
           setLocations(json.locations);
+          // Persist, or the update is in-memory only and a reload drops back
+          // to the stale localStorage copy — which is what made server-side
+          // writes look like they had silently failed.
+          saveEventsData({
+            version: "1.0.0",
+            lastUpdated: json.lastUpdated,
+            locations: json.locations,
+          });
         }
       } catch {
         // API unavailable — silently skip

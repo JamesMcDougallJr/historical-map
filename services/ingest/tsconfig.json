@@ -1,0 +1,40 @@
+{
+  "compilerOptions": {
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "declaration": true,
+    "removeComments": false,
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+    // ES2022, not ES2023: ts-loader resolves the repo-root TypeScript (5.3.3),
+    // which does not accept ES2023 as a --target. Nothing here needs it.
+    "target": "ES2022",
+    "sourceMap": true,
+    "outDir": "./dist",
+    "baseUrl": "./",
+    "incremental": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "strictNullChecks": true,
+    "noImplicitAny": true,
+    "forceConsistentCasingInFileNames": true,
+    "paths": {
+      "@app/common": ["libs/common/src"],
+      "@app/common/*": ["libs/common/src/*"],
+      "@app/database": ["libs/database/src"],
+      "@app/database/*": ["libs/database/src/*"],
+      "@app/queue": ["libs/queue/src"],
+      "@app/queue/*": ["libs/queue/src/*"],
+      "@app/sources": ["libs/sources/src"],
+      "@app/sources/*": ["libs/sources/src/*"],
+      "@app/extraction": ["libs/extraction/src"],
+      "@app/extraction/*": ["libs/extraction/src/*"],
+      "@historical-map/domain": ["../../packages/domain/src/index.ts"],
+      "@historical-map/domain/*": ["../../packages/domain/src/*"]
+    }
+  },
+  "include": ["apps/**/*.ts", "libs/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}
