@@ -12,7 +12,7 @@ import {
   DETECT_JOB_OPTIONS,
   FETCH_JOB_OPTIONS,
   detectSchedulerId,
-  extractJobId,
+  extractEventsJobId,
   fetchJobId,
 } from "../libs/queue/src";
 
@@ -93,7 +93,7 @@ async function main(): Promise<void> {
     const doc = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
     checks.push([
       "stage job IDs are distinct for one document",
-      fetchJobId(doc) !== extractJobId(doc),
+      fetchJobId(doc) !== extractEventsJobId(doc),
     ]);
 
     // 6. A scheduler entry upserts rather than duplicating — this is what makes

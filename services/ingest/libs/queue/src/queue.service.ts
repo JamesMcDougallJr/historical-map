@@ -35,8 +35,14 @@ function assertUsableJobId(id: string): string {
 export const fetchJobId = (documentId: string): string =>
   assertUsableJobId(`fetch-${documentId}`);
 
-export const extractJobId = (documentId: string): string =>
-  assertUsableJobId(`extract-${documentId}`);
+export const extractTextJobId = (documentId: string): string =>
+  assertUsableJobId(`extract-text-${documentId}`);
+
+export const extractEventsJobId = (documentId: string): string =>
+  assertUsableJobId(`extract-events-${documentId}`);
+
+export const validateJobId = (documentId: string): string =>
+  assertUsableJobId(`validate-${documentId}`);
 
 export const publishJobId = (documentId: string): string =>
   assertUsableJobId(`publish-${documentId}`);

@@ -49,6 +49,43 @@ services:
       timeout: 3s
       retries: 10
 
+  # Object storage for document originals and extracted text.
+  minio:
+    image: minio/minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # web console
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # MinIO does not create buckets on boot and nothing else here does either.
+  # One-shot, idempotent (`|| true`), runs on every `up`.
+  #
+  # The retry loop is not defensive padding: `depends_on` waits for the minio
+  # *container* to start, not for the server inside it to accept connections,
+  # and that race fails outright with `connection refused` without it.
+  minio-init:
+    image: minio/mc
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set local http://minio:9000 minioadmin minioadmin; do
+        echo 'waiting for minio...'; sleep 1;
+      done &&
+      mc mb -p local/ingest || true
+      "
+
   martin:
     image: ghcr.io/maplibre/martin:1.16.0
     restart: unless-stopped
@@ -62,6 +99,7 @@ services:
         condition: service_healthy
 
 volumes:
-  # Named volume, unlike db's ./pg_data bind mount — there is nothing in the
-  # queue state worth browsing from the host.
+  # Named volumes, unlike db's ./pg_data bind mount — there is nothing in queue
+  # state or object storage worth browsing from the host directly.
   redis_data:
+  minio_data:

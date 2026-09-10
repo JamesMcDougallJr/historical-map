@@ -6,7 +6,14 @@ import { ConfigService } from "@nestjs/config";
 import { type ExtractedEvent, findDates } from "@historical-map/domain";
 import { JobLogger } from "@app/common";
 import { IngestDocument, IngestExtraction, jsonb } from "@app/database";
-import type { TextSegment } from "@app/parsers";
+import {
+  STORAGE_SERVICE,
+  type StorageService,
+} from "@app/storage";
+import {
+  type TextArtifact,
+  parseArtifact,
+} from "@app/parsers";
 import {
   EXTRACTION_ENGINE,
   type ExtractionChunk,
@@ -14,11 +21,11 @@ import {
   chunkSegments,
 } from "@app/extraction";
 import {
-  PUBLISH_JOB_OPTIONS,
   QUEUE_NAMES,
-  type ExtractJobData,
-  type PublishJobData,
-  publishJobId,
+  VALIDATE_JOB_OPTIONS,
+  type ExtractEventsJobData,
+  type ValidateJobData,
+  validateJobId,
 } from "@app/queue";
 import type { Job, Queue } from "bullmq";
 import { Repository } from "typeorm";
@@ -27,8 +34,8 @@ import { Repository } from "typeorm";
 const DATE_CONFIDENCE_FLOOR = 0.5;
 
 @Injectable()
-export class ExtractingService {
-  private readonly jobLogger = new JobLogger(ExtractingService.name);
+export class EventExtractionService {
+  private readonly jobLogger = new JobLogger(EventExtractionService.name);
 
   constructor(
     @InjectRepository(IngestDocument)
@@ -36,12 +43,13 @@ export class ExtractingService {
     @InjectRepository(IngestExtraction)
     private readonly extractionRepo: Repository<IngestExtraction>,
     @Inject(EXTRACTION_ENGINE) private readonly engine: ExtractionEngine,
-    @InjectQueue(QUEUE_NAMES.PUBLISH)
-    private readonly publishQueue: Queue<PublishJobData>,
+    @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
+    @InjectQueue(QUEUE_NAMES.VALIDATE)
+    private readonly validateQueue: Queue<ValidateJobData>,
     private readonly config: ConfigService,
   ) {}
 
-  async extract(job: Job<ExtractJobData>): Promise<void> {
+  async extract(job: Job<ExtractEventsJobData>): Promise<void> {
     const { documentId } = job.data;
     const document = await this.documentRepo.findOne({
       where: { id: documentId },
@@ -50,25 +58,43 @@ export class ExtractingService {
       await this.jobLogger.log(job, `document ${documentId} not found`);
       return;
     }
-    if (document.status === "extracted" || document.status === "published") {
+    if (["events_ready", "validated", "published"].includes(document.status)) {
       await this.jobLogger.log(job, `already ${document.status} — skipping`);
       return;
     }
-    if (!document.extractedText) {
-      await this.jobLogger.log(job, "no text to extract from — skipping");
+    if (!document.textKey) {
+      await this.jobLogger.log(job, "no text artifact — extract-text has not run");
       return;
     }
 
-    // Resuming an interrupted run reuses its id so completed chunks still
-    // count; a fresh run gets a new one so a re-extraction under a different
-    // model never collides with the old rows.
-    const modelRun = job.data.modelRun ?? randomUUID();
+    // Resuming reuses the run id so completed chunks still count; a genuinely
+    // fresh run gets a new one so re-extraction never collides with old rows.
+    //
+    // The id is also persisted on the document, because `job.updateData` only
+    // survives a *retry* of the same job. Once a job fails permanently — which
+    // is exactly when a chunked 40-minute extraction is most likely to die —
+    // a requeued job is a new job with empty data, and without this the whole
+    // document would silently restart from chunk 0 and re-buy every chunk.
+    const modelRun =
+      job.data.modelRun ??
+      (document.metadata["modelRun"] as string | undefined) ??
+      randomUUID();
 
-    await this.documentRepo.update(documentId, { status: "extracting" });
+    await this.documentRepo.update(documentId, {
+      status: "extracting_events",
+      metadata: jsonb({ ...document.metadata, modelRun }),
+    });
 
     try {
+      // Segments come out of the stored artifact as an array. No re-splitting
+      // joined text and zipping against a parallel anchor list — that round
+      // trip silently collapsed a whole book into one oversized chunk whenever
+      // the counts disagreed.
+      const artifact: TextArtifact = parseArtifact(
+        await this.storage.getObject(document.textKey),
+      );
       const chunks = chunkSegments(
-        this.segmentsFor(document),
+        artifact.segments,
         this.config.get<number>("EXTRACT_CHUNK_TOKENS") ?? 3000,
       );
 
@@ -98,7 +124,7 @@ export class ExtractingService {
       }
 
       await this.documentRepo.update(documentId, {
-        status: "extracted",
+        status: "events_ready",
         extractedAt: new Date(),
         errorMessage: null,
       });
@@ -108,10 +134,10 @@ export class ExtractingService {
         `chunks=${chunks.length} no-date-skipped=${skipped} events=${extracted} run=${modelRun}`,
       );
 
-      await this.publishQueue.add(
-        "publish-document",
+      await this.validateQueue.add(
+        "validate-document",
         { documentId, modelRun },
-        { jobId: publishJobId(documentId), ...PUBLISH_JOB_OPTIONS },
+        { jobId: validateJobId(documentId), ...VALIDATE_JOB_OPTIONS },
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -125,23 +151,6 @@ export class ExtractingService {
       await job.updateData({ ...job.data, modelRun });
       throw error;
     }
-  }
-
-  /**
-   * Segment anchors are recorded by `fetch`, but their text is not — only the
-   * joined document is stored. Splitting it back on the blank line the parsers
-   * join with recovers them; if the counts disagree, fall back to treating the
-   * document as one segment rather than mis-attributing anchors.
-   */
-  private segmentsFor(document: IngestDocument): TextSegment[] {
-    const anchors =
-      (document.metadata["segments"] as string[] | undefined) ?? [];
-    const parts = (document.extractedText ?? "").split("\n\n");
-
-    if (anchors.length !== parts.length) {
-      return [{ text: document.extractedText ?? "", anchor: "whole" }];
-    }
-    return parts.map((text, i) => ({ text, anchor: anchors[i] ?? `#${i}` }));
   }
 
   private async completedChunkIndices(

@@ -43,6 +43,10 @@ services:
       GROQ_MODEL: ${GROQ_MODEL:-openai/gpt-oss-120b}
       GROQ_TOKENS_PER_MINUTE: ${GROQ_TOKENS_PER_MINUTE:-8000}
       INGEST_CORPUS_DIR: /corpus
+      S3_ENDPOINT: ${S3_ENDPOINT:-http://minio:9000}
+      S3_BUCKET: ${S3_BUCKET:-ingest}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-minioadmin}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-minioadmin}
       GEOCODER_USER_AGENT: ${GEOCODER_USER_AGENT}
       GEOCODER_COUNTRY_CODES: ${GEOCODER_COUNTRY_CODES:-}
       PUBLISH_CONFIDENCE_MIN: ${PUBLISH_CONFIDENCE_MIN:-0.6}
@@ -91,10 +95,40 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  ingest-extract:
+  ingest-extract-text:
     build:
       context: .
-      dockerfile: services/ingest/apps/workers/extract/Dockerfile
+      dockerfile: services/ingest/apps/workers/extract-text/Dockerfile
+    environment:
+      <<: *ingest-env
+      PORT: 3105
+    volumes:
+      - ${INGEST_CORPUS_DIR:-./corpus}:/corpus:ro
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  ingest-validate:
+    build:
+      context: .
+      dockerfile: services/ingest/apps/workers/validate/Dockerfile
+    environment:
+      <<: *ingest-env
+      PORT: 3106
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  ingest-extract-events:
+    build:
+      context: .
+      dockerfile: services/ingest/apps/workers/extract-events/Dockerfile
     environment:
       <<: *ingest-env
       PORT: 3103

@@ -23,7 +23,23 @@ export interface FetchJobData {
   documentId: string;
 }
 
-export interface ExtractJobData {
+export interface ExtractTextJobData {
+  documentId: string;
+
+  /**
+   * Re-clean even if the stored artifact is already at the current extractor
+   * version — for testing a rule change against one document without bumping
+   * the version for the whole corpus.
+   */
+  force?: boolean;
+}
+
+export interface ValidateJobData {
+  documentId: string;
+  modelRun?: string;
+}
+
+export interface ExtractEventsJobData {
   documentId: string;
 
   /**

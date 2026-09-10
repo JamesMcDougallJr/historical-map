@@ -2,15 +2,15 @@ import { Module } from "@nestjs/common";
 import { AppConfigModule, HealthController } from "@app/common";
 import { DatabaseModule } from "@app/database";
 import { QueueModule } from "@app/queue";
-import { ExtractingModule } from "./extracting/extracting.module";
+import { ValidationModule } from "./validation/validation.module";
 
 @Module({
   imports: [
     AppConfigModule,
     DatabaseModule,
     QueueModule.forRoot(),
-    ExtractingModule,
+    ValidationModule,
   ],
   controllers: [HealthController],
 })
-export class ExtractModule {}
+export class ValidateModule {}

@@ -5,7 +5,8 @@
   "monorepo": true,
   "root": "apps/api",
   "compilerOptions": {
-    "deleteOutDir": true,
+    "_deleteOutDirNote": "MUST stay false. It is per-invocation, not per-app: `nest build detect` with it on wipes dist/ entirely, deleting the other six apps bundles. Symptom is a worker dying with MODULE_NOT_FOUND for code that just built fine. Clean explicitly with rm -rf dist instead.",
+    "deleteOutDir": false,
     "webpack": true,
     "webpackConfigPath": "webpack.config.js",
     "tsConfigPath": "apps/api/tsconfig.app.json"
@@ -36,15 +37,6 @@
       "sourceRoot": "apps/workers/fetch/src",
       "compilerOptions": {
         "tsConfigPath": "apps/workers/fetch/tsconfig.app.json"
-      }
-    },
-    "extract": {
-      "type": "application",
-      "root": "apps/workers/extract",
-      "entryFile": "main",
-      "sourceRoot": "apps/workers/extract/src",
-      "compilerOptions": {
-        "tsConfigPath": "apps/workers/extract/tsconfig.app.json"
       }
     },
     "publish": {
@@ -117,6 +109,42 @@
       "sourceRoot": "libs/geocoding/src",
       "compilerOptions": {
         "tsConfigPath": "libs/geocoding/tsconfig.lib.json"
+      }
+    },
+    "storage": {
+      "type": "library",
+      "root": "libs/storage",
+      "entryFile": "index",
+      "sourceRoot": "libs/storage/src",
+      "compilerOptions": {
+        "tsConfigPath": "libs/storage/tsconfig.lib.json"
+      }
+    },
+    "extract-text": {
+      "type": "application",
+      "root": "apps/workers/extract-text",
+      "entryFile": "main",
+      "sourceRoot": "apps/workers/extract-text/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/workers/extract-text/tsconfig.app.json"
+      }
+    },
+    "extract-events": {
+      "type": "application",
+      "root": "apps/workers/extract-events",
+      "entryFile": "main",
+      "sourceRoot": "apps/workers/extract-events/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/workers/extract-events/tsconfig.app.json"
+      }
+    },
+    "validate": {
+      "type": "application",
+      "root": "apps/workers/validate",
+      "entryFile": "main",
+      "sourceRoot": "apps/workers/validate/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/workers/validate/tsconfig.app.json"
       }
     }
   }

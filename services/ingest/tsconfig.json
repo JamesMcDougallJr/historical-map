@@ -29,6 +29,8 @@
       "@app/queue/*": ["libs/queue/src/*"],
       "@app/geocoding": ["libs/geocoding/src"],
       "@app/geocoding/*": ["libs/geocoding/src/*"],
+      "@app/storage": ["libs/storage/src"],
+      "@app/storage/*": ["libs/storage/src/*"],
       "@app/parsers": ["libs/parsers/src"],
       "@app/parsers/*": ["libs/parsers/src/*"],
       "@app/sources": ["libs/sources/src"],

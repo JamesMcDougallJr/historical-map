@@ -2,8 +2,14 @@ import type { JobsOptions } from "bullmq";
 
 export const QUEUE_NAMES = {
   DETECT: "detect",
+  /** Retrieval only: bytes in, original stored in object storage. */
   FETCH: "fetch",
-  EXTRACT: "extract",
+  /** Bytes out of storage, cleaned text artifact back in. No model involved. */
+  EXTRACT_TEXT: "extract-text",
+  /** Text to events, via the model. The only stage that costs money. */
+  EXTRACT_EVENTS: "extract-events",
+  /** Judges events and decides publish vs review. */
+  VALIDATE: "validate",
   PUBLISH: "publish",
 } as const;
 
@@ -40,6 +46,29 @@ export const FETCH_JOB_OPTIONS: JobsOptions = {
 };
 
 /**
+ * CPU-bound and free — no external service to be patient with. A failure here
+ * is usually a malformed document, which retrying will not fix, so the budget
+ * is deliberately smaller than `fetch`'s.
+ */
+export const EXTRACT_TEXT_JOB_OPTIONS: JobsOptions = {
+  attempts: 3,
+  backoff: { type: "exponential", delay: 5_000 },
+  removeOnComplete: 200,
+  removeOnFail: 2_000,
+};
+
+/**
+ * Pure computation over data already in hand — no network, no model. Retries
+ * exist only for transient database trouble.
+ */
+export const VALIDATE_JOB_OPTIONS: JobsOptions = {
+  attempts: 3,
+  backoff: { type: "exponential", delay: 5_000 },
+  removeOnComplete: 200,
+  removeOnFail: 2_000,
+};
+
+/**
  * Expensive: every attempt costs real money at the model. Fewer attempts here
  * than `fetch` on purpose — and the in-job chunk checkpoint
  * (`ingest_extractions`) matters far more than this number, because it stops a
@@ -66,7 +95,9 @@ export const PUBLISH_JOB_OPTIONS: JobsOptions = {
 export const JOB_OPTIONS_BY_QUEUE: Record<QueueName, JobsOptions> = {
   [QUEUE_NAMES.DETECT]: DETECT_JOB_OPTIONS,
   [QUEUE_NAMES.FETCH]: FETCH_JOB_OPTIONS,
-  [QUEUE_NAMES.EXTRACT]: EXTRACT_JOB_OPTIONS,
+  [QUEUE_NAMES.EXTRACT_TEXT]: EXTRACT_TEXT_JOB_OPTIONS,
+  [QUEUE_NAMES.EXTRACT_EVENTS]: EXTRACT_JOB_OPTIONS,
+  [QUEUE_NAMES.VALIDATE]: VALIDATE_JOB_OPTIONS,
   [QUEUE_NAMES.PUBLISH]: PUBLISH_JOB_OPTIONS,
 };
 

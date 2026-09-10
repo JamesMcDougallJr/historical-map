@@ -24,6 +24,18 @@ export const envSchema = z.object({
   REDIS_PORT: z.coerce.number().int().positive().default(6379),
 
   /**
+   * Object storage. MinIO locally, any S3 in production — only S3_ENDPOINT
+   * differs. Holds the original bytes and the cleaned-text artifact; keeping
+   * the original is what lets `extract-text` re-run new cleaning rules without
+   * going back to the source.
+   */
+  S3_ENDPOINT: z.string().min(1).optional(),
+  S3_REGION: z.string().min(1).default("auto"),
+  S3_BUCKET: z.string().min(1).default("ingest"),
+  S3_ACCESS_KEY_ID: z.string().min(1).optional(),
+  S3_SECRET_ACCESS_KEY: z.string().min(1).optional(),
+
+  /**
    * Directory the `local-directory` source scans. Relative paths resolve
    * against the process cwd, so a worker started from the repo root picks up
    * `./corpus` without configuration.
@@ -39,10 +51,13 @@ export const envSchema = z.object({
    * boundaries, so this is a target rather than a hard cap — a single page
    * larger than this is still sent whole rather than split mid-page.
    *
-   * Sized against the free tier's 8,000 tokens/minute: ~3K in leaves room for
-   * the response and a little headroom inside a one-minute window.
+   * Sized against the free tier's 8,000 tokens/minute, and note what Groq
+   * actually meters: input PLUS the output reservation. With a 1,500-token
+   * completion ceiling, a 2,000-token chunk reserves ~3,900 per request, which
+   * fits two requests per minute. A 3,000-token chunk reserved ~6,000 and
+   * managed barely one.
    */
-  EXTRACT_CHUNK_TOKENS: z.coerce.number().int().positive().default(3000),
+  EXTRACT_CHUNK_TOKENS: z.coerce.number().int().positive().default(2000),
 
   /** Tokens/minute to throttle against. Raise this on a paid key. */
   GROQ_TOKENS_PER_MINUTE: z.coerce.number().int().positive().default(8000),
@@ -73,7 +88,9 @@ export const envSchema = z.object({
   // time, before DI exists) — validated here purely so a bad value fails fast.
   DETECT_CONCURRENCY: z.coerce.number().int().positive().default(1),
   FETCH_CONCURRENCY: z.coerce.number().int().positive().default(4),
+  EXTRACT_TEXT_CONCURRENCY: z.coerce.number().int().positive().default(2),
   EXTRACT_CONCURRENCY: z.coerce.number().int().positive().default(2),
+  VALIDATE_CONCURRENCY: z.coerce.number().int().positive().default(4),
   PUBLISH_CONCURRENCY: z.coerce.number().int().positive().default(2),
 
   /**

@@ -71,15 +71,38 @@ export interface SourceAdapter {
  * it can never succeed, so conflating the two would burn the whole retry budget
  * on documents that are already in their terminal, correct state.
  */
-export type DocumentStatus =
-  | "discovered"
-  | "fetching"
-  | "fetched"
-  | "extracting"
-  | "extracted"
-  | "published"
-  | "skipped"
-  | "failed";
+export const DOCUMENT_STATUSES = [
+  "discovered",
+  "fetching",
+  /** Original bytes stored. Text has not been extracted yet. */
+  "fetched",
+  "extracting_text",
+  /** Cleaned text artifact written to object storage. */
+  "text_ready",
+  "extracting_events",
+  /** Model has produced events; they have not been judged yet. */
+  "events_ready",
+  "validating",
+  /** Events judged; candidates written. */
+  "validated",
+  "published",
+  "skipped",
+  "failed",
+] as const;
+
+/**
+ * Derived from the array rather than declared alongside it, so the runtime list
+ * and the compile-time union cannot disagree.
+ *
+ * This is not stylistic. `verify-database.ts` asserts that the database CHECK
+ * accepts every status the domain defines — a claim it can only make if it can
+ * *enumerate* them at runtime. When the union was the source of truth, the
+ * verifier had to restate the list by hand, and the two drifted the moment
+ * stages were added: the check kept passing against `extracting`/`extracted`
+ * long after both had been renamed, which is precisely the failure it exists to
+ * catch.
+ */
+export type DocumentStatus = (typeof DOCUMENT_STATUSES)[number];
 
 /** Terminal states — nothing further will be enqueued for these documents. */
 export const TERMINAL_DOCUMENT_STATUSES = [
@@ -150,4 +173,22 @@ export interface ExtractionResult {
   /** Model identifier, for reproducing or re-running an extraction. */
   model: string;
   extractedAt: string;
+}
+
+/**
+ * What the `validate` stage decided about one extracted event.
+ *
+ * `review` is not failure — it is the honest answer when the pipeline cannot
+ * vouch for something. A confidence gate whose rejects vanish is a silent
+ * delete, and the failure mode is a corpus that quietly ingests half of itself.
+ */
+export type EventVerdict = "publish" | "review";
+
+/** One check the validator ran, and what it found. */
+export interface ValidationCheck {
+  name: string;
+  passed: boolean;
+  /** Whether failing this check forces `review`, or is merely recorded. */
+  gating: boolean;
+  detail?: string;
 }

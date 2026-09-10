@@ -1,17 +1,16 @@
 import { GeocodeCache } from "./geocode-cache.entity";
 import { IngestDocument } from "./ingest-document.entity";
+import { IngestEventCandidate } from "./ingest-event-candidate.entity";
 import { IngestExtraction } from "./ingest-extraction.entity";
-import { IngestReviewItem } from "./ingest-review-item.entity";
 import { IngestSource } from "./ingest-source.entity";
 
 export {
   GeocodeCache,
   IngestDocument,
+  IngestEventCandidate,
   IngestExtraction,
-  IngestReviewItem,
   IngestSource,
 };
-export type { ReviewReason } from "./ingest-review-item.entity";
 
 /**
  * Explicit list rather than a glob. Two reasons, and the second is the one that
@@ -27,6 +26,6 @@ export const INGEST_ENTITIES = [
   IngestSource,
   IngestDocument,
   IngestExtraction,
+  IngestEventCandidate,
   GeocodeCache,
-  IngestReviewItem,
 ];

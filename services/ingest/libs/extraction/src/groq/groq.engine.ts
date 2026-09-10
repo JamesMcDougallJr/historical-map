@@ -19,6 +19,31 @@ const MAX_ATTEMPTS_PER_CHUNK = 3;
 const RETRY_BASE_DELAY_MS = 2_000;
 
 /**
+ * Output ceiling. Groq charges the *reservation* against tokens-per-minute, not
+ * the actual completion — with no ceiling set, a 429 on a ~2,400-token chunk
+ * reported `Requested 6018`.
+ *
+ * **2,500 is empirically the floor, not a guess.** `gpt-oss-120b` is a
+ * reasoning model and its reasoning tokens are billed as completion: a measured
+ * call spent 898 of 1,334 completion tokens on reasoning alone. Setting 1,500
+ * looked like a throughput win and instead produced
+ * `json_validate_failed` with an EMPTY `failed_generation` — the budget was
+ * exhausted before any JSON was emitted. The failure mode of setting this too
+ * low is a hard 400, not a truncated result.
+ */
+const MAX_COMPLETION_TOKENS = 2_500;
+
+/**
+ * Extraction is mechanical: find the events, fill the schema. It does not need
+ * deep deliberation, and on this model deliberation is most of the bill.
+ *
+ * Measured on the same input: default effort spent 898 reasoning tokens for 5
+ * events; `low` spent 249 for **the same 5 events** — 24% fewer total tokens
+ * for identical output. This is the cheapest quality-neutral saving available.
+ */
+const REASONING_EFFORT = "low";
+
+/**
  * Marker for failures worth retrying. The retry loop keys on `instanceof` and
  * rethrows anything else immediately — so classification happens once, at the
  * HTTP boundary, rather than being re-derived at each layer.
@@ -60,7 +85,13 @@ export class GroqExtractionEngine implements ExtractionEngine {
 
   async extractChunk(chunk: ExtractionChunk): Promise<ExtractedEvent[]> {
     const userPrompt = buildUserPrompt(chunk.text, chunk.anchors);
-    const estimated = estimateTokens(SYSTEM_PROMPT + userPrompt);
+
+    // Reserve input **plus the output ceiling**, because that is what Groq
+    // counts against TPM. Budgeting on input alone under-reserves by more than
+    // half, so the bucket waves requests through that then 429 — pacing has to
+    // model the same quantity the server is enforcing.
+    const estimated =
+      estimateTokens(SYSTEM_PROMPT + userPrompt) + MAX_COMPLETION_TOKENS;
 
     await this.bucket.take(estimated);
 
@@ -117,6 +148,10 @@ export class GroqExtractionEngine implements ExtractionEngine {
         },
         body: JSON.stringify({
           model: this.model,
+          // Explicit ceiling — see MAX_COMPLETION_TOKENS. Without it Groq
+          // reserves the model default against TPM.
+          max_completion_tokens: MAX_COMPLETION_TOKENS,
+          reasoning_effort: REASONING_EFFORT,
           messages: [
             { role: "system", content: SYSTEM_PROMPT },
             { role: "user", content: userPrompt },
@@ -125,9 +160,14 @@ export class GroqExtractionEngine implements ExtractionEngine {
             type: "json_schema",
             json_schema: {
               name: "historical_events",
-              // `strict` DEFAULTS TO FALSE. Without it the response is
-              // best-effort: valid JSON that may not match the schema, and
-              // which can also 400. This one word is the whole guarantee.
+              // `strict` DEFAULTS TO FALSE, and must be set explicitly.
+              //
+              // It buys less than the docs imply: it guarantees you never
+              // RECEIVE non-conforming JSON, not that the model never
+              // GENERATES it. When generation does not conform, Groq rejects
+              // the request with a 400 instead — observed on real text with an
+              // out-of-enum `datePrecision`. Hence the retry classification
+              // below; without it a single unlucky sample fails a whole chunk.
               strict: true,
               schema: EXTRACTION_JSON_SCHEMA,
             },
@@ -156,7 +196,21 @@ export class GroqExtractionEngine implements ExtractionEngine {
           parseRetryAfter(response.headers.get("retry-after")),
         );
       }
-      // 400 here usually means the schema violated a strict-mode rule.
+
+      // A 400 is usually deterministic — a malformed request, or a schema that
+      // breaks a strict-mode rule — and retrying it just burns the budget.
+      //
+      // Generation failures are the exception, and they are NOT rare in
+      // practice. Strict decoding does not mean the model always emits
+      // conforming JSON; it means Groq validates and rejects when it does not.
+      // Observed on real text: an invalid `datePrecision` enum value, and a
+      // truncated generation when the completion ceiling was too low. Both are
+      // stochastic — a second sample usually succeeds — so they are retryable
+      // while every other 400 stays fatal.
+      if (response.status === 400 && isGenerationFailure(body)) {
+        throw new RetryableGroqError(`generation failed: ${detail}`);
+      }
+
       throw new Error(`Groq request failed: ${detail}`);
     }
 
@@ -201,6 +255,19 @@ export class GroqExtractionEngine implements ExtractionEngine {
       date: event.dateIso ?? event.dateText,
     }));
   }
+}
+
+/**
+ * Did the model fail to produce conforming output, as opposed to the request
+ * being wrong? Matched on Groq's own error code and message rather than the
+ * status, because both arrive as 400.
+ */
+function isGenerationFailure(body: string): boolean {
+  return (
+    body.includes("json_validate_failed") ||
+    body.includes("does not match the expected schema") ||
+    body.includes("Failed to validate JSON")
+  );
 }
 
 /** `Retry-After` is either delta-seconds or an HTTP date. */

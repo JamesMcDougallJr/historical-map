@@ -3,8 +3,7 @@ import { Module } from "@nestjs/common";
 import { TypeOrmModule } from "@nestjs/typeorm";
 import {
   IngestDocument,
-  IngestExtraction,
-  IngestReviewItem,
+  IngestEventCandidate,
   IngestSource,
 } from "@app/database";
 import { GeocodingModule } from "@app/geocoding";
@@ -17,8 +16,7 @@ import { PublishingService } from "./publishing.service";
   imports: [
     TypeOrmModule.forFeature([
       IngestDocument,
-      IngestExtraction,
-      IngestReviewItem,
+      IngestEventCandidate,
       IngestSource,
     ]),
     GeocodingModule,

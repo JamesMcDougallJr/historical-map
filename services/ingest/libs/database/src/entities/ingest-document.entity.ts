@@ -77,15 +77,46 @@ export class IngestDocument {
   status!: DocumentStatus;
 
   /**
-   * What `fetch` extracted. Lives here rather than in object storage — this is
-   * tens of KB of text, and a Postgres column removes MinIO, the S3 config, and
-   * the whole "which host has the file" class of failure.
+   * Object-storage key for the exact source bytes, written once by `fetch`.
+   *
+   * Keeping the original is what lets `extract-text` apply new cleaning rules
+   * to the whole corpus without going back to the source — the reason
+   * retrieval and text extraction are separate stages at all.
    */
-  @Column({ name: "extracted_text", type: "text", nullable: true })
-  extractedText!: string | null;
+  @Column({ name: "original_key", type: "text", nullable: true })
+  originalKey!: string | null;
+
+  /**
+   * Object-storage key for the cleaned-text artifact (segments as JSON).
+   *
+   * The text is NOT duplicated into Postgres. Object storage is authoritative;
+   * these columns are pointers and statistics, so there is one place a given
+   * artifact can be wrong.
+   */
+  @Column({ name: "text_key", type: "text", nullable: true })
+  textKey!: string | null;
+
+  /**
+   * Which cleaning ruleset produced `text_key`. `extract-text` re-runs any
+   * document below the current version.
+   */
+  @Column({ name: "text_extractor_version", type: "integer", nullable: true })
+  textExtractorVersion!: number | null;
+
+  @Column({ name: "text_chars", type: "integer", nullable: true })
+  textChars!: number | null;
+
+  @Column({ name: "text_segments", type: "integer", nullable: true })
+  textSegments!: number | null;
 
   @Column({ name: "fetch_attempts", type: "integer", default: 0 })
   fetchAttempts!: number;
+
+  @Column({ name: "text_attempts", type: "integer", default: 0 })
+  textAttempts!: number;
+
+  @Column({ name: "validate_attempts", type: "integer", default: 0 })
+  validateAttempts!: number;
 
   @Column({ name: "extract_attempts", type: "integer", default: 0 })
   extractAttempts!: number;
@@ -96,8 +127,14 @@ export class IngestDocument {
   @Column({ name: "fetched_at", type: "timestamptz", nullable: true })
   fetchedAt!: Date | null;
 
+  @Column({ name: "text_ready_at", type: "timestamptz", nullable: true })
+  textReadyAt!: Date | null;
+
   @Column({ name: "extracted_at", type: "timestamptz", nullable: true })
   extractedAt!: Date | null;
+
+  @Column({ name: "validated_at", type: "timestamptz", nullable: true })
+  validatedAt!: Date | null;
 
   /** Pipeline finished. Named to avoid colliding with `published_at` above. */
   @Column({ name: "completed_at", type: "timestamptz", nullable: true })

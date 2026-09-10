@@ -1,11 +1,8 @@
 import { Controller, Get, Query } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
-import {
-  IngestDocument,
-  IngestReviewItem,
-  type ReviewReason,
-} from "@app/database";
-import { Repository } from "typeorm";
+import { IngestDocument, IngestEventCandidate } from "@app/database";
+import type { EventVerdict } from "@historical-map/domain";
+import { IsNull, Repository } from "typeorm";
 
 /**
  * Read-only status surface. Rows here are only ever mutated by the workers, so
@@ -17,8 +14,8 @@ export class DocumentsController {
   constructor(
     @InjectRepository(IngestDocument)
     private readonly documentRepo: Repository<IngestDocument>,
-    @InjectRepository(IngestReviewItem)
-    private readonly reviewRepo: Repository<IngestReviewItem>,
+    @InjectRepository(IngestEventCandidate)
+    private readonly candidateRepo: Repository<IngestEventCandidate>,
   ) {}
 
   /** Counts per pipeline status — the fastest read on overall health. */
@@ -35,17 +32,17 @@ export class DocumentsController {
         .groupBy("d.status")
         .getRawMany();
 
-    const byReason: Array<{ reason: string; n: string }> = await this.reviewRepo
+    const byReason: Array<{ verdict: string; n: string }> = await this.candidateRepo
       .createQueryBuilder("r")
-      .select("r.reason", "reason")
+      .select("r.verdict", "verdict")
       .addSelect("count(*)", "n")
       .where("r.resolved_at IS NULL")
-      .groupBy("r.reason")
+      .groupBy("r.verdict")
       .getRawMany();
 
     return {
       documents: Object.fromEntries(byStatus.map((r) => [r.status, Number(r.n)])),
-      review: Object.fromEntries(byReason.map((r) => [r.reason, Number(r.n)])),
+      review: Object.fromEntries(byReason.map((r) => [r.verdict, Number(r.n)])),
     };
   }
 
@@ -78,17 +75,15 @@ export class DocumentsController {
   }
 
   /** The human queue: events the pipeline declined to publish, and why. */
+  /** The human queue: events the validator declined to publish, and why. */
   @Get("review")
   async review(
-    @Query("reason") reason?: string,
+    @Query("verdict") verdict = "review",
     @Query("limit") limit = "50",
-  ): Promise<{ data: IngestReviewItem[]; total: number }> {
+  ): Promise<{ data: IngestEventCandidate[]; total: number }> {
     const take = Math.min(Number(limit) || 50, 200);
-    const [data, total] = await this.reviewRepo.findAndCount({
-      where: {
-        resolvedAt: undefined,
-        ...(reason ? { reason: reason as ReviewReason } : {}),
-      },
+    const [data, total] = await this.candidateRepo.findAndCount({
+      where: { verdict: verdict as EventVerdict, resolvedAt: IsNull() },
       order: { createdAt: "DESC" },
       take,
     });

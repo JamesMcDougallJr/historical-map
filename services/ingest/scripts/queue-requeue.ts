@@ -13,7 +13,7 @@ import { Queue } from "bullmq";
 import {
   JOB_OPTIONS_BY_QUEUE,
   QUEUE_NAMES,
-  extractJobId,
+  extractEventsJobId,
   fetchJobId,
   publishJobId,
   type QueueName,
@@ -21,7 +21,7 @@ import {
 
 const JOB_ID_BUILDERS: Partial<Record<QueueName, (id: string) => string>> = {
   [QUEUE_NAMES.FETCH]: fetchJobId,
-  [QUEUE_NAMES.EXTRACT]: extractJobId,
+  [QUEUE_NAMES.EXTRACT_EVENTS]: extractEventsJobId,
   [QUEUE_NAMES.PUBLISH]: publishJobId,
 };
 

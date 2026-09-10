@@ -1,22 +1,28 @@
 import { Injectable } from "@nestjs/common";
-import { ConfigService } from "@nestjs/config";
 import { InjectRepository } from "@nestjs/typeorm";
 import type { ExtractedEvent } from "@historical-map/domain";
 import { JobLogger } from "@app/common";
 import {
   IngestDocument,
-  IngestExtraction,
-  IngestReviewItem,
+  IngestEventCandidate,
   IngestSource,
-  type ReviewReason,
   jsonb,
 } from "@app/database";
 import { GeocodingService } from "@app/geocoding";
 import type { PublishJobData } from "@app/queue";
 import type { Job } from "bullmq";
-import { Repository } from "typeorm";
-import { MapWriterService, eventKeyFor } from "./map-writer.service";
+import { IsNull, Repository } from "typeorm";
+import { MapWriterService } from "./map-writer.service";
 
+/**
+ * Geocodes and writes. **Nothing else.**
+ *
+ * The confidence gate, date checks and duplicate detection all moved to
+ * `validate`, so this reads only candidates already marked `publish`. That
+ * split matters because judging an event and placing it are different failures:
+ * a bad event should never be written, whereas a good event that cannot be
+ * geocoded is still worth keeping — it just goes back to review.
+ */
 @Injectable()
 export class PublishingService {
   private readonly jobLogger = new JobLogger(PublishingService.name);
@@ -24,15 +30,12 @@ export class PublishingService {
   constructor(
     @InjectRepository(IngestDocument)
     private readonly documentRepo: Repository<IngestDocument>,
-    @InjectRepository(IngestExtraction)
-    private readonly extractionRepo: Repository<IngestExtraction>,
-    @InjectRepository(IngestReviewItem)
-    private readonly reviewRepo: Repository<IngestReviewItem>,
+    @InjectRepository(IngestEventCandidate)
+    private readonly candidateRepo: Repository<IngestEventCandidate>,
     @InjectRepository(IngestSource)
     private readonly sourceRepo: Repository<IngestSource>,
     private readonly geocoding: GeocodingService,
     private readonly mapWriter: MapWriterService,
-    private readonly config: ConfigService,
   ) {}
 
   async publish(job: Job<PublishJobData>): Promise<void> {
@@ -45,11 +48,6 @@ export class PublishingService {
       await this.jobLogger.log(job, `document ${documentId} not found`);
       return;
     }
-    if (document.status === "published") {
-      await this.jobLogger.log(job, "already published — skipping");
-      return;
-    }
-
     const source = await this.sourceRepo.findOne({
       where: { id: document.sourceId },
     });
@@ -58,11 +56,9 @@ export class PublishingService {
       return;
     }
 
-    const threshold = this.config.get<number>("PUBLISH_CONFIDENCE_MIN") ?? 0.6;
-
     try {
       // The map layer this source's events belong to. Without it the events
-      // would have a dangling source_id and never appear under any toggle.
+      // would carry a dangling source_id and never appear under any toggle.
       await this.mapWriter.ensureSource({
         id: source.key,
         name: source.displayName,
@@ -70,56 +66,35 @@ export class PublishingService {
         attribution: source.attribution,
       });
 
-      const events = await this.eventsFor(documentId, job.data.modelRun);
+      const candidates = await this.candidateRepo.find({
+        where: { documentId, verdict: "publish", publishedAt: IsNull() },
+      });
 
       let published = 0;
-      let duplicate = 0;
-      const reviewed: Record<string, number> = {};
-      const review = async (
-        event: ExtractedEvent,
-        key: string,
-        reason: ReviewReason,
-        detail?: string,
-      ): Promise<void> => {
-        reviewed[reason] = (reviewed[reason] ?? 0) + 1;
-        await this.toReview(documentId, key, event, reason, detail);
-      };
+      let alreadyPresent = 0;
+      let demoted = 0;
 
-      for (const event of events) {
-        // Keyed on the representative day when there is one so the id is stable
-        // even if the model rewords the date text on a later run.
-        const key = eventKeyFor(
-          source.key,
-          document.externalId,
-          event.title,
-          event.dateIso ?? event.dateText,
-        );
+      for (const candidate of candidates) {
+        const event = candidate.event as ExtractedEvent;
 
-        if (event.confidence < threshold) {
-          await review(
-            event,
-            key,
-            "low_confidence",
-            `${event.confidence} < ${threshold}`,
+        // `validate` guarantees these, but publishing is the last stop before
+        // the map and a violated invariant here is a wrong pin, so re-check.
+        if (!event.dateIso || !event.placeName) {
+          await this.demote(
+            candidate,
+            "missing date or place after validation",
           );
-          continue;
-        }
-
-        // `events.date` is `date NOT NULL`, so an event with no derivable day
-        // cannot be stored at all — it is kept for review rather than dropped.
-        if (!event.dateIso) {
-          await review(event, key, "no_date", event.dateText);
-          continue;
-        }
-
-        if (!event.placeName) {
-          await review(event, key, "geocode_failed", "no place named in text");
+          demoted++;
           continue;
         }
 
         const hit = await this.geocoding.resolve(event.placeName);
         if (!hit) {
-          await review(event, key, "geocode_failed", event.placeName);
+          // A good event we cannot place. Back to review with its reason, not
+          // discarded — `locations` requires coordinates, so it has nowhere
+          // else to live.
+          await this.demote(candidate, `geocode failed: ${event.placeName}`);
+          demoted++;
           continue;
         }
 
@@ -130,7 +105,7 @@ export class PublishingService {
         );
 
         const inserted = await this.mapWriter.insertEvent({
-          id: key,
+          id: candidate.eventKey,
           locationId,
           sourceId: source.key,
           title: event.title,
@@ -142,8 +117,11 @@ export class PublishingService {
           documentId,
         });
 
+        await this.candidateRepo.update(candidate.id, {
+          publishedAt: new Date(),
+        });
         if (inserted) published++;
-        else duplicate++;
+        else alreadyPresent++;
       }
 
       await this.documentRepo.update(documentId, {
@@ -152,13 +130,10 @@ export class PublishingService {
         errorMessage: null,
       });
 
-      const reviewSummary =
-        Object.entries(reviewed)
-          .map(([reason, n]) => `${reason}=${n}`)
-          .join(" ") || "none";
       await this.jobLogger.log(
         job,
-        `events=${events.length} published=${published} already-present=${duplicate} review: ${reviewSummary}`,
+        `candidates=${candidates.length} published=${published} ` +
+          `already-present=${alreadyPresent} demoted-to-review=${demoted}`,
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -171,50 +146,17 @@ export class PublishingService {
     }
   }
 
-  /**
-   * Flattens the chunk rows of one extraction run.
-   *
-   * Defaults to the most recent run when the job does not name one, so a
-   * re-publish after a re-extraction picks up the newer events rather than
-   * replaying the superseded ones.
-   */
-  private async eventsFor(
-    documentId: string,
-    modelRun?: string,
-  ): Promise<ExtractedEvent[]> {
-    const rows = await this.extractionRepo.find({
-      where: modelRun ? { documentId, modelRun } : { documentId },
-      order: { createdAt: "DESC", chunkIndex: "ASC" },
-    });
-    if (rows.length === 0) return [];
-
-    const run = modelRun ?? rows[0]?.modelRun;
-    return rows
-      .filter((r) => r.modelRun === run)
-      .sort((a, b) => a.chunkIndex - b.chunkIndex)
-      .flatMap((r) => r.events as ExtractedEvent[]);
-  }
-
-  private async toReview(
-    documentId: string,
-    eventKey: string,
-    event: ExtractedEvent,
-    reason: ReviewReason,
-    detail?: string,
+  /** Move a candidate back to review, recording why publishing declined it. */
+  private async demote(
+    candidate: IngestEventCandidate,
+    detail: string,
   ): Promise<void> {
-    await this.reviewRepo
-      .createQueryBuilder()
-      .insert()
-      .into(IngestReviewItem)
-      .values({
-        documentId,
-        eventKey,
-        reason,
-        detail: detail ?? null,
-        event: jsonb(event),
-      })
-      // Re-publishing the same document must not pile up review rows.
-      .orIgnore()
-      .execute();
+    await this.candidateRepo.update(candidate.id, {
+      verdict: "review",
+      checks: jsonb([
+        ...candidate.checks,
+        { name: "publish", passed: false, gating: true, detail },
+      ]) as never,
+    });
   }
 }

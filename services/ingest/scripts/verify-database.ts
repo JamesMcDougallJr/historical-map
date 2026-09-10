@@ -6,6 +6,7 @@
  *
  *   POSTGRES_URL=... npm run db:verify --workspace=services/ingest
  */
+import { DOCUMENT_STATUSES } from "@historical-map/domain";
 import type { QueryRunner } from "typeorm";
 import { createDataSource } from "../libs/database/src/data-source";
 import { IngestDocument, IngestSource } from "../libs/database/src/entities";
@@ -98,17 +99,10 @@ async function main(): Promise<void> {
 
     // 4. Every status the domain defines is actually accepted — the CHECK and
     //    the DocumentStatus union must not drift apart.
+    //    Iterating the domain's own array is the point: a hand-written copy
+    //    here silently passed for two renames, asserting nothing.
     let allStatusesAccepted = true;
-    for (const status of [
-      "discovered",
-      "fetching",
-      "fetched",
-      "extracting",
-      "extracted",
-      "published",
-      "skipped",
-      "failed",
-    ]) {
+    for (const status of DOCUMENT_STATUSES) {
       const ok = !(await expectViolation(runner, CHECK_VIOLATION, () =>
         runner.query(
           `UPDATE ingest_documents SET status = $1 WHERE source_id = $2`,
