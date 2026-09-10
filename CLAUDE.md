@@ -40,15 +40,15 @@ The two present differently:
 - **Stale JS** — edits appear to have no effect. A newly added global read `undefined` at
   runtime while being plainly present in the file the server returned for that exact URL.
 
-Verifying what is *actually applied* (not what the server would send):
+Verifying what is _actually applied_ (not what the server would send):
 
-| Ask | Do |
-|---|---|
-| Which CSS rules are in force | Walk `document.styleSheets` → `cssRules` (CSSOM reflects the applied sheet) |
+| Ask                            | Do                                                                            |
+| ------------------------------ | ----------------------------------------------------------------------------- |
+| Which CSS rules are in force   | Walk `document.styleSheets` → `cssRules` (CSSOM reflects the applied sheet)   |
 | What the server would send now | `fetch(href, { cache: 'reload' })` — a plain `fetch` can be served from cache |
-| Is the running JS current | Check for a symbol you just added, at runtime, not in the fetched text |
+| Is the running JS current      | Check for a symbol you just added, at runtime, not in the fetched text        |
 
-Server content and applied content disagreeing for the same URL *is* the bug — that
+Server content and applied content disagreeing for the same URL _is_ the bug — that
 comparison is the fastest way to confirm it rather than infer it.
 
 `rm -rf .next && npm run dev` is the reliable fix — it changes the chunk hashes, so the
@@ -61,9 +61,9 @@ assume a plain refresh picked up your change.
 `MapView` publishes two globals behind `process.env.NODE_ENV !== "production"` (stripped from
 production builds):
 
-| Global | What it is |
-|---|---|
-| `window.__olMap` | The live OpenLayers `Map` — layers, sources, view, hit testing |
+| Global             | What it is                                                                                        |
+| ------------------ | ------------------------------------------------------------------------------------------------- |
+| `window.__olMap`   | The live OpenLayers `Map` — layers, sources, view, hit testing                                    |
 | `window.__olDebug` | The popup/hover **refs** (read `.current`): `popupHovered`, `hoverTimeout`, `pinned`, `hoveredId` |
 
 They exist because the hover and popup state deliberately lives in refs rather than state —
@@ -73,9 +73,12 @@ these handles the only way to reason about "is the pointer considered inside the
 "is a close timer armed?" is to infer it from behaviour, which is slow and gets it wrong.
 
 ```js
-__olDebug.popupHovered.current          // is the map standing down for the popup?
-!!__olDebug.hoverTimeout.current        // is a close timer armed?
-__olMap.getLayers().getArray().map(l => l.get("eventLayerId"))
+__olDebug.popupHovered.current; // is the map standing down for the popup?
+!!__olDebug.hoverTimeout.current; // is a close timer armed?
+__olMap
+  .getLayers()
+  .getArray()
+  .map((l) => l.get("eventLayerId"));
 ```
 
 **Hit testing needs a rendered frame.** `forEachFeatureAtPixel` reads the last rendered frame,
@@ -95,12 +98,12 @@ inline in Claude.
 npm workspaces, with **Nx as a package-based task runner only** — it owns no build, and every
 target it runs is a plain `package.json` script.
 
-| Path | What |
-|---|---|
-| `/` | **Root package = the Next.js web app.** Not under `apps/` — see below. |
-| `packages/domain` | `@historical-map/domain` — event + ingestion types shared with the workers. |
-| `services/ingest` | `@historical-map/ingest` — NestJS monorepo: apps `api`/`detect`/`fetch`/`extract`/`publish`, libs under `@app/*`. |
-| `plans/` | Phased plan for the ingestion engine. |
+| Path              | What                                                                                                                                               |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/`               | **Root package = the Next.js web app.** Not under `apps/` — see below.                                                                             |
+| `packages/domain` | `@historical-map/domain` — event + ingestion types shared with the workers.                                                                        |
+| `services/ingest` | `@historical-map/ingest` — NestJS monorepo: apps `api`/`detect`/`fetch`/`extract-text`/`extract-events`/`validate`/`publish`, libs under `@app/*`. |
+| `plans/`          | Phased plan for the ingestion engine.                                                                                                              |
 
 **The web app is deliberately the root package.** Moving it to `apps/web` would require
 flipping the Vercel project's Root Directory, which is project-wide rather than per-branch —
@@ -132,20 +135,64 @@ Nest can't resolve dependencies of the TypeOrmCoreModule (TypeOrmModuleOptions, 
 ```
 
 The config scans **both** directories, which fixes it and drops each bundle from ~2.8MB to
-~19KB. `@historical-map/*` is allowlisted so it stays *bundled* — those packages are TS source,
+~19KB. `@historical-map/*` is allowlisted so it stays _bundled_ — those packages are TS source,
 so an external `require()` would resolve to a `.ts` file Node can't load.
 
 #### Ingestion engine
 
-`services/ingest` runs the pipeline `detect → fetch → extract → publish`. Local dev:
+`services/ingest` runs the pipeline
+`detect → fetch → extract-text → extract-events → validate → publish`.
+
+| Stage            | Owns                   | Writes                                      |
+| ---------------- | ---------------------- | ------------------------------------------- |
+| `detect`         | discovery, idempotency | `ingest_documents`                          |
+| `fetch`          | retrieval **only**     | original bytes → object storage             |
+| `extract-text`   | bytes → clean segments | text artifact → object storage              |
+| `extract-events` | text → events (Groq)   | `ingest_extractions`                        |
+| `validate`       | judging events         | `ingest_event_candidates`                   |
+| `publish`        | geocode + write        | map tables (`sources`/`locations`/`events`) |
+
+Local dev:
 
 ```bash
-docker compose up -d db redis
+docker compose up -d db redis minio
 export POSTGRES_URL=postgres://postgres:password@localhost:5433/db
+export S3_ENDPOINT=http://localhost:9000 S3_ACCESS_KEY_ID=minioadmin \
+       S3_SECRET_ACCESS_KEY=minioadmin S3_BUCKET=ingest
 npm run migrate      --workspace=services/ingest   # TypeORM migrations
 npm run seed:sources --workspace=services/ingest   # creates the local-directory source
 # drop .pdf/.txt/.md/.html into ./corpus, then run the detect + fetch workers
 ```
+
+**Why `fetch` and `extract-text` are separate jobs.** Object storage holds the
+original bytes forever, so improving a cleaning rule never re-downloads anything —
+which matters because cleaning rules change constantly. Re-extraction is
+version-driven: bump `EXTRACTOR_VERSION` in `libs/parsers/src/cleaning/`, and any
+document whose stored `text_extractor_version` is lower is re-cleaned from the
+stored original with **no network fetch**. Object storage is authoritative for
+both artifacts; Postgres keeps only keys, counts and that version.
+
+The text artifact is **structured** (`{ segments: [{ anchor, text }], stats, cleaning }`),
+not a blob. An earlier version rebuilt segments by re-splitting stored text on
+`"\n\n"` and zipping positionally against a parallel anchor array; it worked by
+luck, and a single mismatch collapses a whole book into one 95k-token chunk —
+an automatic rejection against an 8,000 TPM limit.
+
+**Cleaning is a cost model, not cosmetics.** Real PDFs put a running header on
+every page (`Original Copyright 1903 … Distributed by Heritage History 2011`,
+with the page number glued on). That defeats the `hasDate()` pre-filter — every
+chunk contains a date — and feeds the model a spurious year on every request.
+Header stripping detects furniture by **longest common prefix**, and
+`MIN_FURNITURE_LINE_RATIO` is load-bearing: without it, cleaning is not
+idempotent, because any long shared prefix of real content gets stripped too.
+
+**`validate` decides; `publish` only places.** Seven checks run before anything
+reaches the map. The grounding check — does the event's quoted `sourceText`
+actually appear in the document — is **recorded but not gating**, deliberately:
+it is the strongest hallucination signal available, and a threshold should be set
+from evidence rather than guessed. First real run: 90/131 quotes found.
+`publish` reads only `verdict = 'publish'` and demotes back to review when
+geocoding fails, since `locations` requires coordinates.
 
 Verifiers (`--workspace=services/ingest`): `sources:verify` and `extract:verify`
 need nothing at all; `db:verify` needs Postgres, `queue:verify` needs Redis.
@@ -162,7 +209,7 @@ same database the web app reads is the single most important value: a worker
 aimed elsewhere ingests happily into a void with no error anywhere.
 
 **Geocoding is the least trustworthy part of the pipeline.** Nominatim is a
-*modern* gazetteer, so historical place names resolve to whatever bears that
+_modern_ gazetteer, so historical place names resolve to whatever bears that
 name today — observed on the first real run: "Sutter's Mill" → Kuna, Idaho
 (really Coloma, California) and "Promontory Summit" → a ranch in Summit County
 (really Box Elder). Both look entirely plausible on a map. Because every place
@@ -170,7 +217,14 @@ is resolved once and cached, `geocode:review` lists what each matched and
 `--set` corrects it for the whole corpus at once. Treat a new corpus's first
 `geocode:review` output as a required review step, not an optional one.
 
-Two invariants that are easy to break and fail silently:
+Invariants that are easy to break and fail silently:
+
+- **`nest-cli.json` must keep `deleteOutDir: false`.** The flag is
+  _per-invocation, not per-app_: with it on, `nest build detect` wipes `dist/`
+  entirely, deleting the other six apps' bundles. The symptom is a worker dying
+  with `MODULE_NOT_FOUND` for code that just built fine, or — worse — a worker
+  silently running a stale bundle and producing test results that look real.
+  Clean explicitly with `rm -rf dist` instead.
 
 - **Only `fetch` writes `ingest_documents.etag`.** It is the hash of the bytes
   `fetch` last turned into text, and `fetch` compares it against what it just read
@@ -182,6 +236,31 @@ Two invariants that are easy to break and fail silently:
   takes the first match and `TextParser` is a deliberate catch-all for unlabelled
   content, so it must stay last or it swallows PDFs whose server omitted a
   content type.
+- **`DocumentStatus` derives from `DOCUMENT_STATUSES`, not the reverse.**
+  `verify-database` asserts the database CHECK accepts every status the domain
+  defines, which it can only do by enumerating them at runtime. When the union
+  was the source of truth the verifier restated the list by hand and kept
+  passing against two statuses that had been renamed away.
+
+#### Groq, measured
+
+Three things about `openai/gpt-oss-120b` that cost real debugging time:
+
+- **Always set `max_completion_tokens`.** Groq charges the output _reservation_
+  against TPM, not the actual completion — without a ceiling, a ~2,400-token
+  chunk 429'd reporting `Requested 6018`. The bucket in `groq.engine.ts` must
+  reserve input **plus** that ceiling for pacing to model what the server enforces.
+- **2,500 is a measured floor.** Reasoning tokens bill as completion: one call
+  spent 898 of 1,334 on reasoning alone. Setting 1,500 looked like a throughput
+  win and produced `json_validate_failed` with an _empty_ `failed_generation` —
+  the budget was gone before any JSON was emitted. `reasoning_effort: "low"`
+  cuts that 898 → 249 for identical output; extraction is mechanical and does
+  not benefit from deliberation.
+- **`strict: true` defaults to false, and guarantees less than it sounds.** It
+  guarantees you never _receive_ non-conforming JSON — not that the model never
+  _generates_ it. When generation doesn't conform, Groq returns **400**, observed
+  on real text with an out-of-enum `datePrecision`. Those are retried; every
+  other 400 stays fatal.
 
 #### One TypeScript, pinned by path
 
@@ -209,11 +288,11 @@ Not an issue from the main checkout, whose path is short enough.
 This is the least obvious part of the codebase. Three separate stores hold the same
 `HistoricalEventsData` shape, and which one is authoritative depends on the caller:
 
-| Store | Module | Used by |
-|---|---|---|
-| `localStorage` (`'historical-events'`) | `app/map/utils/storage.ts` | browser only; SSR-guarded |
-| `data/map-data.json` | `lib/server-storage.ts` | local dev, stdio MCP server |
-| Postgres | `lib/postgres-storage.ts` | any deploy with `POSTGRES_URL` set |
+| Store                                  | Module                     | Used by                            |
+| -------------------------------------- | -------------------------- | ---------------------------------- |
+| `localStorage` (`'historical-events'`) | `app/map/utils/storage.ts` | browser only; SSR-guarded          |
+| `data/map-data.json`                   | `lib/server-storage.ts`    | local dev, stdio MCP server        |
+| Postgres                               | `lib/postgres-storage.ts`  | any deploy with `POSTGRES_URL` set |
 
 `lib/server-storage.ts` is the server-side entry point and picks its backend at call time
 on `POSTGRES_URL`. Its API mirrors the browser module's but is **async** — serverless
@@ -248,7 +327,7 @@ consume it:
 
 **CSP is the thing that breaks the inline map.** The App runs in a host-controlled sandboxed
 iframe; the host builds a CSP from `_meta.ui.csp` on the resource, and any undeclared origin
-is blocked *before the request is sent* — which renders as a blank map, not an error. The
+is blocked _before the request is sent_ — which renders as a blank map, not an error. The
 domain lists must be nested under `_meta.ui.csp`, not directly on `_meta.ui`: the schema is
 `additionalProperties: false`, so a misplaced key is silently dropped and every external
 origin gets blocked. Origins live in `TILE_ORIGINS` in `mcp/register.ts` and go in both
