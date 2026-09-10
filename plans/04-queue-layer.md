@@ -1,4 +1,17 @@
-# Phase 4 — Queue layer
+# Phase 4 — Queue layer · **Implemented**
+
+Built as described below. Two things worth recording:
+
+- The `:` rule is enforced, not just documented — `assertUsableJobId()` throws
+  before BullMQ's own opaque rejection. It matters because the one input that
+  isn't a UUID is a source key, which comes from a database row.
+- `queue:verify` proves all of it against a real Redis (8/8), including that
+  `upsertJobScheduler` really is idempotent — the property that makes
+  boot-time registration safe under multiple `detect` replicas.
+
+`QueueModule` is deliberately **not yet imported by any app**: doing so before a
+queue or processor exists would open a live Redis connection at boot for no
+functional benefit. Phase 6 wires it in.
 
 `libs/queue` — BullMQ contracts shared by every worker. No processors here; each app's feature
 module registers its own queue using these constants.

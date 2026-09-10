@@ -9,6 +9,9 @@
     "migrate": "tsx scripts/migrate.ts",
     "migrate:revert": "tsx scripts/migrate.ts --revert",
     "db:verify": "tsx scripts/verify-database.ts",
+    "queue:verify": "tsx scripts/verify-queue.ts",
+    "queue:inspect": "tsx scripts/queue-inspect.ts",
+    "queue:requeue": "tsx scripts/queue-requeue.ts",
     "start:api": "nest start api --watch",
     "start:detect": "nest start detect --watch",
     "start:fetch": "nest start fetch --watch",
@@ -17,6 +20,7 @@
   },
   "dependencies": {
     "@historical-map/domain": "*",
+    "@nestjs/bullmq": "^11.0.1",
     "@nestjs/common": "^11.0.1",
     "@nestjs/config": "^4.0.0",
     "@nestjs/core": "^11.0.1",

@@ -59,6 +59,13 @@
       "entryFile": "index",
       "sourceRoot": "libs/database/src",
       "compilerOptions": { "tsConfigPath": "libs/database/tsconfig.lib.json" }
+    },
+    "queue": {
+      "type": "library",
+      "root": "libs/queue",
+      "entryFile": "index",
+      "sourceRoot": "libs/queue/src",
+      "compilerOptions": { "tsConfigPath": "libs/queue/tsconfig.lib.json" }
     }
   }
 }
