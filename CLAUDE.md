@@ -135,6 +135,44 @@ The config scans **both** directories, which fixes it and drops each bundle from
 ~19KB. `@historical-map/*` is allowlisted so it stays *bundled* — those packages are TS source,
 so an external `require()` would resolve to a `.ts` file Node can't load.
 
+#### Ingestion engine
+
+`services/ingest` runs the pipeline `detect → fetch → extract → publish`. Local dev:
+
+```bash
+docker compose up -d db redis
+export POSTGRES_URL=postgres://postgres:password@localhost:5433/db
+npm run migrate      --workspace=services/ingest   # TypeORM migrations
+npm run seed:sources --workspace=services/ingest   # creates the local-directory source
+# drop .pdf/.txt/.md/.html into ./corpus, then run the detect + fetch workers
+```
+
+Offline verifiers, none of which need network or an API key: `sources:verify`
+(adapter + all three parsers against fixtures), `db:verify`, `queue:verify`.
+
+Two invariants that are easy to break and fail silently:
+
+- **Only `fetch` writes `ingest_documents.etag`.** It is the hash of the bytes
+  `fetch` last turned into text, and `fetch` compares it against what it just read
+  to decide whether anything changed. If `detect` also wrote it when flagging a
+  changed document, the two would already match, `fetch` would take its unchanged
+  short-circuit, and the document would keep stale text forever while every status
+  field reported success.
+- **Parser registration order in `parsers.module.ts`.** `ParserRegistry.select`
+  takes the first match and `TextParser` is a deliberate catch-all for unlabelled
+  content, so it must stay last or it swallows PDFs whose server omitted a
+  content type.
+
+#### One TypeScript, pinned by path
+
+`services/ingest`'s `type-check` script invokes `../../node_modules/typescript/bin/tsc`
+by path rather than the bare binary. `@nestjs/cli` depends on an exact
+`typescript@5.9.3`, which npm nests under `services/ingest/node_modules` where it
+wins `.bin` precedence — while `ts-loader`, which actually compiles the code, resolves
+the root's `5.3.3`. The two disagree (`RegExpMatchArray.index` is optional in 5.3.3
+and not in 5.9.3), so a bare `tsc` passes on code `nest build` then rejects. Pointing
+the script at the root compiler makes the gate match the build.
+
 #### Nx in a worktree
 
 Nx opens a daemon socket under the workspace path; from `.claude/worktrees/<name>` that path

@@ -1,17 +1,24 @@
 import { Module } from "@nestjs/common";
 import { AppConfigModule, HealthController } from "@app/common";
 import { DatabaseModule } from "@app/database";
+import { QueueModule } from "@app/queue";
+import { DetectionModule } from "./detection/detection.module";
 
 /**
  * Root module for the `detect` app. AppConfigModule must come first — it is
- * `isGlobal`, and DatabaseModule's factory injects the ConfigService it
- * publishes.
+ * `isGlobal`, and both DatabaseModule and QueueModule inject the ConfigService
+ * it publishes.
  *
- * Queues, processors and feature modules are added in later phases; today this
- * boots, validates its environment, connects to Postgres, and idles.
+ * This is the app that makes the system actually run: it owns the BullMQ Job
+ * Scheduler registration that fires every polling tick.
  */
 @Module({
-  imports: [AppConfigModule, DatabaseModule],
+  imports: [
+    AppConfigModule,
+    DatabaseModule,
+    QueueModule.forRoot(),
+    DetectionModule,
+  ],
   controllers: [HealthController],
 })
 export class DetectModule {}

@@ -74,6 +74,9 @@ const HEADING_RE = /<h[1-3]\b[^>]*>([\s\S]*?)<\/h[1-3]>/gi;
 function splitOnHeadings(html: string): TextSegment[] {
   const boundaries: Array<{ index: number; title: string }> = [];
   for (const match of html.matchAll(HEADING_RE)) {
+    // `index` is optional on a match result. It is always present for a
+    // non-sticky global regex, but narrowing beats asserting.
+    if (match.index === undefined) continue;
     boundaries.push({
       index: match.index,
       title: toText(match[1] ?? "").slice(0, 80),
