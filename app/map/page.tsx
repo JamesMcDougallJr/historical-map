@@ -2,10 +2,11 @@
 
 import { useEffect, useState, useRef, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
-import type { HistoricalLocation } from "./types";
+import type { EventLayer, EventSource, HistoricalLocation } from "./types";
 import { getLocations, saveEventsData } from "./utils/storage";
 import type { HistoricalEventsData } from "./types";
 import { MapView } from "./components/MapView";
+import { eventLayersFromSources, getEventLayers } from "./utils/event-layers";
 
 /**
  * `x-api-key` for /api/data/* when one is configured. The routes treat a
@@ -19,6 +20,38 @@ function apiKeyHeaders(): Record<string, string> {
 function MapContent(): JSX.Element {
   const [locations, setLocations] = useState<HistoricalLocation[]>([]);
   const lastUpdatedRef = useRef<string | null>(null);
+
+  // Event layers come from the server's source list, so a source the ingestion
+  // pipeline published gets a layer without a code change.
+  //
+  // `null` means "not resolved yet" and deliberately blocks the first render:
+  // MapView seeds its layer state with a lazy `useState` initializer, so a
+  // layer list that arrives after mount is silently ignored. Rendering early
+  // with a default would therefore pin the map to the hardcoded demo layer for
+  // the rest of the session.
+  const [eventLayers, setEventLayers] = useState<EventLayer[] | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/sources", { headers: apiKeyHeaders() })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((json: { sources?: EventSource[] } | null) => {
+        if (cancelled) return;
+        setEventLayers(
+          json?.sources?.length
+            ? eventLayersFromSources(json.sources)
+            : getEventLayers(),
+        );
+      })
+      .catch(() => {
+        // Fall back to the static registry rather than rendering no layers at
+        // all — the deployed demo has no database to list sources from.
+        if (!cancelled) setEventLayers(getEventLayers());
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Reload from localStorage on mount and when returning from import
   const searchParams = useSearchParams();
@@ -109,7 +142,15 @@ function MapContent(): JSX.Element {
     setLocations(getLocations());
   };
 
-  return <MapView locations={locations} onRefresh={handleRefresh} />;
+  if (!eventLayers) return <div>Loading map...</div>;
+
+  return (
+    <MapView
+      locations={locations}
+      initialEventLayers={eventLayers}
+      onRefresh={handleRefresh}
+    />
+  );
 }
 
 export default function Page(): JSX.Element {

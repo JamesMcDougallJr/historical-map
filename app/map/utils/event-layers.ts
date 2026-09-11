@@ -7,10 +7,34 @@
 // nothing to hammer. Set NEXT_PUBLIC_MARTIN_URL locally to additionally get the
 // live PostGIS layer, so both can be enabled at once and compared.
 
-import type { EventLayer } from "../types";
+import type { EventLayer, EventSource } from "../types";
 
 /** Source id of the events seeded from data/map-data.json. */
 export const DEMO_SOURCE_ID = "utah-historical";
+
+/**
+ * Build a layer per event source.
+ *
+ * The registry was previously a hardcoded list of one id, which meant any
+ * source beyond the seeded demo — anything the ingestion pipeline published —
+ * had no layer and therefore never appeared, however correctly it had been
+ * written to the database. Deriving the list from `sources` makes a newly
+ * published source visible without a code change, which is the whole point of
+ * the pipeline writing a `sources` row in the first place.
+ */
+export function eventLayersFromSources(sources: EventSource[]): EventLayer[] {
+  const layers: EventLayer[] = sources.map((source) => ({
+    id: source.id,
+    name: source.name,
+    kind: "geojson",
+    url: `/api/sources/${source.id}/features`,
+    ...(source.attribution ? { attribution: source.attribution } : {}),
+    ...(source.color ? { color: source.color } : {}),
+    enabled: true,
+  }));
+
+  return withMartinLayer(layers);
+}
 
 export function getEventLayers(): EventLayer[] {
   const layers: EventLayer[] = [
@@ -25,6 +49,15 @@ export function getEventLayers(): EventLayer[] {
     },
   ];
 
+  return withMartinLayer(layers);
+}
+
+/**
+ * The PostGIS comparison layer, which stays tied to the demo source: it exists
+ * to check the two backends agree on the same data, so pointing it at anything
+ * else would defeat its purpose.
+ */
+function withMartinLayer(layers: EventLayer[]): EventLayer[] {
   const martinUrl = process.env["NEXT_PUBLIC_MARTIN_URL"];
   if (martinUrl) {
     layers.push({
