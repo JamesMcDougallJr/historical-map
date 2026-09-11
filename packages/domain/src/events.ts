@@ -1,10 +1,24 @@
 // Historical Events Types
 
+import type { DatePrecision } from "./dates";
+
 export interface HistoricalEvent {
   id: string;
   title: string;
   description: string;
   date: string; // ISO 8601: "1869-05-10"
+  /**
+   * How much of `date` the source actually supports.
+   *
+   * `events.date` is `date NOT NULL`, so a year-only event is stored as
+   * `1103-01-01` — a representative day, not a claim. Without this field the
+   * UI cannot tell that apart from a genuine 1 January and renders
+   * "January 1, 1103", inventing a precision no source ever gave. Absent means
+   * day precision, which is the right default for hand-curated events.
+   */
+  datePrecision?: DatePrecision;
+  /** The date exactly as the source worded it, e.g. "Spring 1847". */
+  dateText?: string;
   imageUrl?: string;
   tags?: string[];
   /** Free-text citation for this specific event, e.g. a page reference. */

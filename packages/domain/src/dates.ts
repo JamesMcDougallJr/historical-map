@@ -1,5 +1,24 @@
 // Regex patterns for various date formats
 
+/**
+ * How precisely a source dated an event. Historical text is routinely vague
+ * ("Spring 1847", "circa 1850"), and `events.date` is a `date NOT NULL` column,
+ * so a representative day always gets stored — this records how much of it to
+ * believe, and lets the timeline widen a range rather than assert a precision
+ * the source never had.
+ *
+ * It also governs display: rendering a year-only event from its stored
+ * `1103-01-01` produces "January 1, 1103", which states a day the source never
+ * gave. Anything formatting a date for a human needs to read this.
+ */
+export type DatePrecision =
+  | "day"
+  | "month"
+  | "season"
+  | "year"
+  | "decade"
+  | "circa";
+
 export interface DateMatch {
   raw: string;
   normalized: string; // ISO 8601 format
@@ -27,12 +46,21 @@ const DATE_PATTERNS: Array<{
     confidence: 0.95,
     normalize: (m) => {
       const monthNames: Record<string, string> = {
-        january: '01', february: '02', march: '03', april: '04',
-        may: '05', june: '06', july: '07', august: '08',
-        september: '09', october: '10', november: '11', december: '12',
+        january: "01",
+        february: "02",
+        march: "03",
+        april: "04",
+        may: "05",
+        june: "06",
+        july: "07",
+        august: "08",
+        september: "09",
+        october: "10",
+        november: "11",
+        december: "12",
       };
-      const month = monthNames[m[1]?.toLowerCase() ?? ''];
-      const day = m[2]?.padStart(2, '0');
+      const month = monthNames[m[1]?.toLowerCase() ?? ""];
+      const day = m[2]?.padStart(2, "0");
       const year = m[3];
       if (month && day && year) {
         return `${year}-${month}-${day}`;
@@ -43,16 +71,26 @@ const DATE_PATTERNS: Array<{
 
   // Abbreviated month: "May. 10, 1869" or "May 10, 1869"
   {
-    pattern: /(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\.?\s+(\d{1,2}),?\s+(\d{4})/gi,
+    pattern:
+      /(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\.?\s+(\d{1,2}),?\s+(\d{4})/gi,
     confidence: 0.9,
     normalize: (m) => {
       const monthAbbrevs: Record<string, string> = {
-        jan: '01', feb: '02', mar: '03', apr: '04',
-        may: '05', jun: '06', jul: '07', aug: '08',
-        sep: '09', oct: '10', nov: '11', dec: '12',
+        jan: "01",
+        feb: "02",
+        mar: "03",
+        apr: "04",
+        may: "05",
+        jun: "06",
+        jul: "07",
+        aug: "08",
+        sep: "09",
+        oct: "10",
+        nov: "11",
+        dec: "12",
       };
-      const month = monthAbbrevs[m[1]?.toLowerCase() ?? ''];
-      const day = m[2]?.padStart(2, '0');
+      const month = monthAbbrevs[m[1]?.toLowerCase() ?? ""];
+      const day = m[2]?.padStart(2, "0");
       const year = m[3];
       if (month && day && year) {
         return `${year}-${month}-${day}`;
@@ -66,8 +104,8 @@ const DATE_PATTERNS: Array<{
     pattern: /(\d{1,2})\/(\d{1,2})\/(\d{4})/g,
     confidence: 0.85,
     normalize: (m) => {
-      const month = m[1]?.padStart(2, '0');
-      const day = m[2]?.padStart(2, '0');
+      const month = m[1]?.padStart(2, "0");
+      const day = m[2]?.padStart(2, "0");
       const year = m[3];
       if (month && day && year) {
         return `${year}-${month}-${day}`;
@@ -81,8 +119,8 @@ const DATE_PATTERNS: Array<{
     pattern: /(\d{1,2})[-.](\d{1,2})[-.](\d{4})/g,
     confidence: 0.8,
     normalize: (m) => {
-      const day = m[1]?.padStart(2, '0');
-      const month = m[2]?.padStart(2, '0');
+      const day = m[1]?.padStart(2, "0");
+      const month = m[2]?.padStart(2, "0");
       const year = m[3];
       if (day && month && year) {
         return `${year}-${month}-${day}`;
@@ -98,11 +136,20 @@ const DATE_PATTERNS: Array<{
     confidence: 0.7,
     normalize: (m) => {
       const monthNames: Record<string, string> = {
-        january: '01', february: '02', march: '03', april: '04',
-        may: '05', june: '06', july: '07', august: '08',
-        september: '09', october: '10', november: '11', december: '12',
+        january: "01",
+        february: "02",
+        march: "03",
+        april: "04",
+        may: "05",
+        june: "06",
+        july: "07",
+        august: "08",
+        september: "09",
+        october: "10",
+        november: "11",
+        december: "12",
       };
-      const month = monthNames[m[1]?.toLowerCase() ?? ''];
+      const month = monthNames[m[1]?.toLowerCase() ?? ""];
       const year = m[2];
       if (month && year) {
         return `${year}-${month}`;
@@ -123,7 +170,7 @@ const DATE_PATTERNS: Array<{
     pattern: /\b(1[0-9]{3}|20[0-2][0-9])\b/g,
     confidence: 0.3,
     normalize: (m) => {
-      const year = parseInt(m[1] ?? '0', 10);
+      const year = parseInt(m[1] ?? "0", 10);
       // Only accept years between 1000 and 2030
       if (year >= 1000 && year <= 2030) {
         return m[1] ?? null;
@@ -203,7 +250,7 @@ export function extractSentence(text: string, dateIndex: number): string {
   if (sentence.length > 300) {
     const start = Math.max(0, dateIndex - 100);
     const end = Math.min(text.length, dateIndex + 200);
-    return text.slice(start, end).trim() + '...';
+    return text.slice(start, end).trim() + "...";
   }
 
   return sentence;
@@ -217,22 +264,22 @@ export function extractSentence(text: string, dateIndex: number): string {
  */
 export function generateTitle(sentence: string, date: DateMatch): string {
   // Remove the date from the sentence for title generation
-  const withoutDate = sentence.replace(date.raw, '').trim();
+  const withoutDate = sentence.replace(date.raw, "").trim();
 
   // Take first few words as title (up to 60 chars)
   const words = withoutDate.split(/\s+/).slice(0, 8);
-  let title = words.join(' ');
+  let title = words.join(" ");
 
   // Clean up punctuation at start/end
-  title = title.replace(/^[,\-:]+\s*/, '').replace(/[,\-:]+\s*$/, '');
+  title = title.replace(/^[,\-:]+\s*/, "").replace(/[,\-:]+\s*$/, "");
 
   // Capitalize first letter
   title = title.charAt(0).toUpperCase() + title.slice(1);
 
   // Truncate if too long
   if (title.length > 60) {
-    title = title.slice(0, 57) + '...';
+    title = title.slice(0, 57) + "...";
   }
 
-  return title || 'Historical Event';
+  return title || "Historical Event";
 }

@@ -13,6 +13,7 @@
 //   extract  turn document text into ParsedEvents via the Claude API
 //   publish  geocode, deduplicate, and write HistoricalEvents to Postgres
 
+import type { DatePrecision } from "./dates";
 import type { ParsedEvent } from "./events";
 
 /**
@@ -111,20 +112,9 @@ export const TERMINAL_DOCUMENT_STATUSES = [
   "failed",
 ] as const satisfies readonly DocumentStatus[];
 
-/**
- * How precisely a source dated an event. Historical text is routinely vague
- * ("Spring 1847", "circa 1850"), and `events.date` is a `date NOT NULL` column,
- * so a representative day always gets stored — this records how much of it to
- * believe, and lets the timeline widen a range rather than assert a precision
- * the source never had.
- */
-export type DatePrecision =
-  | "day"
-  | "month"
-  | "season"
-  | "year"
-  | "decade"
-  | "circa";
+// Lives in ./dates — both this module and ./events need it, and events.ts is
+// already imported here, so declaring it in either would make a cycle.
+export type { DatePrecision } from "./dates";
 
 /**
  * An event as an LLM extraction pass produces it.

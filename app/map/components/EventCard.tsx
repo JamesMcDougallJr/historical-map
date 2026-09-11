@@ -23,7 +23,7 @@ export function EventCard({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <span className="text-sm font-medium text-blue-600 dark:text-blue-400">
-              {formatDate(event.date)}
+              {formatDate(event.date, event.datePrecision, event.dateText)}
             </span>
             {isAcknowledged && (
               <span className="text-xs text-green-600 dark:text-green-400 font-medium">

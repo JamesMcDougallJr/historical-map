@@ -10,6 +10,7 @@
 
 import postgres from "postgres";
 import type {
+  DatePrecision,
   EventSource,
   HistoricalEventsData,
   HistoricalEvent,
@@ -45,6 +46,8 @@ interface EventRow {
   image_url: string | null;
   source: string | null;
   tags: string[] | null;
+  date_precision: DatePrecision | null;
+  date_text: string | null;
 }
 
 let schemaReady: Promise<void> | null = null;
@@ -119,6 +122,10 @@ function toEvent(row: EventRow): HistoricalEvent {
   if (row.source) event.source = row.source;
   if (row.tags) event.tags = row.tags;
   if (row.source_id) event.sourceId = row.source_id;
+  // Without these the stored representative day is indistinguishable from a
+  // real one, and a year-only event renders as "January 1".
+  if (row.date_precision) event.datePrecision = row.date_precision;
+  if (row.date_text) event.dateText = row.date_text;
   return event;
 }
 
