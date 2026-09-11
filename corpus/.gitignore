@@ -1,0 +1,13 @@
+# Source documents live here but are never committed — they are large, often
+# licensed, and belong to whoever published them. Only this file is tracked,
+# which is also what keeps the directory itself in git.
+#
+# Drop .pdf / .txt / .md / .html files here and run a detection pass; see the
+# "Ingestion engine" section of CLAUDE.md. Anything with another extension is
+# ignored rather than failed.
+#
+# Note there is deliberately no README.md here: the local-directory source
+# scans this directory, so a README would be ingested as if it were a source
+# document.
+*
+!.gitignore

@@ -1,49 +1,19 @@
 // Historical Events Types
+//
+// The event/location vocabulary itself now lives in `packages/domain`, because
+// the ingestion workers in `services/ingest` write these exact shapes and the
+// two must not drift. It is re-exported here so every existing
+// `@/app/map/types` import keeps working — that alias is still the right one to
+// use from inside the web app.
+//
+// `export type *` (not `export *`) is deliberate: it erases completely at
+// compile time, so nothing in the browser bundle has to resolve the workspace
+// package at runtime.
+export type * from "@historical-map/domain";
 
-export interface HistoricalEvent {
-  id: string;
-  title: string;
-  description: string;
-  date: string; // ISO 8601: "1869-05-10"
-  imageUrl?: string;
-  tags?: string[];
-  /** Free-text citation for this specific event, e.g. a page reference. */
-  source?: string;
-  /** EventSource.id — which publisher this event came from. */
-  sourceId?: string;
-}
-
-/**
- * A publisher of events — one organisation or dataset, e.g. the Utah Historical
- * Society. Events are grouped by source, and each source surfaces as its own
- * toggleable layer on the map.
- *
- * Distinct from EventLayer, which describes how a source's events are *served*.
- */
-export interface EventSource {
-  id: string;
-  name: string;
-  description?: string;
-  homepageUrl?: string;
-  /** Rendered while this source's layer is visible. */
-  attribution?: string;
-  /** Pin colour, so layers are visually distinguishable. */
-  color?: string;
-}
-
-export interface HistoricalLocation {
-  id: string;
-  name: string;
-  coordinates: [number, number]; // [longitude, latitude]
-  events: HistoricalEvent[];
-}
-
-export interface HistoricalEventsData {
-  version: string;
-  lastUpdated: string;
-  locations: HistoricalLocation[];
-  sources?: EventSource[];
-}
+// Everything below is web-app-only — how events are *served* and *drawn*. The
+// ingestion side has no opinion on any of it, so none of it belongs in
+// `packages/domain`.
 
 /**
  * How a source's events reach the map.
@@ -75,14 +45,7 @@ export interface EventLayer {
 
 // Parser Types
 
-export interface ParsedEvent {
-  id: string;
-  title: string;
-  description: string;
-  date: string;
-  confidence: number; // 0-1, for AI parsing quality
-  sourceText: string; // Original text snippet
-}
+import type { ParsedEvent } from "@historical-map/domain";
 
 export interface ProcessingJob {
   id: string;

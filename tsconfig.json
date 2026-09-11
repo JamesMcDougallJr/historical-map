@@ -21,7 +21,9 @@
     "jsx": "react-jsx",
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./*"]
+      "@/*": ["./*"],
+      "@historical-map/domain": ["./packages/domain/src/index.ts"],
+      "@historical-map/domain/*": ["./packages/domain/src/*"]
     },
     "incremental": true,
     "plugins": [
@@ -43,6 +45,7 @@
     "node_modules",
     "vite.config.mcp.ts",
     "dist",
-    "mcp/dist"
+    "mcp/dist",
+    "services"
   ]
 }

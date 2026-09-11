@@ -1,0 +1,151 @@
+{
+  "$schema": "https://json.schemastore.org/nest-cli",
+  "collection": "@nestjs/schematics",
+  "sourceRoot": "apps/api/src",
+  "monorepo": true,
+  "root": "apps/api",
+  "compilerOptions": {
+    "_deleteOutDirNote": "MUST stay false. It is per-invocation, not per-app: `nest build detect` with it on wipes dist/ entirely, deleting the other six apps bundles. Symptom is a worker dying with MODULE_NOT_FOUND for code that just built fine. Clean explicitly with rm -rf dist instead.",
+    "deleteOutDir": false,
+    "webpack": true,
+    "webpackConfigPath": "webpack.config.js",
+    "tsConfigPath": "apps/api/tsconfig.app.json"
+  },
+  "projects": {
+    "api": {
+      "type": "application",
+      "root": "apps/api",
+      "entryFile": "main",
+      "sourceRoot": "apps/api/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/api/tsconfig.app.json"
+      }
+    },
+    "detect": {
+      "type": "application",
+      "root": "apps/workers/detect",
+      "entryFile": "main",
+      "sourceRoot": "apps/workers/detect/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/workers/detect/tsconfig.app.json"
+      }
+    },
+    "fetch": {
+      "type": "application",
+      "root": "apps/workers/fetch",
+      "entryFile": "main",
+      "sourceRoot": "apps/workers/fetch/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/workers/fetch/tsconfig.app.json"
+      }
+    },
+    "publish": {
+      "type": "application",
+      "root": "apps/workers/publish",
+      "entryFile": "main",
+      "sourceRoot": "apps/workers/publish/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/workers/publish/tsconfig.app.json"
+      }
+    },
+    "common": {
+      "type": "library",
+      "root": "libs/common",
+      "entryFile": "index",
+      "sourceRoot": "libs/common/src",
+      "compilerOptions": {
+        "tsConfigPath": "libs/common/tsconfig.lib.json"
+      }
+    },
+    "database": {
+      "type": "library",
+      "root": "libs/database",
+      "entryFile": "index",
+      "sourceRoot": "libs/database/src",
+      "compilerOptions": {
+        "tsConfigPath": "libs/database/tsconfig.lib.json"
+      }
+    },
+    "queue": {
+      "type": "library",
+      "root": "libs/queue",
+      "entryFile": "index",
+      "sourceRoot": "libs/queue/src",
+      "compilerOptions": {
+        "tsConfigPath": "libs/queue/tsconfig.lib.json"
+      }
+    },
+    "parsers": {
+      "type": "library",
+      "root": "libs/parsers",
+      "entryFile": "index",
+      "sourceRoot": "libs/parsers/src",
+      "compilerOptions": {
+        "tsConfigPath": "libs/parsers/tsconfig.lib.json"
+      }
+    },
+    "sources": {
+      "type": "library",
+      "root": "libs/sources",
+      "entryFile": "index",
+      "sourceRoot": "libs/sources/src",
+      "compilerOptions": {
+        "tsConfigPath": "libs/sources/tsconfig.lib.json"
+      }
+    },
+    "extraction": {
+      "type": "library",
+      "root": "libs/extraction",
+      "entryFile": "index",
+      "sourceRoot": "libs/extraction/src",
+      "compilerOptions": {
+        "tsConfigPath": "libs/extraction/tsconfig.lib.json"
+      }
+    },
+    "geocoding": {
+      "type": "library",
+      "root": "libs/geocoding",
+      "entryFile": "index",
+      "sourceRoot": "libs/geocoding/src",
+      "compilerOptions": {
+        "tsConfigPath": "libs/geocoding/tsconfig.lib.json"
+      }
+    },
+    "storage": {
+      "type": "library",
+      "root": "libs/storage",
+      "entryFile": "index",
+      "sourceRoot": "libs/storage/src",
+      "compilerOptions": {
+        "tsConfigPath": "libs/storage/tsconfig.lib.json"
+      }
+    },
+    "extract-text": {
+      "type": "application",
+      "root": "apps/workers/extract-text",
+      "entryFile": "main",
+      "sourceRoot": "apps/workers/extract-text/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/workers/extract-text/tsconfig.app.json"
+      }
+    },
+    "extract-events": {
+      "type": "application",
+      "root": "apps/workers/extract-events",
+      "entryFile": "main",
+      "sourceRoot": "apps/workers/extract-events/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/workers/extract-events/tsconfig.app.json"
+      }
+    },
+    "validate": {
+      "type": "application",
+      "root": "apps/workers/validate",
+      "entryFile": "main",
+      "sourceRoot": "apps/workers/validate/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/workers/validate/tsconfig.app.json"
+      }
+    }
+  }
+}

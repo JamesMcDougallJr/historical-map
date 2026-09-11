@@ -10,6 +10,7 @@
 
 import postgres from "postgres";
 import type {
+  DatePrecision,
   EventSource,
   HistoricalEventsData,
   HistoricalEvent,
@@ -45,6 +46,8 @@ interface EventRow {
   image_url: string | null;
   source: string | null;
   tags: string[] | null;
+  date_precision: DatePrecision | null;
+  date_text: string | null;
 }
 
 let schemaReady: Promise<void> | null = null;
@@ -94,6 +97,12 @@ export function ensureSchema(): Promise<void> {
       )`;
     await db`ALTER TABLE events ADD COLUMN IF NOT EXISTS source_id text REFERENCES sources(id) ON DELETE SET NULL`;
 
+    // Change watermark, read by readData(). Without it `lastUpdated` was
+    // regenerated on every read, so the map's poll saw a "change" every 5s and
+    // re-rendered regardless of whether anything had actually happened.
+    await db`ALTER TABLE locations ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now()`;
+    await db`ALTER TABLE events ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now()`;
+
     await db`CREATE INDEX IF NOT EXISTS events_location_id_idx ON events (location_id)`;
     await db`CREATE INDEX IF NOT EXISTS events_date_idx ON events (date)`;
     await db`CREATE INDEX IF NOT EXISTS events_source_id_idx ON events (source_id)`;
@@ -113,6 +122,10 @@ function toEvent(row: EventRow): HistoricalEvent {
   if (row.source) event.source = row.source;
   if (row.tags) event.tags = row.tags;
   if (row.source_id) event.sourceId = row.source_id;
+  // Without these the stored representative day is indistinguishable from a
+  // real one, and a year-only event renders as "January 1".
+  if (row.date_precision) event.datePrecision = row.date_precision;
+  if (row.date_text) event.dateText = row.date_text;
   return event;
 }
 
@@ -192,6 +205,23 @@ export async function upsertSource(source: EventSource): Promise<void> {
 
 // ── Locations & events ──────────────────────────────────────────────────────
 
+/**
+ * Newest `updated_at` across locations and events, or the epoch when both are
+ * empty. This is the value `lastUpdated` reports, and the map's 5s poll uses it
+ * as a change guard — so it has to actually change only when data changes.
+ *
+ * `GREATEST` ignores NULL arguments in Postgres and returns NULL only when
+ * every argument is NULL, which is exactly the empty-database case.
+ */
+async function changeWatermark(): Promise<string> {
+  const [row] = await sql()<{ last_updated: Date | null }[]>`
+    SELECT GREATEST(
+      (SELECT MAX(updated_at) FROM locations),
+      (SELECT MAX(updated_at) FROM events)
+    ) AS last_updated`;
+  return row?.last_updated?.toISOString() ?? new Date(0).toISOString();
+}
+
 export async function readData(): Promise<HistoricalEventsData> {
   await ensureSchema();
   const rows = await sql()<
@@ -199,7 +229,7 @@ export async function readData(): Promise<HistoricalEventsData> {
   >`SELECT id, name, lon, lat FROM locations ORDER BY name ASC`;
   return {
     version: "1.0.0",
-    lastUpdated: new Date().toISOString(),
+    lastUpdated: await changeWatermark(),
     locations: await assemble(rows),
     sources: await listSources(),
   };
@@ -218,7 +248,8 @@ export async function upsertLocation(loc: HistoricalLocation): Promise<void> {
     INSERT INTO locations (id, name, lon, lat)
     VALUES (${loc.id}, ${loc.name}, ${lon}, ${lat})
     ON CONFLICT (id) DO UPDATE
-      SET name = EXCLUDED.name, lon = EXCLUDED.lon, lat = EXCLUDED.lat`;
+      SET name = EXCLUDED.name, lon = EXCLUDED.lon, lat = EXCLUDED.lat,
+          updated_at = now()`;
   for (const e of loc.events) await insertEvent(loc.id, e);
 }
 
