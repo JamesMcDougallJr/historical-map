@@ -342,6 +342,25 @@ The bundle is read from disk at runtime, so Next cannot trace it automatically �
 `outputFileTracingIncludes` in `next.config.mjs` pulls `mcp/dist/**` into the
 `/api/mcp` function, and `prebuild` guarantees it exists.
 
+### Event layers — one per source, deliberately unfused
+
+`/map` builds one toggleable layer per row in `sources`, from `GET /api/sources`
+(`app/map/utils/event-layers.ts`). It used to be a hardcoded list of a single id, which
+meant anything the ingestion pipeline published had no layer and never rendered — a
+failure invisible from both the database and the API, and indistinguishable from "publish
+didn't run". If you add a source, it gets a layer; don't reintroduce a fixed list.
+
+Two sources describing the same event therefore produce **two pins on two layers**. That is
+the current intent, not an oversight — fusing them requires event identity the codebase does
+not yet have. `plans/11-identity-and-fusion.md` records exactly what today's dedup covers
+(re-running the pipeline is idempotent) and what it does not (a second document describing
+an event the first already published). Read it before changing `eventKeyFor`.
+
+**Dates carry `datePrecision`.** `events.date` is `date NOT NULL`, so a year-only event is
+stored as `YYYY-01-01`. `formatDate` must be given the precision or it renders "January 1",
+asserting a day no source gave — the common case, not the edge one (50 of the first 60
+ingested events are year-only).
+
 ### Overlay system
 
 `HistoricalOverlay` supports four sources: `allmaps` (IIIF georeferenced via

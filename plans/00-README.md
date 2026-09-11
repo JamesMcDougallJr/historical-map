@@ -3,7 +3,7 @@
 The map at `/map` currently serves **44 hand-curated events across 34 locations from one
 source** (`utah-historical`, seeded from `data/map-data.json`). Everything in it was entered
 by hand or pasted through `/map/import`. This directory plans the engine that replaces that
-with continuous, automated ingestion — and makes adding the *second* source, and the
+with continuous, automated ingestion — and makes adding the _second_ source, and the
 fiftieth, a one-file change.
 
 The design is deliberately a port of the State Affairs video pipeline (`~/Code/StateAffairs`),
@@ -13,12 +13,12 @@ network failure without manual intervention.
 
 ## The mapping
 
-| State Affairs | Here | What changed |
-|---|---|---|
-| `detect` — poll MI House/Senate video portals | `detect` — poll historical-source catalogues | Nothing structural. `SourceAdapter` gets a new implementation per source. |
-| `download` — `ffmpeg` stream → 16kHz WAV → S3 | `fetch` — HTTP/PDF/IIIF → extracted text → Postgres | No `ffmpeg` and no object storage. Text extraction reuses `unpdf`, already a dependency of the web app. |
-| `transcribe` — Groq Whisper → transcript | `extract` — Claude API → `ParsedEvent[]` | Different engine, identical shape: a chunked, retryable, interface-backed transformation behind a DI token. |
-| — | `publish` — geocode, dedupe, write | **New stage.** See below. |
+| State Affairs                                 | Here                                                | What changed                                                                                                |
+| --------------------------------------------- | --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `detect` — poll MI House/Senate video portals | `detect` — poll historical-source catalogues        | Nothing structural. `SourceAdapter` gets a new implementation per source.                                   |
+| `download` — `ffmpeg` stream → 16kHz WAV → S3 | `fetch` — HTTP/PDF/IIIF → extracted text → Postgres | No `ffmpeg` and no object storage. Text extraction reuses `unpdf`, already a dependency of the web app.     |
+| `transcribe` — Groq Whisper → transcript      | `extract` — Claude API → `ParsedEvent[]`            | Different engine, identical shape: a chunked, retryable, interface-backed transformation behind a DI token. |
+| —                                             | `publish` — geocode, dedupe, write                  | **New stage.** See below.                                                                                   |
 
 **Why a fourth stage.** In State Affairs the transcript was terminal — once written, the job
 was done. Here, extraction output is not yet map data: a `ParsedEvent` has a free-text place
@@ -53,12 +53,20 @@ working agreement as `~/Code/StateAffairs/plans/00-README.md`.
 9. [09-publish-worker.md](./09-publish-worker.md) — geocode, dedupe, write to the map.
 10. [10-deployment.md](./10-deployment.md) — where the workers run, given the web app is on
     Vercel.
+11. [11-identity-and-fusion.md](./11-identity-and-fusion.md) — **gaps recorded, not
+    scheduled.** What today's deduplication actually covers, and what breaks when a second
+    document describes an event the first already published.
+
+> **The pipeline shipped as six stages, not four.** `fetch` split into
+> `fetch` → `extract-text`, and `validate` was added between extraction and publishing.
+> Phases 07–09 above describe the four-stage shape and are kept as the reasoning that led
+> here; `CLAUDE.md` describes what actually runs.
 
 ## Locked decisions
 
 Do not relitigate without discussion.
 
-- **Monorepo tooling: npm workspaces, with Nx as a package-based task runner.** Nx does *not*
+- **Monorepo tooling: npm workspaces, with Nx as a package-based task runner.** Nx does _not_
   own any build — every target is a plain `package.json` script, and `vercel.json` pins
   `installCommand`/`buildCommand` so Vercel's monorepo detection can never reroute the web
   build through Nx. Rationale and the alternative considered are in
@@ -72,13 +80,13 @@ Do not relitigate without discussion.
   Redis, so it survives a restart of whichever worker registered it.
 - **Database: the Postgres this repo already has.** `docker-compose.yml` already runs
   PostGIS + Martin, and `lib/postgres-storage.ts` already reads map data from it. Ingestion
-  writes into the *same* database, adding its own tables. No second datastore, and no API hop
+  writes into the _same_ database, adding its own tables. No second datastore, and no API hop
   between the workers and the map.
 - **ORM: TypeORM, for both entities and migrations.** No Prisma — the State Affairs
   Prisma-schema-plus-hand-mirrored-entities split is not carried over. One tool owns the
   `ingest_*` tables. `synchronize` stays `false` in every environment. See
   [03-database-layer.md](./03-database-layer.md).
-- **No object storage.** `fetch` produces extracted *text* — tens of KB — which goes in a
+- **No object storage.** `fetch` produces extracted _text_ — tens of KB — which goes in a
   Postgres column. No MinIO, no S3, no `StorageService` abstraction. The compose stack gains
   one service (Redis), not four. See [02-ingest-scaffold.md](./02-ingest-scaffold.md).
 - **Extraction: Claude API via `@anthropic-ai/sdk`**, behind an `ExtractionEngine` interface
