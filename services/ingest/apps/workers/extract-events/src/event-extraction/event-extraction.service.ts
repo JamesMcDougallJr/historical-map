@@ -6,14 +6,8 @@ import { ConfigService } from "@nestjs/config";
 import { type ExtractedEvent, findDates } from "@historical-map/domain";
 import { JobLogger } from "@app/common";
 import { IngestDocument, IngestExtraction, jsonb } from "@app/database";
-import {
-  STORAGE_SERVICE,
-  type StorageService,
-} from "@app/storage";
-import {
-  type TextArtifact,
-  parseArtifact,
-} from "@app/parsers";
+import { STORAGE_SERVICE, type StorageService } from "@app/storage";
+import { type TextArtifact, parseArtifact } from "@app/parsers";
 import {
   EXTRACTION_ENGINE,
   type ExtractionChunk,
@@ -63,7 +57,10 @@ export class EventExtractionService {
       return;
     }
     if (!document.textKey) {
-      await this.jobLogger.log(job, "no text artifact — extract-text has not run");
+      await this.jobLogger.log(
+        job,
+        "no text artifact — extract-text has not run",
+      );
       return;
     }
 
@@ -93,9 +90,14 @@ export class EventExtractionService {
       const artifact: TextArtifact = parseArtifact(
         await this.storage.getObject(document.textKey),
       );
+      // No `?? default` here on purpose. The env schema already defaults this
+      // (to 2000) and ConfigService returns the validated value, so a fallback
+      // written here can never fire — it only advertises a chunk size that is
+      // not the one in use, which is exactly the sort of thing read as fact
+      // when reconciling a run's chunk count against the code.
       const chunks = chunkSegments(
         artifact.segments,
-        this.config.get<number>("EXTRACT_CHUNK_TOKENS") ?? 3000,
+        this.config.getOrThrow<number>("EXTRACT_CHUNK_TOKENS"),
       );
 
       const done = await this.completedChunkIndices(documentId, modelRun);
