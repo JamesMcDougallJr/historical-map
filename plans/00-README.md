@@ -56,6 +56,18 @@ working agreement as `~/Code/StateAffairs/plans/00-README.md`.
 11. [11-identity-and-fusion.md](./11-identity-and-fusion.md) — **gaps recorded, not
     scheduled.** What today's deduplication actually covers, and what breaks when a second
     document describes an event the first already published.
+12. [12-embeddings-and-bedrock.md](./12-embeddings-and-bedrock.md) — the shared substrate for
+    13 and 14: Bedrock as embedding + judge provider, pgvector in the same Postgres, the
+    `EmbeddingEngine`/`JudgeEngine` tokens.
+13. [13-similarity-and-fusion.md](./13-similarity-and-fusion.md) — vector search proposes, an
+    LLM judge disposes, assertions fuse into clusters. Answers the gaps in 11.
+14. [14-source-retrieval-and-rag.md](./14-source-retrieval-and-rag.md) — anchors, "view the
+    source" deep links, and RAG with citations across multiple sources.
+
+> **Groq cannot embed, and Bedrock is not in the default region.** Groq exposes no embedding
+> models at all, so 12 adds AWS Bedrock alongside it — and the account's configured region
+> (`us-west-1`) carries only one embedding model against us-west-2's five. Both verified
+> live; see 12.
 
 > **The pipeline shipped as six stages, not four.** `fetch` split into
 > `fetch` → `extract-text`, and `validate` was added between extraction and publishing.
@@ -86,13 +98,20 @@ Do not relitigate without discussion.
   Prisma-schema-plus-hand-mirrored-entities split is not carried over. One tool owns the
   `ingest_*` tables. `synchronize` stays `false` in every environment. See
   [03-database-layer.md](./03-database-layer.md).
-- **No object storage.** `fetch` produces extracted _text_ — tens of KB — which goes in a
-  Postgres column. No MinIO, no S3, no `StorageService` abstraction. The compose stack gains
-  one service (Redis), not four. See [02-ingest-scaffold.md](./02-ingest-scaffold.md).
-- **Extraction: Claude API via `@anthropic-ai/sdk`**, behind an `ExtractionEngine` interface
-  and an `EXTRACTION_ENGINE` DI token — so the engine is swappable without touching the
-  worker, the queue contract, or storage. Model and parameters in
-  [08-extract-worker.md](./08-extract-worker.md).
+- ~~**No object storage.**~~ **Reversed.** The original reasoning — `fetch` produces tens of
+  KB of text, so a Postgres column suffices — held only while text extraction lived inside
+  `fetch`. Once the two split, keeping the original bytes is what makes re-extraction
+  possible without re-downloading, and cleaning rules change constantly. MinIO/S3 now holds
+  originals and text artifacts; `StorageService`/`STORAGE_SERVICE` exists. The preference did
+  not change, the reasoning did. Retaining the artifacts is also what makes
+  [14-source-retrieval-and-rag.md](./14-source-retrieval-and-rag.md) possible at all.
+- **Extraction runs behind an `ExtractionEngine` interface and an `EXTRACTION_ENGINE` DI
+  token**, so the engine is swappable without touching the worker, the queue contract, or
+  storage. **The engine shipped as Groq** (`openai/gpt-oss-120b`), not the Claude API as
+  phase 8 assumed — the interface is what was locked, and it did its job. Measured findings
+  in `CLAUDE.md` ("Groq, measured"). Groq exposes **no embedding models**, which is why
+  [12-embeddings-and-bedrock.md](./12-embeddings-and-bedrock.md) adds Bedrock beside it
+  rather than replacing it.
 - **Shared types live in `packages/domain`**, imported by both the web app and the workers.
   The two must not drift on what a `HistoricalEvent` is.
 - **The workers do not run on Vercel.** They are long-lived processes holding Redis
