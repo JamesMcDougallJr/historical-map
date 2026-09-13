@@ -7,3 +7,5 @@ pg_data
 *.tsbuildinfo
 .env.dev
 .env.prod
+.DS_Store
+.claude/worktrees
