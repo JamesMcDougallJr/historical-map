@@ -7,3 +7,4 @@ pg_data
 *.tsbuildinfo
 .env.dev
 .env.prod
+.env*.local

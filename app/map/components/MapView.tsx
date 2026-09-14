@@ -225,7 +225,7 @@ function buildEventLayer(
       ? new VectorTileLayer({
           source: new VectorTileSource({
             format: new MVT(),
-            url: layer.url,
+            url: `${layer.url}${mvtQueryString({ sourceIds: layer.sourceIds })}`,
             attributions: layer.attribution,
           }),
           style,
@@ -706,9 +706,12 @@ export function MapView({
       if (layer.kind === "mvt") {
         const source = (olLayer as VectorTileLayer).getSource();
         if (!source) continue;
-        const qs = isTimelineEnabled
-          ? mvtQueryString({ fromYear, toYear })
-          : "";
+        // Rebuilt from scratch, not appended — `sourceIds` must be included
+        // every time or a timeline move silently drops the layer's filter.
+        const qs = mvtQueryString({
+          sourceIds: layer.sourceIds,
+          ...(isTimelineEnabled ? { fromYear, toYear } : {}),
+        });
         source.setUrl(`${layer.url}${qs}`);
         source.refresh();
         continue;

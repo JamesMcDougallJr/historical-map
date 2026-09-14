@@ -26,7 +26,7 @@ services:
     volumes:
       - ./pg_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d db"]
+      test: [ "CMD-SHELL", "pg_isready -U postgres -d db" ]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -38,13 +38,13 @@ services:
     image: redis:7-alpine
     restart: unless-stopped
     # appendonly so a restart doesn't drop queued jobs on the floor.
-    command: ["redis-server", "--appendonly", "yes"]
+    command: [ "redis-server", "--appendonly", "yes" ]
     ports:
       - "6379:6379"
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: [ "CMD", "redis-cli", "ping" ]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -58,12 +58,12 @@ services:
       - MINIO_ROOT_USER=minioadmin
       - MINIO_ROOT_PASSWORD=minioadmin
     ports:
-      - "9000:9000"   # S3 API
-      - "9001:9001"   # web console
+      - "9000:9000" # S3 API
+      - "9001:9001" # web console
     volumes:
       - minio_data:/data
     healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
+      test: [ "CMD", "mc", "ready", "local" ]
       interval: 5s
       timeout: 5s
       retries: 20
@@ -79,12 +79,9 @@ services:
     depends_on:
       - minio
     entrypoint: >
-      /bin/sh -c "
-      until mc alias set local http://minio:9000 minioadmin minioadmin; do
+      /bin/sh -c " until mc alias set local http://minio:9000 minioadmin minioadmin; do
         echo 'waiting for minio...'; sleep 1;
-      done &&
-      mc mb -p local/ingest || true
-      "
+      done && mc mb -p local/ingest || true "
 
   martin:
     image: ghcr.io/maplibre/martin:1.16.0
