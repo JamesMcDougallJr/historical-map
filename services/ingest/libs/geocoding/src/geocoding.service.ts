@@ -58,7 +58,7 @@ export class GeocodingService {
         lon: hit?.lon ?? null,
         lat: hit?.lat ?? null,
         found: hit !== null,
-        provider: this.geocoder.providerName,
+        provider: hit?.provider ?? this.geocoder.providerName,
         displayName: hit?.displayName ?? null,
       })
       // A concurrent worker may have just cached the same place.

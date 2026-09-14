@@ -105,6 +105,15 @@ export const envSchema = z.object({
    */
   GEOCODER_COUNTRY_CODES: optionalNonEmpty(),
 
+  /**
+   * World Historical Gazetteer — tried before Nominatim because it indexes
+   * historical names/variants instead of only what a place is called today.
+   * The reconciliation API requires a token from a WHG account's Profile page.
+   */
+  WHG_API_TOKEN: optionalNonEmpty(),
+  WHG_MIN_SCORE: z.coerce.number().min(0).max(100).default(40),
+  WHG_MIN_INTERVAL_MS: z.coerce.number().int().positive().default(250),
+
   // Read via process.env in @Processor() options (which evaluate at module-load
   // time, before DI exists) — validated here purely so a bad value fails fast.
   DETECT_CONCURRENCY: z.coerce.number().int().positive().default(1),
