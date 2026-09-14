@@ -225,7 +225,7 @@ function buildEventLayer(
       ? new VectorTileLayer({
           source: new VectorTileSource({
             format: new MVT(),
-            url: layer.url,
+            url: `${layer.url}${mvtQueryString({ sourceIds: layer.sourceIds })}`,
             attributions: layer.attribution,
           }),
           style,
@@ -557,6 +557,18 @@ export function MapView({
     });
     mapRef.current = map;
 
+    // OL measures its target once at construction and caches that size; a
+    // frame where the container is briefly 0×0 — mid-hydration, or before a
+    // web font finishes loading and reflows the page — leaves the map
+    // permanently blank with no error, since nothing after that first measure
+    // ever asks it to look again. Only surfaced under a production build: dev
+    // mode's slower first paint happens to dodge the race. A ResizeObserver
+    // catches every future layout change; `updateSize()` on the next frame
+    // catches the construction-time case where the observer hasn't fired yet.
+    const resizeObserver = new ResizeObserver(() => map.updateSize());
+    resizeObserver.observe(mapContainerRef.current);
+    requestAnimationFrame(() => map.updateSize());
+
     // Dev-only console handles, stripped from production builds: the map itself
     // for hit testing and layer state, and the popup/hover refs, which React
     // DevTools can't show. They're refs rather than state because OL's handlers
@@ -686,6 +698,7 @@ export function MapView({
       popupEl.removeEventListener("mouseenter", onPopupEnter);
       popupEl.removeEventListener("mouseleave", onPopupLeave);
       countableSources.forEach((s) => s.un("change", recountPins));
+      resizeObserver.disconnect();
       map.setTarget(undefined);
     };
   }, [locations, eventLayers, loadLocationDetail]);
@@ -706,9 +719,12 @@ export function MapView({
       if (layer.kind === "mvt") {
         const source = (olLayer as VectorTileLayer).getSource();
         if (!source) continue;
-        const qs = isTimelineEnabled
-          ? mvtQueryString({ fromYear, toYear })
-          : "";
+        // Rebuilt from scratch, not appended — `sourceIds` must be included
+        // every time or a timeline move silently drops the layer's filter.
+        const qs = mvtQueryString({
+          sourceIds: layer.sourceIds,
+          ...(isTimelineEnabled ? { fromYear, toYear } : {}),
+        });
         source.setUrl(`${layer.url}${qs}`);
         source.refresh();
         continue;

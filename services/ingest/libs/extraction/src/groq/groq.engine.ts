@@ -253,6 +253,9 @@ export class GroqExtractionEngine implements ExtractionEngine {
       // rather than a fresh set that would defeat downstream deduplication.
       id: `${chunk.index}-${i}`,
       date: event.dateIso ?? event.dateText,
+      // A property of the chunk, not something the model reports — every
+      // event in this chunk came from the same span of the source document.
+      anchor: chunk.anchors[0] ?? null,
     }));
   }
 }

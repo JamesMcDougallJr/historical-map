@@ -36,8 +36,16 @@ export interface EventLayer {
   id: string;
   name: string;
   kind: EventLayerKind;
-  /** Static endpoint for `geojson`, Martin tile template for `mvt`. */
+  /** Static endpoint for `geojson`, Martin tile template for `mvt` — never
+   * carrying its own query string; see `sourceIds`. */
   url: string;
+  /**
+   * Which `source_id`s this MVT layer's tile requests should filter to.
+   * Undefined means unfiltered. Kept off `url` deliberately: MapView rebuilds
+   * the whole query string on every timeline change, so a filter baked into
+   * `url` would be silently dropped the first time the timeline moves.
+   */
+  sourceIds?: string[];
   attribution?: string;
   color?: string;
   enabled: boolean;

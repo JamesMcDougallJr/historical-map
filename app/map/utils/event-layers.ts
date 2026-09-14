@@ -3,9 +3,10 @@
 // Mirrors DEFAULT_OVERLAYS in ./overlays.ts: a plain list of layer descriptors
 // that MapView turns into OpenLayers layers by switching on `kind`.
 //
-// The deployed demo registers only the static geojson layer — no database,
-// nothing to hammer. Set NEXT_PUBLIC_MARTIN_URL locally to additionally get the
-// live PostGIS layer, so both can be enabled at once and compared.
+// The deployed demo (no database) registers static geojson layers. Anywhere
+// `NEXT_PUBLIC_MARTIN_URL` is set — local dev, or any deploy with Postgres +
+// Martin — every source instead gets a live MVT layer straight from PostGIS,
+// filtered to that source with `sourceIds`.
 
 import type { EventLayer, EventSource } from "../types";
 
@@ -23,15 +24,35 @@ export const DEMO_SOURCE_ID = "utah-historical";
  * the pipeline writing a `sources` row in the first place.
  */
 export function eventLayersFromSources(sources: EventSource[]): EventLayer[] {
-  const layers: EventLayer[] = sources.map((source) => ({
-    id: source.id,
-    name: source.name,
-    kind: "geojson",
-    url: `/api/sources/${source.id}/features`,
-    ...(source.attribution ? { attribution: source.attribution } : {}),
-    ...(source.color ? { color: source.color } : {}),
-    enabled: true,
-  }));
+  const martinUrl = process.env["NEXT_PUBLIC_MARTIN_URL"];
+
+  const layers: EventLayer[] = sources.map((source) =>
+    martinUrl
+      ? {
+          id: source.id,
+          name: source.name,
+          kind: "mvt",
+          // Bare tile template — no query string here. `sourceIds` carries the
+          // per-layer filter instead, so MapView's timeline updates (which
+          // rebuild the query string from scratch) can never clobber it: two
+          // things writing into one query string is how a filter silently
+          // disappears the first time something else changes it.
+          url: `${martinUrl.replace(/\/$/, "")}/event_pins/{z}/{x}/{y}`,
+          sourceIds: [source.id],
+          ...(source.attribution ? { attribution: source.attribution } : {}),
+          ...(source.color ? { color: source.color } : {}),
+          enabled: true,
+        }
+      : {
+          id: source.id,
+          name: source.name,
+          kind: "geojson",
+          url: `/api/sources/${source.id}/features`,
+          ...(source.attribution ? { attribution: source.attribution } : {}),
+          ...(source.color ? { color: source.color } : {}),
+          enabled: true,
+        },
+  );
 
   return withMartinLayer(layers);
 }
@@ -65,6 +86,11 @@ function withMartinLayer(layers: EventLayer[]): EventLayer[] {
       name: "Utah Historical Events (PostGIS)",
       kind: "mvt",
       url: `${martinUrl.replace(/\/$/, "")}/event_pins/{z}/{x}/{y}`,
+      // Was unfiltered before `sourceIds` existed, so it silently rendered
+      // every source's events under the Utah label. Filtering to the demo
+      // source is what makes the label true — and correctly means empty
+      // whenever the demo source isn't seeded locally.
+      sourceIds: [DEMO_SOURCE_ID],
       attribution: "Utah Historical Events (curated)",
       color: "#f97316",
       // Off by default: enabling it alongside the geojson layer is how you

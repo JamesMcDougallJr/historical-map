@@ -1,0 +1,13 @@
+node_modules
+.next
+.nx
+dist
+pg_data
+corpus
+.git
+.claude
+*.log
+*.tsbuildinfo
+.env*.local
+.DS_Store
+plans

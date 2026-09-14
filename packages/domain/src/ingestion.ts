@@ -150,6 +150,17 @@ export interface ExtractedEvent extends ParsedEvent {
    * produces plausible, unverifiable, wrong pins.
    */
   placeName: string | null;
+
+  /**
+   * Which segment of the source document this event came from, e.g. `"p.43"` —
+   * the first of `chunk.anchors`, set by `extract-events` after the model
+   * returns, since an anchor is a property of the chunk, not something the
+   * model itself reports. Null when extracted before this field existed.
+   *
+   * This is the whole of what "view source" needs: `publish` writes it onto
+   * the event row, and the deep link parses the page number back out of it.
+   */
+  anchor: string | null;
 }
 
 /**

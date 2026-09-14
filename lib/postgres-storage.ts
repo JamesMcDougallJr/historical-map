@@ -48,6 +48,8 @@ interface EventRow {
   tags: string[] | null;
   date_precision: DatePrecision | null;
   date_text: string | null;
+  document_id: string | null;
+  anchor: string | null;
 }
 
 let schemaReady: Promise<void> | null = null;
@@ -126,6 +128,11 @@ function toEvent(row: EventRow): HistoricalEvent {
   // real one, and a year-only event renders as "January 1".
   if (row.date_precision) event.datePrecision = row.date_precision;
   if (row.date_text) event.dateText = row.date_text;
+  // Both needed to build the "view source" link: which document, and which
+  // page of it. `document_id` has existed since publish started writing it;
+  // it was never selected here, so it never reached the client either.
+  if (row.document_id) event.documentId = row.document_id;
+  if (row.anchor) event.anchor = row.anchor;
   return event;
 }
 
@@ -186,6 +193,25 @@ export async function listSources(): Promise<EventSource[]> {
     if (r.color) s.color = r.color;
     return s;
   });
+}
+
+/**
+ * Looks up what `ingest_documents` knows about a document, for the
+ * "view source" link. Reads a table the ingestion side's TypeORM migrations
+ * own — safe as a plain query, since the two apps already share one Postgres
+ * and this file already crosses that boundary for `document_id`/`anchor` on
+ * `events`. Returns null for a document that predates ingestion (hand-entered
+ * events have no `documentId` in the first place) or was never fetched.
+ */
+export async function getIngestedDocument(
+  documentId: string,
+): Promise<{ title: string | null; originalKey: string | null } | null> {
+  const rows = await sql()<
+    { title: string | null; original_key: string | null }[]
+  >`SELECT title, original_key FROM ingest_documents WHERE id = ${documentId}`;
+  const row = rows[0];
+  if (!row) return null;
+  return { title: row.title, originalKey: row.original_key };
 }
 
 export async function upsertSource(source: EventSource): Promise<void> {

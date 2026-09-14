@@ -1,6 +1,7 @@
 import { InitIngestSchema1757808000000 } from "./1757808000000-init-ingest-schema";
 import { AddPublishTables1757894400000 } from "./1757894400000-add-publish-tables";
 import { SplitTextExtraction1757980800000 } from "./1757980800000-split-text-extraction";
+import { AddEventAnchor1760140800000 } from "./1760140800000-add-event-anchor";
 
 /**
  * Explicit imports, in order. **Do not replace this with a glob.**
@@ -18,4 +19,5 @@ export const INGEST_MIGRATIONS = [
   InitIngestSchema1757808000000,
   AddPublishTables1757894400000,
   SplitTextExtraction1757980800000,
+  AddEventAnchor1760140800000,
 ];

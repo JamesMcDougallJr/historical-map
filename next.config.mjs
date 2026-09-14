@@ -50,8 +50,23 @@ const nextConfig = {
         ],
       },
       {
+        // Only immutable in production, where the filename is content-hashed and
+        // genuinely never changes. In `next dev`, Turbopack reuses the same chunk
+        // filename across recompiles (see CLAUDE.md's stale-chunk section) — an
+        // immutable, one-year Cache-Control on that same URL means the browser
+        // never re-requests it after an edit, which is indistinguishable from the
+        // edit not having happened. `max-age=0, must-revalidate` in dev keeps a
+        // reload actually reflecting what the server just built.
         source: '/_next/static/:path*',
-        headers: [{ key: 'Cache-Control', value: 'public, max-age=31536000, immutable' }],
+        headers: [
+          {
+            key: 'Cache-Control',
+            value:
+              process.env.NODE_ENV === 'production'
+                ? 'public, max-age=31536000, immutable'
+                : 'no-cache, must-revalidate',
+          },
+        ],
       },
       {
         // Must precede /api/:path* — the MCP transport needs GET/DELETE and its

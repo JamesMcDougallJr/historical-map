@@ -1,6 +1,27 @@
 import { z } from "zod";
 
 /**
+ * An optional, non-empty string — for env vars that are fine absent but
+ * meaningless blank.
+ *
+ * Exists because `docker-compose.prod.yml`'s `${VAR}`/`${VAR:-}`
+ * interpolation cannot express "absent"; an unset shell variable resolves to
+ * the empty string, which then becomes a real, *present* environment value of
+ * `""`. `.optional()` alone accepts a missing key but correctly rejects that
+ * present-but-empty string against `.min(1)` — exactly the state compose
+ * puts every one of these fields in in practice, since the values that reach
+ * this schema come from container environments assembled by variable
+ * substitution, not typed by a human. Treating `""` the same as absent is
+ * what `.optional()` was actually trying to mean.
+ */
+function optionalNonEmpty() {
+  return z.preprocess(
+    (v) => (v === "" ? undefined : v),
+    z.string().min(1).optional(),
+  );
+}
+
+/**
  * One schema for all five apps.
  *
  * Anything only one app needs is `.optional()` or `.default()`ed, so the other
@@ -29,11 +50,11 @@ export const envSchema = z.object({
    * the original is what lets `extract-text` re-run new cleaning rules without
    * going back to the source.
    */
-  S3_ENDPOINT: z.string().min(1).optional(),
+  S3_ENDPOINT: optionalNonEmpty(),
   S3_REGION: z.string().min(1).default("auto"),
   S3_BUCKET: z.string().min(1).default("ingest"),
-  S3_ACCESS_KEY_ID: z.string().min(1).optional(),
-  S3_SECRET_ACCESS_KEY: z.string().min(1).optional(),
+  S3_ACCESS_KEY_ID: optionalNonEmpty(),
+  S3_SECRET_ACCESS_KEY: optionalNonEmpty(),
 
   /**
    * Directory the `local-directory` source scans. Relative paths resolve
@@ -43,7 +64,7 @@ export const envSchema = z.object({
   INGEST_CORPUS_DIR: z.string().min(1).default("./corpus"),
 
   // Required only by `extract`; optional here so the other apps boot without it.
-  GROQ_API_KEY: z.string().min(1).optional(),
+  GROQ_API_KEY: optionalNonEmpty(),
   GROQ_MODEL: z.string().min(1).default("openai/gpt-oss-120b"),
 
   /**
@@ -74,7 +95,7 @@ export const envSchema = z.object({
    * per second. Both are policy, not guidance — exceeding them gets an IP
    * blocked from free public infrastructure.
    */
-  GEOCODER_USER_AGENT: z.string().min(1).optional(),
+  GEOCODER_USER_AGENT: optionalNonEmpty(),
   GEOCODER_MIN_INTERVAL_MS: z.coerce.number().int().positive().default(1100),
 
   /**
@@ -82,7 +103,7 @@ export const envSchema = z.object({
    * Per-corpus knowledge and the cheapest accuracy win available — unset means
    * the whole world, which is how "Sutter's Mill" resolves to Idaho.
    */
-  GEOCODER_COUNTRY_CODES: z.string().min(1).optional(),
+  GEOCODER_COUNTRY_CODES: optionalNonEmpty(),
 
   // Read via process.env in @Processor() options (which evaluate at module-load
   // time, before DI exists) — validated here purely so a bad value fails fast.
@@ -105,7 +126,7 @@ export const envSchema = z.object({
    * than mounting openly — it exposes every job payload and a Remove button.
    */
   BULL_BOARD_USER: z.string().min(1).default("admin"),
-  BULL_BOARD_PASSWORD: z.string().min(1).optional(),
+  BULL_BOARD_PASSWORD: optionalNonEmpty(),
 
   PORT: z.coerce.number().int().positive().optional(),
 });

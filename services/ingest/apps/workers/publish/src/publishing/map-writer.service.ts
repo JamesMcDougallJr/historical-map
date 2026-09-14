@@ -105,13 +105,14 @@ export class MapWriterService {
     datePrecision?: string | null;
     dateText?: string | null;
     documentId?: string | null;
+    anchor?: string | null;
   }): Promise<boolean> {
     const result: unknown[] = await this.dataSource.query(
       `INSERT INTO events (
          id, location_id, source_id, title, date, description,
-         source, tags, date_precision, date_text, document_id
+         source, tags, date_precision, date_text, document_id, anchor
        )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
        ON CONFLICT (id) DO NOTHING
        RETURNING id`,
       [
@@ -126,6 +127,7 @@ export class MapWriterService {
         event.datePrecision ?? null,
         event.dateText ?? null,
         event.documentId ?? null,
+        event.anchor ?? null,
       ],
     );
     return result.length > 0;

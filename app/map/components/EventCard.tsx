@@ -10,6 +10,20 @@ interface EventCardProps {
   onAcknowledge?: (eventId: string) => void;
 }
 
+/**
+ * `anchor` is `"p.43"` — a segment id from the text artifact, not guaranteed
+ * to be a page number for every parser. Only build the `#page=` fragment when
+ * it parses as one; otherwise still link to the document, just without a deep
+ * link. The fragment is appended by the caller, not this route: a URL
+ * fragment is never sent to the server, so it rides the redirect for free.
+ */
+function sourceHref(event: HistoricalEvent): string | null {
+  if (!event.documentId) return null;
+  const page = event.anchor?.match(/^p\.(\d+)$/)?.[1];
+  const base = `/api/documents/${event.documentId}/source`;
+  return page ? `${base}#page=${page}` : base;
+}
+
 export function EventCard({
   event,
   isAcknowledged,
@@ -104,6 +118,21 @@ export function EventCard({
             className="text-xs text-neutral-500 dark:text-neutral-500 italic"
           />
         </div>
+      )}
+      {sourceHref(event) && (
+        <a
+          href={sourceHref(event) ?? undefined}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mt-1 inline-flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400 hover:underline"
+        >
+          View source document
+          {event.anchor && (
+            <span className="text-neutral-400 dark:text-neutral-500">
+              ({event.anchor})
+            </span>
+          )}
+        </a>
       )}
     </div>
   );
