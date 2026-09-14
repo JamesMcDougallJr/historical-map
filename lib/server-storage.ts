@@ -127,6 +127,18 @@ export async function listSources(): Promise<EventSource[]> {
 }
 
 /**
+ * "View source" needs `ingest_documents`, which only exists under the Postgres
+ * backend — the JSON file this repo's read-only demo serves has no ingestion
+ * pipeline behind it, so there is nothing to look up.
+ */
+export async function getIngestedDocument(
+  documentId: string,
+): Promise<{ title: string | null; originalKey: string | null } | null> {
+  if (!usePostgres()) return null;
+  return pg.getIngestedDocument(documentId);
+}
+
+/**
  * Spatial + temporal search. Under Postgres this becomes indexed SQL; on the
  * static backend the identical filters run in memory. Same results either way.
  */

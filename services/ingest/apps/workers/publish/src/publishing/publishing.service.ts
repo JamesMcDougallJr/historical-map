@@ -115,6 +115,7 @@ export class PublishingService {
           datePrecision: event.datePrecision,
           dateText: event.dateText,
           documentId,
+          anchor: event.anchor,
         });
 
         await this.candidateRepo.update(candidate.id, {

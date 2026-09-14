@@ -25,6 +25,10 @@ export interface HistoricalEvent {
   source?: string;
   /** EventSource.id — which publisher this event came from. */
   sourceId?: string;
+  /** `ingest_documents.id` — which document asserted this event, if ingested. */
+  documentId?: string;
+  /** Page/segment within that document, e.g. `"p.43"`. See `/api/events/:id/source`. */
+  anchor?: string;
 }
 
 /**
