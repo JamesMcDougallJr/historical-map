@@ -22,8 +22,20 @@ export const dynamic = "force-dynamic";
 
 const PRESIGN_TTL_SECONDS = 900;
 
+/**
+ * Presigning `getSignedUrl` never actually connects to S3 — it's a pure SigV4
+ * computation over the client's configured endpoint, region and credentials.
+ * That matters here specifically: this route runs inside the `web` container,
+ * where `S3_ENDPOINT` is `http://minio:9000` — a hostname only resolvable
+ * *inside* the Docker network. The redirect target has to be resolvable by
+ * the browser, which is outside it. `S3_PUBLIC_ENDPOINT` is that
+ * browser-reachable origin (`http://localhost:9000` in dev compose); it
+ * defaults to `S3_ENDPOINT` for the common case where server and browser can
+ * reach the same URL — a real S3 bucket, or this route run outside Docker.
+ */
 function s3Client(): S3Client | null {
-  const endpoint = process.env["S3_ENDPOINT"];
+  const endpoint =
+    process.env["S3_PUBLIC_ENDPOINT"] ?? process.env["S3_ENDPOINT"];
   const accessKeyId = process.env["S3_ACCESS_KEY_ID"];
   const secretAccessKey = process.env["S3_SECRET_ACCESS_KEY"];
   if (!accessKeyId || !secretAccessKey) return null;

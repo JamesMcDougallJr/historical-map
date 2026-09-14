@@ -4,7 +4,7 @@
 # the lockfile, and packages/domain ships TypeScript source that webpack must
 # compile in. Build with:
 #
-#   docker build -f services/ingest/apps/workers/extract/Dockerfile -t ingest-extract .
+#   docker build -f services/ingest/apps/workers/extract-events/Dockerfile -t ingest-extract-events .
 #
 FROM node:22-alpine AS build
 WORKDIR /repo
@@ -19,7 +19,7 @@ COPY packages/domain packages/domain
 COPY services/ingest services/ingest
 
 WORKDIR /repo/services/ingest
-RUN npx nest build extract
+RUN npx nest build extract-events
 
 FROM node:22-alpine
 ENV NODE_ENV=production
@@ -41,7 +41,7 @@ RUN npm ci --omit=dev --workspace=services/ingest \
 # `nest build` with webpack inlines every @app/* lib and @historical-map/domain
 # into one main.js (see webpack.config.js), so only the bundle is needed — never
 # the monorepo source.
-COPY --from=build /repo/services/ingest/dist/apps/workers/extract services/ingest/dist
+COPY --from=build /repo/services/ingest/dist/apps/workers/extract-events services/ingest/dist
 
 WORKDIR /app/services/ingest
 

@@ -1,0 +1,90 @@
+# Everything, in Docker, for local dev — the web app plus the whole ingestion
+# pipeline, replacing the "start seven node processes by hand" workflow.
+#
+#   GROQ_API_KEY=... docker compose \
+#     -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.dev.yml \
+#     up --build -d
+#
+# Layers on `docker-compose.prod.yml` rather than redefining the seven ingest
+# services: their build contexts, Dockerfiles, corpus volume mount and
+# dependency ordering are already correct and tested there. This file only
+# adds two things prod deliberately leaves to the caller:
+#
+#   1. `web` — the Next.js app. Not in the prod file on purpose: production
+#      deploys it to Vercel (see docker-compose.prod.yml's own header comment),
+#      and a container is exactly the wrong shape for a serverless target.
+#      Local dev has no Vercel, so it needs a container here.
+#   2. `POSTGRES_URL` pointed at this stack's own `db`/`redis`/`minio` service
+#      names on port 5432 (the in-network port) rather than the host-mapped
+#      5433 `docker-compose.yml` publishes for tools running outside Docker.
+#      The prod file leaves `POSTGRES_URL` with no default so a real deploy
+#      cannot silently ingest into a void — see its own header comment — which
+#      means local dev has to supply one.
+#
+# `BULL_BOARD_PASSWORD` defaults to a fixed local value here for convenience;
+# prod leaves it unset (dashboard disabled) for the same reason it leaves
+# POSTGRES_URL unset — a safe default is not always a default that's safe to
+# ship.
+
+x-dev-postgres: &dev-postgres
+  POSTGRES_URL: postgres://postgres:password@db:5432/db
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # Baked into the client bundle at build time (see the Dockerfile) —
+        # must be the URL the BROWSER can reach, i.e. the host-published port,
+        # never the in-network `martin:3000` hostname.
+        NEXT_PUBLIC_MARTIN_URL: ${NEXT_PUBLIC_MARTIN_URL:-http://localhost:3001}
+    environment:
+      <<: *dev-postgres
+      NODE_ENV: production
+      S3_ENDPOINT: http://minio:9000
+      # The presigned "view source" link must resolve for the BROWSER, which
+      # is outside this container's network — see the route's own comment.
+      S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-http://localhost:9000}
+      S3_BUCKET: ${S3_BUCKET:-ingest}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-minioadmin}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-minioadmin}
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  migrate:
+    environment:
+      <<: *dev-postgres
+
+  ingest-api:
+    environment:
+      <<: *dev-postgres
+      BULL_BOARD_PASSWORD: ${BULL_BOARD_PASSWORD:-ingest}
+
+  ingest-detect:
+    environment:
+      <<: *dev-postgres
+
+  ingest-fetch:
+    environment:
+      <<: *dev-postgres
+
+  ingest-extract-text:
+    environment:
+      <<: *dev-postgres
+
+  ingest-validate:
+    environment:
+      <<: *dev-postgres
+
+  ingest-extract-events:
+    environment:
+      <<: *dev-postgres
+
+  ingest-publish:
+    environment:
+      <<: *dev-postgres
