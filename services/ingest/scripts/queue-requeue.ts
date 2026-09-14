@@ -11,17 +11,33 @@
  */
 import { Queue } from "bullmq";
 import {
+  JOB_NAME_BY_QUEUE,
   JOB_OPTIONS_BY_QUEUE,
   QUEUE_NAMES,
   extractEventsJobId,
+  extractTextJobId,
   fetchJobId,
   publishJobId,
+  validateJobId,
   type QueueName,
 } from "../libs/queue/src";
 
-const JOB_ID_BUILDERS: Partial<Record<QueueName, (id: string) => string>> = {
+/**
+ * Every document-scoped queue. `detect` is absent on purpose — its jobs are
+ * keyed by source, not document, so `--document=<uuid>` has no meaning there.
+ *
+ * Deliberately NOT `Partial`: a new document-scoped stage should fail to
+ * compile here rather than silently become un-requeueable. Two stages were
+ * missing from this map for exactly that reason.
+ */
+const JOB_ID_BUILDERS: Record<
+  Exclude<QueueName, typeof QUEUE_NAMES.DETECT>,
+  (id: string) => string
+> = {
   [QUEUE_NAMES.FETCH]: fetchJobId,
+  [QUEUE_NAMES.EXTRACT_TEXT]: extractTextJobId,
   [QUEUE_NAMES.EXTRACT_EVENTS]: extractEventsJobId,
+  [QUEUE_NAMES.VALIDATE]: validateJobId,
   [QUEUE_NAMES.PUBLISH]: publishJobId,
 };
 
@@ -29,10 +45,17 @@ function arg(name: string): string | undefined {
   return process.argv.find((a) => a.startsWith(`--${name}=`))?.split("=")[1];
 }
 
+type RequeueableQueue = keyof typeof JOB_ID_BUILDERS;
+
+function isRequeueable(name: string | undefined): name is RequeueableQueue {
+  return name !== undefined && name in JOB_ID_BUILDERS;
+}
+
 async function main(): Promise<void> {
-  const queueName = arg("queue") as QueueName | undefined;
+  const requested = arg("queue");
   const documentId = arg("document");
 
+  const queueName = isRequeueable(requested) ? requested : undefined;
   const buildJobId = queueName ? JOB_ID_BUILDERS[queueName] : undefined;
   if (!queueName || !buildJobId || !documentId) {
     console.error(
@@ -63,7 +86,7 @@ async function main(): Promise<void> {
     }
 
     await queue.add(
-      queueName,
+      JOB_NAME_BY_QUEUE[queueName],
       { documentId },
       { jobId, ...JOB_OPTIONS_BY_QUEUE[queueName] },
     );

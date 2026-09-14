@@ -16,6 +16,25 @@ export const QUEUE_NAMES = {
 export type QueueName = (typeof QUEUE_NAMES)[keyof typeof QUEUE_NAMES];
 
 /**
+ * The job *name* each stage enqueues under — distinct from the queue name, and
+ * purely descriptive: every processor is a `WorkerHost` handling all names on
+ * its queue, so nothing dispatches on these.
+ *
+ * They are not cosmetic either. Bull Board lists jobs by name, so a re-enqueue
+ * that invents its own name produces a job that looks nothing like the one the
+ * pipeline would have created for the same work — which is actively misleading
+ * in the one place an operator goes to compare them.
+ */
+export const JOB_NAME_BY_QUEUE = {
+  [QUEUE_NAMES.DETECT]: "poll-source",
+  [QUEUE_NAMES.FETCH]: "fetch-document",
+  [QUEUE_NAMES.EXTRACT_TEXT]: "extract-text",
+  [QUEUE_NAMES.EXTRACT_EVENTS]: "extract-events",
+  [QUEUE_NAMES.VALIDATE]: "validate-document",
+  [QUEUE_NAMES.PUBLISH]: "publish-document",
+} as const satisfies Record<QueueName, string>;
+
+/**
  * Retry budgets are tuned per stage to what the stage actually costs. They are
  * not a uniform policy with the numbers filled in.
  */
