@@ -15,12 +15,12 @@ import type {
   HistoricalEventsData,
   HistoricalEvent,
   HistoricalLocation,
-} from "@/app/map/types";
+} from "../app/map/types";
 import {
   eventYear,
   type EventQuery,
   type EventSearchResult,
-} from "@/app/map/utils/event-query";
+} from "../app/map/utils/event-query";
 import * as pg from "./postgres-storage";
 
 const DATA_PATH =

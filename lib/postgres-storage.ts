@@ -15,8 +15,8 @@ import type {
   HistoricalEventsData,
   HistoricalEvent,
   HistoricalLocation,
-} from "@/app/map/types";
-import type { EventQuery } from "@/app/map/utils/event-query";
+} from "../app/map/types";
+import type { EventQuery } from "../app/map/utils/event-query";
 
 let client: ReturnType<typeof postgres> | null = null;
 
