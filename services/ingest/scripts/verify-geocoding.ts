@@ -2,12 +2,12 @@
  * Exercises `FallbackGeocoder` and `WhgGeocoder` against a mocked `fetch`.
  * No network, no database, no Redis.
  *
- * `FallbackGeocoder` is fully implemented and should be green already.
- * `WhgGeocoder`'s HTTP methods are stubbed (`geocode.reconcile`,
- * `.fetchEntityCoordinates`) — this file is the acceptance spec to implement
- * them against. Run it, watch it fail, implement, rerun until green:
- *
  *   npm run geocoding:verify --workspace=services/ingest
+ *
+ * Once implemented, exercise it against the real WHG API with `--live` —
+ * requires a token from https://whgazetteer.org 's Profile page:
+ *
+ *   WHG_API_TOKEN=... npm run geocoding:verify --workspace=services/ingest -- --live
  */
 import { ConfigService } from "@nestjs/config";
 import type { GeocodeHit, Geocoder } from "../libs/geocoding/src";
@@ -70,7 +70,7 @@ class StubGeocoder implements Geocoder {
       | { type: "hit"; hit: GeocodeHit }
       | { type: "miss" }
       | { type: "throw"; error: Error },
-  ) {}
+  ) { }
 
   async geocode(): Promise<GeocodeHit | null> {
     this.callCount++;
@@ -117,41 +117,57 @@ function installFetchMock(responses: MockResponse[]): {
   };
 }
 
+// Shaped after a real `/reconcile` response for "Sutters Mill" (captured
+// 2026-09-14): repr_point is [lon, lat], and — the case that matters — a tie
+// at score 100 between a match in California and an unrelated same-named
+// place in Virginia, plus a `match: false` candidate scoring as high as
+// genuine non-matches, so score alone can't be the accept signal.
 const RECONCILE_HIT_BODY = {
-  q1: {
+  q0: {
     result: [
       {
-        id: "place:169687",
-        name: "Coloma",
-        score: 87.5,
+        id: "place:gn:5285192",
+        name: "Sutters Mill",
+        score: 100,
         match: true,
         description: "Country: US",
+        repr_point: [-120.89188, 38.80296],
+      },
+      {
+        id: "place:osm:n3937043163",
+        name: "Sutters Mill",
+        score: 100,
+        match: true,
+        description: "Country: US",
+        repr_point: [-77.656355, 37.45198],
+      },
+      {
+        id: "place:wd:Q1973789",
+        name: "Sutter's Mill",
+        score: 40,
+        match: false,
+        description: "Country: US",
+        repr_point: [-120.892361, 38.803472],
       },
     ],
   },
 };
 
-const RECONCILE_LOW_SCORE_BODY = {
-  q1: {
+const RECONCILE_NO_MATCH_BODY = {
+  q0: {
     result: [
-      { id: "place:1", name: "Coloma Estates", score: 12, match: false },
+      {
+        id: "place:1",
+        name: "Coloma Estates",
+        score: 40,
+        match: false,
+        repr_point: [-120.9, 38.8],
+      },
     ],
   },
 };
 
-const RECONCILE_EMPTY_BODY = { q1: { result: [] } };
-
-const ENTITY_WITH_GEOMETRY_BODY = {
-  type: "Feature",
-  geometry: { type: "Point", coordinates: [-120.8895, 38.8016] },
-  names: [{ toponym: "Coloma" }],
-};
-
-const ENTITY_WITHOUT_GEOMETRY_BODY = {
-  type: "Feature",
-  geometry: null,
-  names: [{ toponym: "Coloma" }],
-};
+const RECONCILE_EMPTY_BODY = { q0: { result: [] } };
 
 async function main(): Promise<void> {
   // ── FallbackGeocoder ──────────────────────────────────────────────────
@@ -247,89 +263,73 @@ async function main(): Promise<void> {
   }
 
   {
-    const mock = installFetchMock([
-      { status: 200, body: RECONCILE_HIT_BODY },
-      { status: 200, body: ENTITY_WITH_GEOMETRY_BODY },
-    ]);
+    const mock = installFetchMock([{ status: 200, body: RECONCILE_HIT_BODY }]);
     const geocoder = new WhgGeocoder(
       fakeConfig({ WHG_API_TOKEN: "test-token", WHG_MIN_INTERVAL_MS: 0 }),
     );
     const hit = await safeGeocode(
       geocoder,
-      "Sutter's Mill",
-      "a well-scored match resolves without throwing",
+      "Sutters Mill",
+      "a matched candidate resolves without throwing",
     );
     if (hit !== undefined) {
       check(
-        "resolves lon/lat from the entity API's geometry.coordinates ([lon, lat])",
-        hit?.lon === -120.8895 && hit?.lat === 38.8016,
+        "repr_point [lon, lat] maps to hit.lon/hit.lat, not swapped",
+        hit?.lon === -120.89188 && hit?.lat === 38.80296,
         JSON.stringify(hit),
       );
       check(
-        "displayName comes from the winning candidate's name",
-        hit?.displayName === "Coloma",
+        "tied top-score matches: the first candidate wins (documented limitation)",
+        hit?.displayName?.startsWith("Sutters Mill") ?? false,
         hit?.displayName,
       );
     }
     check(
-      "reconcile is called, then the entity API for the winning id",
-      mock.calls.length === 2 &&
-        mock.calls[0]!.url.includes("/reconcile") &&
-        mock.calls[1]!.url.includes("place:169687"),
+      "exactly one request is made — no second (entity) lookup",
+      mock.calls.length === 1 && mock.calls[0]!.url.includes("/reconcile"),
       mock.calls.map((c) => c.url).join(" | "),
     );
     check(
-      "reconcile request carries the token and a User-Agent header",
+      "request carries Bearer token and a User-Agent header",
       (() => {
         const init = mock.calls[0]?.init;
         const headers = new Headers(init?.headers);
         const auth = headers.get("authorization") ?? "";
         return (
           init?.method === "POST" &&
-          auth.includes("test-token") &&
+          auth === "Bearer test-token" &&
           !!headers.get("user-agent")
         );
       })(),
     );
     check(
-      "reconcile request body queries the given place name",
+      "request body queries the given place name under key q0",
       (() => {
         const body = mock.calls[0]?.init?.body;
         if (typeof body !== "string") return false;
         const parsed = JSON.parse(body) as {
           queries: Record<string, { query: string }>;
         };
-        return Object.values(parsed.queries).some(
-          (q) => q.query === "Sutter's Mill",
-        );
+        return parsed.queries["q0"]?.query === "Sutters Mill";
       })(),
     );
     mock.restore();
   }
 
   {
-    const mock = installFetchMock([{ status: 200, body: RECONCILE_LOW_SCORE_BODY }]);
+    const mock = installFetchMock([{ status: 200, body: RECONCILE_NO_MATCH_BODY }]);
     const geocoder = new WhgGeocoder(
-      fakeConfig({
-        WHG_API_TOKEN: "test-token",
-        WHG_MIN_SCORE: 40,
-        WHG_MIN_INTERVAL_MS: 0,
-      }),
+      fakeConfig({ WHG_API_TOKEN: "test-token", WHG_MIN_INTERVAL_MS: 0 }),
     );
     const hit = await safeGeocode(
       geocoder,
       "Coloma Estates",
-      "a candidate below WHG_MIN_SCORE resolves without throwing",
+      "a same-scoring non-match resolves without throwing",
     );
     check(
-      "a candidate below WHG_MIN_SCORE is treated as no match",
+      "a candidate with match:false is rejected even at a passing score",
       hit === null,
       JSON.stringify(hit),
-    );
-    check(
-      "a below-threshold candidate never triggers an entity lookup",
-      mock.calls.length === 1,
-      `${mock.calls.length} calls`,
     );
     mock.restore();
   }
@@ -349,34 +349,13 @@ async function main(): Promise<void> {
   }
 
   {
-    const mock = installFetchMock([
-      { status: 200, body: RECONCILE_HIT_BODY },
-      { status: 200, body: ENTITY_WITHOUT_GEOMETRY_BODY },
-    ]);
+    const mock = installFetchMock([{ status: 401, body: {} }]);
     const geocoder = new WhgGeocoder(
-      fakeConfig({ WHG_API_TOKEN: "test-token", WHG_MIN_INTERVAL_MS: 0 }),
-    );
-    const hit = await safeGeocode(
-      geocoder,
-      "Coloma",
-      "a geometry-less entity resolves without throwing",
-    );
-    check(
-      "a matched entity with no geometry yields null rather than fabricated coordinates",
-      hit === null,
-      JSON.stringify(hit),
-    );
-    mock.restore();
-  }
-
-  {
-    const mock = installFetchMock([{ status: 500, body: {} }]);
-    const geocoder = new WhgGeocoder(
-      fakeConfig({ WHG_API_TOKEN: "test-token", WHG_MIN_INTERVAL_MS: 0 }),
+      fakeConfig({ WHG_API_TOKEN: "bad-token", WHG_MIN_INTERVAL_MS: 0 }),
     );
     const result = await expectRejects(() => geocoder.geocode("Coloma"));
     check(
-      "a reconcile HTTP failure throws (retryable), not a cached miss",
+      "an HTTP failure (e.g. bad token) throws (retryable), not a cached miss",
       result.threw,
       result.message,
     );
@@ -386,26 +365,7 @@ async function main(): Promise<void> {
   {
     const mock = installFetchMock([
       { status: 200, body: RECONCILE_HIT_BODY },
-      { status: 500, body: {} },
-    ]);
-    const geocoder = new WhgGeocoder(
-      fakeConfig({ WHG_API_TOKEN: "test-token", WHG_MIN_INTERVAL_MS: 0 }),
-    );
-    const result = await expectRejects(() => geocoder.geocode("Coloma"));
-    check(
-      "an entity-API HTTP failure throws (retryable), not a cached miss",
-      result.threw,
-      result.message,
-    );
-    mock.restore();
-  }
-
-  {
-    const mock = installFetchMock([
       { status: 200, body: RECONCILE_HIT_BODY },
-      { status: 200, body: ENTITY_WITH_GEOMETRY_BODY },
-      { status: 200, body: RECONCILE_HIT_BODY },
-      { status: 200, body: ENTITY_WITH_GEOMETRY_BODY },
     ]);
     const geocoder = new WhgGeocoder(
       fakeConfig({ WHG_API_TOKEN: "test-token", WHG_MIN_INTERVAL_MS: 50 }),
@@ -422,10 +382,36 @@ async function main(): Promise<void> {
     mock.restore();
   }
 
+  // ── Optional live call ────────────────────────────────────────────────────
+  // Same idea as extract:verify's `--live`: this is an internal library with
+  // no HTTP route of its own to hit from Postman/curl, so the acceptance
+  // script itself is the harness for a real network round trip. Unlike the
+  // mocked checks above, a live WHG response can't be asserted byte-for-byte
+  // (their index changes), so this prints what came back for a human to
+  // eyeball rather than pinning exact coordinates.
+  if (process.argv.includes("--live")) {
+    const token = process.env["WHG_API_TOKEN"];
+    if (!token) {
+      check("live call", false, "--live given but WHG_API_TOKEN is unset");
+    } else {
+      const geocoder = new WhgGeocoder({
+        get: (key: string) => process.env[key],
+      } as unknown as ConfigService);
+
+      for (const place of ["Sutter's Mill", "Promontory Summit", "Nonexistent Place Zzyzx123"]) {
+        const result = await expectRejects(async () => {
+          const hit = await geocoder.geocode(place);
+          console.log(`  "${place}" ->`, hit);
+        });
+        check(`live geocode("${place}") does not throw`, !result.threw, result.message);
+      }
+    }
+  }
+
   let failed = 0;
   for (const [name, ok, detail] of checks) {
     console.log(
-      `${ok ? "PASS" : "FAIL"}  ${name}${!ok && detail ? `  (${detail})` : ""}`,
+      `${ok ? "PASS" : "FAIL"}  ${name}${detail && (!ok || process.argv.includes("--live")) ? `  (${detail})` : ""}`,
     );
     if (!ok) failed++;
   }
