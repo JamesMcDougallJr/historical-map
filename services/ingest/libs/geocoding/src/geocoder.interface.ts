@@ -3,6 +3,13 @@ export interface GeocodeHit {
   lat: number;
   /** The provider's own label for what it matched, for spot-checking. */
   displayName: string;
+  /**
+   * Which provider actually produced this hit. Only meaningful when a
+   * `Geocoder` delegates to others (see `FallbackGeocoder`) — a single
+   * provider's own hits are attributed via its `providerName` instead, so
+   * this is left unset there.
+   */
+  provider?: string;
 }
 
 /**
