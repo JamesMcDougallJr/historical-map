@@ -1,6 +1,6 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import type { GeocodeHit, Geocoder } from "./geocoder.interface";
+import type { GeocodeCandidate, GeocodeHit, Geocoder } from "./geocoder.interface";
 
 const WHG_RECONCILE_URL = "https://whgazetteer.org/reconcile";
 const REQUEST_TIMEOUT_MS = 15_000;
@@ -93,13 +93,35 @@ export class WhgGeocoder implements Geocoder {
     await this.respectRateLimit();
     const candidates = await this.reconcile(placeName);
 
-    const best = candidates
+    const accepted = candidates
       .filter((c) => c.match && c.score >= this.minScore)
-      .sort((a, b) => b.score - a.score)[0];
+      .sort((a, b) => b.score - a.score);
+    const best = accepted[0];
     if (!best) return null;
 
     const [lon, lat] = best.repr_point;
     if (!Number.isFinite(lon) || !Number.isFinite(lat)) return null;
+
+    // Ties at the top score — e.g. the CA/VA "Sutters Mill" case this file's
+    // fixture is built around — are real ambiguity a human should be able to
+    // see, not just the auto-picked winner. Deduped by coordinates: distinct
+    // places (however same-named) must all survive; a provider returning a
+    // literal duplicate candidate must not.
+    const seen = new Set([`${lon},${lat}`]);
+    const alternates: GeocodeCandidate[] = [];
+    for (const c of accepted.slice(1)) {
+      if (c.score !== best.score) break;
+      const [altLon, altLat] = c.repr_point;
+      if (!Number.isFinite(altLon) || !Number.isFinite(altLat)) continue;
+      const key = `${altLon},${altLat}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      alternates.push({
+        lon: altLon,
+        lat: altLat,
+        displayName: c.description ? `${c.name} (${c.description})` : c.name,
+      });
+    }
 
     return {
       lon,
@@ -107,6 +129,7 @@ export class WhgGeocoder implements Geocoder {
       displayName: best.description
         ? `${best.name} (${best.description})`
         : best.name,
+      ...(alternates.length ? { alternates } : {}),
     };
   }
 

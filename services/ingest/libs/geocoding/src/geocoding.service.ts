@@ -60,6 +60,7 @@ export class GeocodingService {
         found: hit !== null,
         provider: hit?.provider ?? this.geocoder.providerName,
         displayName: hit?.displayName ?? null,
+        candidates: hit?.alternates?.length ? hit.alternates : null,
       })
       // A concurrent worker may have just cached the same place.
       .orIgnore()
