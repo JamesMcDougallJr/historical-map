@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as storage from "@/lib/server-storage";
 import { generateEventId } from "@/app/map/utils/storage";
+import { corsPreflight } from "@/lib/cors";
 import type { HistoricalEvent } from "@/app/map/types";
+
+export const OPTIONS = corsPreflight;
 
 function checkApiKey(req: NextRequest): boolean {
   const key = process.env["MAP_API_KEY"];
@@ -44,6 +47,9 @@ export async function POST(
       source: body.source,
       tags: body.tags,
       imageUrl: body.imageUrl,
+      datePrecision: body.datePrecision,
+      dateText: body.dateText,
+      sourceId: body.sourceId,
     };
 
     const location = await storage.addEventsToLocation(id, [event]);

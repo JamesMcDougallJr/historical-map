@@ -99,6 +99,17 @@ export function ensureSchema(): Promise<void> {
       )`;
     await db`ALTER TABLE events ADD COLUMN IF NOT EXISTS source_id text REFERENCES sources(id) ON DELETE SET NULL`;
 
+    // Owned by the ingest side's TypeORM migration too (map-writer writes them
+    // via raw SQL there). Adding them here as well means this file's own
+    // schema management is self-sufficient on a Postgres that was only ever
+    // seeded via `npm run seed:db`, without depending on ingest migrations
+    // having run first.
+    await db`ALTER TABLE events ADD COLUMN IF NOT EXISTS date_precision text`;
+    await db`ALTER TABLE events ADD COLUMN IF NOT EXISTS date_text text`;
+    await db`ALTER TABLE events ADD COLUMN IF NOT EXISTS document_id uuid`;
+    await db`ALTER TABLE events ADD COLUMN IF NOT EXISTS anchor text`;
+    await db`CREATE INDEX IF NOT EXISTS events_document_id_idx ON events (document_id)`;
+
     // Change watermark, read by readData(). Without it `lastUpdated` was
     // regenerated on every read, so the map's poll saw a "change" every 5s and
     // re-rendered regardless of whether anything had actually happened.
@@ -284,10 +295,10 @@ async function insertEvent(
   e: HistoricalEvent,
 ): Promise<void> {
   await sql()`
-    INSERT INTO events (id, location_id, source_id, title, date, description, image_url, source, tags)
+    INSERT INTO events (id, location_id, source_id, title, date, description, image_url, source, tags, date_precision, date_text)
     VALUES (${e.id}, ${locationId}, ${e.sourceId ?? null}, ${e.title}, ${e.date},
             ${e.description}, ${e.imageUrl ?? null}, ${e.source ?? null},
-            ${e.tags ?? null})
+            ${e.tags ?? null}, ${e.datePrecision ?? null}, ${e.dateText ?? null})
     ON CONFLICT (id) DO NOTHING`;
 }
 
@@ -295,6 +306,72 @@ export async function deleteLocation(id: string): Promise<boolean> {
   await ensureSchema();
   // Events go with it via ON DELETE CASCADE.
   const result = await sql()`DELETE FROM locations WHERE id = ${id}`;
+  return result.count > 0;
+}
+
+export async function updateLocation(
+  id: string,
+  patch: { name?: string; coordinates?: [number, number] },
+): Promise<HistoricalLocation | null> {
+  await ensureSchema();
+  const rows = await sql()<LocationRow[]>`
+    UPDATE locations
+    SET name = COALESCE(${patch.name ?? null}, name),
+        lon = COALESCE(${patch.coordinates?.[0] ?? null}, lon),
+        lat = COALESCE(${patch.coordinates?.[1] ?? null}, lat),
+        updated_at = now()
+    WHERE id = ${id}
+    RETURNING id, name, lon, lat`;
+  const row = rows[0];
+  if (!row) return null;
+  const [updated] = await assemble([row]);
+  return updated ?? null;
+}
+
+export async function updateEvent(
+  locationId: string,
+  eventId: string,
+  patch: Partial<
+    Pick<
+      HistoricalEvent,
+      | "title"
+      | "date"
+      | "description"
+      | "datePrecision"
+      | "dateText"
+      | "source"
+      | "sourceId"
+      | "tags"
+      | "imageUrl"
+    >
+  >,
+): Promise<HistoricalEvent | null> {
+  await ensureSchema();
+  const rows = await sql()<EventRow[]>`
+    UPDATE events
+    SET title = COALESCE(${patch.title ?? null}, title),
+        date = COALESCE(${patch.date ?? null}, date),
+        description = COALESCE(${patch.description ?? null}, description),
+        date_precision = COALESCE(${patch.datePrecision ?? null}, date_precision),
+        date_text = COALESCE(${patch.dateText ?? null}, date_text),
+        source = COALESCE(${patch.source ?? null}, source),
+        source_id = COALESCE(${patch.sourceId ?? null}, source_id),
+        tags = COALESCE(${patch.tags ?? null}, tags),
+        image_url = COALESCE(${patch.imageUrl ?? null}, image_url),
+        updated_at = now()
+    WHERE id = ${eventId} AND location_id = ${locationId}
+    RETURNING *`;
+  const row = rows[0];
+  return row ? toEvent(row) : null;
+}
+
+export async function deleteEvent(
+  locationId: string,
+  eventId: string,
+): Promise<boolean> {
+  await ensureSchema();
+  const result = await sql()`
+    DELETE FROM events WHERE id = ${eventId} AND location_id = ${locationId}`;
   return result.count > 0;
 }
 
