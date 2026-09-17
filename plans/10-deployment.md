@@ -39,23 +39,37 @@ Postgres is the integration point. The workers write; the web app reads what it 
 There is no service-to-service API between them, deliberately — one less thing to authenticate,
 version, and page someone about.
 
-## Where the workers run
+## Where the workers run · **Decided**
 
-| Option | For | Against |
-|---|---|---|
-| **Single VPS / EC2 + Docker Compose** | Cheapest, most control, and the compose file already exists for local dev — one artefact for both. The State Affairs choice. | Manual provisioning; you own the host. |
-| **Fly.io / Railway** | Managed containers, managed Postgres and Redis add-ons, near-zero ops. | Less control; another bill. |
-| **ECS/Fargate** | Scales properly. | Adds moving parts this workload's actual volume does not justify. |
+The workers run **locally**, on the operator's own machine, via the existing `docker-compose.yml`
+— not a VPS. This is a deliberate cost decision (avoid paying for a host running the "opposite
+shape from serverless" workload described above), not an oversight of the options table that used
+to live here. Redis and object storage (MinIO) stay local too — nothing about the worker host
+needs to be reachable from the internet, since Postgres is the only integration point and the
+workers only ever *write* to it.
 
-Recommendation: **a single small VPS running the existing compose stack**, extended with the
-Redis and worker services from phase 2. Ingestion volume here is a handful of documents per
-source per day at steady state — this is not a workload that needs an orchestrator, and the
-same compose file serving dev and prod is a real simplification.
+## Where Martin runs · **Decided**
 
-Decide before phase 10 whether production Postgres is the **existing Vercel/managed Postgres**
-(simplest — one database, already backed up, already what the app reads) or a container on the
-same host (cheaper, but now you own backups). Recommendation: keep the managed one and point
-the workers at it.
+`app/map` renders event layers as live MVT tiles instead of static GeoJSON purely based on whether
+`NEXT_PUBLIC_MARTIN_URL` is set (`app/map/utils/event-layers.ts`) — so Martin (`docker-compose.yml`'s
+`martin` service) is the one piece besides Postgres that needs a stable **public** HTTPS URL, since
+the Vercel-hosted browser fetches tiles from it directly.
+
+Current: **AWS Lightsail Container Service** (`infra/`, Terraform) — a single stateless container,
+no load balancer needed for a stable HTTPS URL, ~$7/mo, torn down with `terraform destroy`.
+Deliberately an interim step: once self-hosting is set up, Martin moves to the same local machine
+as the workers, exposed via a Cloudflare Tunnel, and the Lightsail service goes away — the only
+thing that changes elsewhere is `NEXT_PUBLIC_MARTIN_URL` in Vercel.
+
+## Where Postgres runs · **Decided**
+
+**AWS RDS for PostgreSQL** (`infra/`, Terraform), not the container-on-the-worker-host option this
+section used to weigh — `POSTGRES_URL` needs to be reachable from both Vercel (build+runtime) and
+Martin (Lightsail), so it has to be public regardless of where the workers themselves live.
+RDS Postgres supports `CREATE EXTENSION postgis`, which `lib/postgres-storage.ts`'s `ensureSchema()`
+requires. `publicly_accessible = true` with `0.0.0.0/0` ingress is a stated demo-grade tradeoff
+(Vercel serverless functions have no fixed egress IP without paid Secure Compute) — see
+`infra/README.md` for the mitigations (`sslmode=require` enforced server-side, generated password).
 
 ## Configuration
 
