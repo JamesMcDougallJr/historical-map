@@ -10,3 +10,12 @@ pg_data
 .DS_Store
 .claude/worktrees
 .env*.local
+
+# Terraform state holds the generated RDS password in plaintext.
+# (.terraform.lock.hcl is NOT ignored — it's meant to be committed, pins provider versions.)
+infra/.terraform
+infra/*.tfstate
+infra/*.tfstate.*
+infra/*.tfvars
+infra/crash.log
+infra/crash.*.log
