@@ -1,5 +1,5 @@
 variable "aws_region" {
-  description = "AWS region for RDS and Lightsail."
+  description = "AWS region for RDS, ECS/Fargate, and the ALB. CloudFront is global regardless."
   type        = string
   default     = "us-east-1"
 }
@@ -52,35 +52,34 @@ variable "rds_allowed_cidr_blocks" {
   default     = ["0.0.0.0/0"]
 }
 
-# ── Lightsail (Martin) ───────────────────────────────────────────────────────
-
-variable "lightsail_power" {
-  description = "nano is the smallest/cheapest tier (~$7/mo) — Martin is a single stateless container with light demo traffic."
-  type        = string
-  default     = "nano"
-}
-
-variable "lightsail_scale" {
-  type    = number
-  default = 1
-}
+# ── Martin (ECS Fargate + ALB + CloudFront) ─────────────────────────────────
+#
+# Not Lightsail Container Service: this account's Container Service quota is
+# 0 (confirmed empty across every Lightsail region, yet AWS still rejects
+# creating the first one as "exceeding your maximum limit" — a quota-increase
+# request is required and isn't instant). Fargate needs no such request.
+#
+# A plain ALB can't get a browser-trusted HTTPS certificate without owning a
+# custom domain (ACM won't issue certs for the ALB's own *.elb.amazonaws.com
+# name) — and Vercel serves the map over HTTPS, so an HTTP-only tile endpoint
+# is blocked outright as mixed content, not just insecure. CloudFront sits in
+# front of the ALB purely to get a free HTTPS endpoint on a *.cloudfront.net
+# domain with an AWS-managed certificate, no domain purchase required.
 
 variable "martin_source_image" {
-  description = "Upstream image, matching docker-compose.yml's martin service. Informational — passed to scripts/push-martin-image.sh, not read by Terraform itself."
+  description = "Matches docker-compose.yml's martin service. Fargate pulls this directly — unlike Lightsail, no local docker pull/push step is needed."
   type        = string
   default     = "ghcr.io/maplibre/martin:1.16.0"
 }
 
-variable "martin_image_ref" {
-  description = <<-EOT
-    The Lightsail-registry image reference (e.g. ":historical-map-martin.martin.1")
-    returned by `scripts/push-martin-image.sh` after it pushes martin_source_image
-    into this service's private registry. Left with no default deliberately —
-    the service must exist before an image can be pushed into it, so this is
-    a genuine two-step apply (see infra/README.md). Leave unset for the first
-    `terraform apply` (which will create the service and RDS instance only);
-    supply it for the second apply that creates the deployment version.
-  EOT
+variable "martin_cpu" {
+  description = "Fargate task vCPU units (256 = 0.25 vCPU, the smallest size) — Martin is a single stateless process with light demo traffic."
   type        = string
-  default     = null
+  default     = "256"
+}
+
+variable "martin_memory" {
+  description = "Fargate task memory in MiB. 512 is the minimum paired with 256 CPU units."
+  type        = string
+  default     = "512"
 }

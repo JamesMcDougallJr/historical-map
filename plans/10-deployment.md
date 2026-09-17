@@ -55,17 +55,25 @@ workers only ever *write* to it.
 `martin` service) is the one piece besides Postgres that needs a stable **public** HTTPS URL, since
 the Vercel-hosted browser fetches tiles from it directly.
 
-Current: **AWS Lightsail Container Service** (`infra/`, Terraform) — a single stateless container,
-no load balancer needed for a stable HTTPS URL, ~$7/mo, torn down with `terraform destroy`.
-Deliberately an interim step: once self-hosting is set up, Martin moves to the same local machine
-as the workers, exposed via a Cloudflare Tunnel, and the Lightsail service goes away — the only
-thing that changes elsewhere is `NEXT_PUBLIC_MARTIN_URL` in Vercel.
+Current: **ECS Fargate behind an ALB behind CloudFront** (`infra/`, Terraform), ~$40–50/mo, torn
+down with `terraform destroy`. The original plan was Lightsail Container Service (a single
+stateless container, no load balancer needed, ~$7/mo) — abandoned after a real deploy attempt
+found this account's Container Service quota is 0 (confirmed empty across every Lightsail region;
+AWS still rejects creating the first one as exceeding the limit, which needs an AWS Support
+quota-increase request, not something scriptable). CloudFront exists specifically because a plain
+ALB can't get a browser-trusted HTTPS cert without a custom domain, and Vercel serves the map over
+HTTPS — an HTTP-only tile endpoint is blocked as mixed content, not just insecure.
+Deliberately an interim step regardless of which of these it ends up being: once self-hosting is
+set up, Martin moves to the same local machine as the workers, exposed via a Cloudflare Tunnel,
+and this whole stack goes away — the only thing that changes elsewhere is `NEXT_PUBLIC_MARTIN_URL`
+in Vercel. Full apply/verify/teardown walkthrough — including the confirmed-working
+`tofu apply` → seed → curl-verified MVT tiles → `tofu destroy` cycle — is in `infra/README.md`.
 
 ## Where Postgres runs · **Decided**
 
 **AWS RDS for PostgreSQL** (`infra/`, Terraform), not the container-on-the-worker-host option this
 section used to weigh — `POSTGRES_URL` needs to be reachable from both Vercel (build+runtime) and
-Martin (Lightsail), so it has to be public regardless of where the workers themselves live.
+Martin, so it has to be public regardless of where the workers themselves live.
 RDS Postgres supports `CREATE EXTENSION postgis`, which `lib/postgres-storage.ts`'s `ensureSchema()`
 requires. `publicly_accessible = true` with `0.0.0.0/0` ingress is a stated demo-grade tradeoff
 (Vercel serverless functions have no fixed egress IP without paid Secure Compute) — see
