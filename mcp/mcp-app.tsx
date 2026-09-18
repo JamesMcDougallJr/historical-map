@@ -33,6 +33,11 @@ const INLINE_LAYERS: EventLayer[] = [
   },
 ];
 
+// Comfortable card size when the host only offers a growth ceiling rather
+// than an exact box — see the maxHeight/maxWidth note in onhostcontextchanged.
+const MAX_APP_HEIGHT = 520;
+const MAX_APP_WIDTH = 800;
+
 interface McpAppParams {
   locations?: HistoricalLocation[];
   filterYear?: number;
@@ -76,6 +81,39 @@ async function main() {
     if (ctx.safeAreaInsets) {
       const { top, right, bottom, left } = ctx.safeAreaInsets;
       document.body.style.padding = `${top}px ${right}px ${bottom}px ${left}px`;
+    }
+    // OL needs a container with a real pixel size. html/body/#root are
+    // height:100%, which resolves against the iframe's own box — but with
+    // autoResize on, the host sizes that box from *our* reported content
+    // height, and our content has no intrinsic height of its own (it's
+    // 100% of the iframe too). That's a 0/0 fixed point: report 0, get
+    // sized to 0, measure 0 again. containerDimensions breaks the loop by
+    // telling us the size the host actually gave the iframe.
+    //
+    // `height`/`width` are an exact box the host already allocated — safe to
+    // fill 1:1. `maxHeight`/`maxWidth` are only a ceiling autoResize is
+    // allowed to grow into, which can be much taller than what's actually
+    // visible on-screen without scrolling. Filling the whole ceiling made the
+    // map report that height back via autoResize, the host obliged, and only
+    // the unscrolled top sliver was visible — the fixed-center view (Utah)
+    // sits mid-box, so that sliver reads as somewhere north of it. Clamp to a
+    // comfortable constant instead so the whole map fits on-screen.
+    const dims = ctx.containerDimensions;
+    if (dims) {
+      const height =
+        "height" in dims
+          ? dims.height
+          : dims.maxHeight
+            ? Math.min(MAX_APP_HEIGHT, dims.maxHeight)
+            : undefined;
+      const width =
+        "width" in dims
+          ? dims.width
+          : dims.maxWidth
+            ? Math.min(MAX_APP_WIDTH, dims.maxWidth)
+            : undefined;
+      if (height) document.documentElement.style.height = `${height}px`;
+      if (width) document.documentElement.style.width = `${width}px`;
     }
   };
 
