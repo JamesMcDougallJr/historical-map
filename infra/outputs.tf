@@ -8,12 +8,12 @@ output "rds_endpoint" {
   value = aws_db_instance.postgres.address
 }
 
-output "lightsail_service_name" {
-  description = "Pass to scripts/push-martin-image.sh."
-  value       = aws_lightsail_container_service.martin.name
+output "martin_url" {
+  description = "Set this as NEXT_PUBLIC_MARTIN_URL on Vercel — a CloudFront HTTPS endpoint in front of the ALB/Fargate task."
+  value       = "https://${aws_cloudfront_distribution.martin.domain_name}"
 }
 
-output "lightsail_url" {
-  description = "Set this as NEXT_PUBLIC_MARTIN_URL on Vercel once the deployment version exists (second apply)."
-  value       = try(aws_lightsail_container_service.martin.url, null)
+output "alb_dns_name" {
+  description = "For debugging the ALB/Fargate task directly (HTTP only, not what Vercel should point at)."
+  value       = aws_lb.martin.dns_name
 }
