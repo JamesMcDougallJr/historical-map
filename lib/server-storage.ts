@@ -104,6 +104,66 @@ export async function deleteLocation(id: string): Promise<boolean> {
   return true;
 }
 
+export async function updateLocation(
+  id: string,
+  patch: { name?: string; coordinates?: [number, number] },
+): Promise<HistoricalLocation | null> {
+  if (usePostgres()) return pg.updateLocation(id, patch);
+
+  const data = readFileData();
+  const loc = data.locations.find((l) => l.id === id);
+  if (!loc) return null;
+  if (patch.name !== undefined) loc.name = patch.name;
+  if (patch.coordinates !== undefined) loc.coordinates = patch.coordinates;
+  writeFileData(data);
+  return loc;
+}
+
+export async function updateEvent(
+  locationId: string,
+  eventId: string,
+  patch: Partial<
+    Pick<
+      HistoricalEvent,
+      | "title"
+      | "date"
+      | "description"
+      | "datePrecision"
+      | "dateText"
+      | "source"
+      | "sourceId"
+      | "tags"
+      | "imageUrl"
+    >
+  >,
+): Promise<HistoricalEvent | null> {
+  if (usePostgres()) return pg.updateEvent(locationId, eventId, patch);
+
+  const data = readFileData();
+  const loc = data.locations.find((l) => l.id === locationId);
+  const event = loc?.events.find((e) => e.id === eventId);
+  if (!loc || !event) return null;
+  Object.assign(event, patch);
+  writeFileData(data);
+  return event;
+}
+
+export async function deleteEvent(
+  locationId: string,
+  eventId: string,
+): Promise<boolean> {
+  if (usePostgres()) return pg.deleteEvent(locationId, eventId);
+
+  const data = readFileData();
+  const loc = data.locations.find((l) => l.id === locationId);
+  if (!loc) return false;
+  const before = loc.events.length;
+  loc.events = loc.events.filter((e) => e.id !== eventId);
+  if (loc.events.length === before) return false;
+  writeFileData(data);
+  return true;
+}
+
 export async function addEventsToLocation(
   locationId: string,
   events: HistoricalEvent[],

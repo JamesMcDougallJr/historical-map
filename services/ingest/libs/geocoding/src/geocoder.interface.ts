@@ -1,3 +1,9 @@
+export interface GeocodeCandidate {
+  lon: number;
+  lat: number;
+  displayName: string;
+}
+
 export interface GeocodeHit {
   lon: number;
   lat: number;
@@ -10,6 +16,15 @@ export interface GeocodeHit {
    * this is left unset there.
    */
   provider?: string;
+  /**
+   * Other candidates the provider considered equally confident to this hit
+   * (tied top score/importance), excluding the hit itself. A human review
+   * tool needs these to know a pick was ambiguous — auto-selection still
+   * always takes the first — so every `Geocoder` implementation must
+   * populate this whenever its own confidence signal reports a tie, even
+   * though nothing consumes it yet.
+   */
+  alternates?: GeocodeCandidate[];
 }
 
 /**

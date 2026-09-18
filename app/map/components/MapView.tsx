@@ -1,5 +1,6 @@
 "use client";
 
+import { createMapClient } from "@historical-map/api-client";
 import { Feature, Map as OlMap, View, Overlay } from "ol";
 import OSM from "ol/source/OSM";
 import XYZ from "ol/source/XYZ";
@@ -55,6 +56,9 @@ import type { FeatureLike } from "ol/Feature";
 // Positions OL's controls, overlays and attribution. Imported here rather than
 // in a layout so both consumers get it — the Next app and the MCP App bundle.
 import "ol/ol.css";
+
+// Same-origin (no auth check on this route today — see loadLocationDetail).
+const mapClient = createMapClient();
 
 // Pin icon SVG as data URL for historical events (module scope - created once)
 const EVENT_PIN_SVG = `data:image/svg+xml,${encodeURIComponent(`
@@ -319,13 +323,7 @@ export function MapView({
       if (cached) return cached;
 
       try {
-        const res = await fetch(
-          `/api/data/locations/${encodeURIComponent(stub.id)}`,
-        );
-        if (!res.ok) return stub;
-        const { location } = (await res.json()) as {
-          location: HistoricalLocation;
-        };
+        const location = await mapClient.getLocation(stub.id);
         if (!location) return stub;
         locationCacheRef.current.set(stub.id, location);
         return location;

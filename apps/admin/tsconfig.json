@@ -1,11 +1,7 @@
 {
   "compilerOptions": {
     "target": "es5",
-    "lib": [
-      "dom",
-      "dom.iterable",
-      "esnext"
-    ],
+    "lib": ["dom", "dom.iterable", "esnext"],
     "allowJs": true,
     "skipLibCheck": true,
     "strict": true,
@@ -21,34 +17,18 @@
     "jsx": "react-jsx",
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./*"],
-      "@historical-map/domain": ["./packages/domain/src/index.ts"],
-      "@historical-map/domain/*": ["./packages/domain/src/*"],
-      "@historical-map/api-client": ["./packages/api-client/src/index.ts"],
-      "@historical-map/api-client/*": ["./packages/api-client/src/*"]
+      "@/*": ["./*"]
     },
     "incremental": true,
-    "plugins": [
-      {
-        "name": "next"
-      }
-    ],
+    "plugins": [{ "name": "next" }],
     "strictNullChecks": true
   },
   "include": [
     "next-env.d.ts",
-    "types/**/*.d.ts",
     "**/*.ts",
     "**/*.tsx",
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts"
   ],
-  "exclude": [
-    "node_modules",
-    "vite.config.mcp.ts",
-    "dist",
-    "mcp/dist",
-    "services",
-    "apps"
-  ]
+  "exclude": ["node_modules"]
 }

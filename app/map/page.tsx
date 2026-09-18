@@ -2,20 +2,18 @@
 
 import { useEffect, useState, useRef, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
-import type { EventLayer, EventSource, HistoricalLocation } from "./types";
+import { createMapClient } from "@historical-map/api-client";
+import type { EventLayer, HistoricalLocation } from "./types";
 import { getLocations, saveEventsData } from "./utils/storage";
 import type { HistoricalEventsData } from "./types";
 import { MapView } from "./components/MapView";
 import { eventLayersFromSources, getEventLayers } from "./utils/event-layers";
 
-/**
- * `x-api-key` for /api/data/* when one is configured. The routes treat a
- * missing MAP_API_KEY as "allow", so an empty header set is correct locally.
- */
-function apiKeyHeaders(): Record<string, string> {
-  const apiKey = process.env["NEXT_PUBLIC_MAP_API_KEY"];
-  return apiKey ? { "x-api-key": apiKey } : {};
-}
+// Same-origin: no baseUrl needed. `MAP_API_KEY`-gated routes treat a missing
+// key as "allow", so an unset NEXT_PUBLIC_MAP_API_KEY is correct locally.
+const mapClient = createMapClient({
+  apiKey: process.env["NEXT_PUBLIC_MAP_API_KEY"],
+});
 
 function MapContent(): JSX.Element {
   const [locations, setLocations] = useState<HistoricalLocation[]>([]);
@@ -33,14 +31,12 @@ function MapContent(): JSX.Element {
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/sources", { headers: apiKeyHeaders() })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((json: { sources?: EventSource[] } | null) => {
+    mapClient
+      .getSources()
+      .then((sources) => {
         if (cancelled) return;
         setEventLayers(
-          json?.sources?.length
-            ? eventLayersFromSources(json.sources)
-            : getEventLayers(),
+          sources.length ? eventLayersFromSources(sources) : getEventLayers(),
         );
       })
       .catch(() => {
@@ -72,23 +68,19 @@ function MapContent(): JSX.Element {
     // First visit: seed localStorage from server data.
     // The key must be sent here too — /api/data/locations is gated on
     // MAP_API_KEY, so an unauthenticated seed 401s wherever it is configured.
-    fetch("/api/data/locations", { headers: apiKeyHeaders() })
-      .then((res) => (res.ok ? res.json() : null))
-      .then(
-        (
-          json: { locations: HistoricalLocation[]; lastUpdated: string } | null,
-        ) => {
-          if (json?.locations?.length) {
-            const seed: HistoricalEventsData = {
-              version: "1.0.0",
-              lastUpdated: json.lastUpdated,
-              locations: json.locations,
-            };
-            saveEventsData(seed);
-            setLocations(json.locations);
-          }
-        },
-      )
+    mapClient
+      .getLocations()
+      .then(({ locations, lastUpdated }) => {
+        if (locations.length) {
+          const seed: HistoricalEventsData = {
+            version: "1.0.0",
+            lastUpdated,
+            locations,
+          };
+          saveEventsData(seed);
+          setLocations(locations);
+        }
+      })
       .catch(() => {});
   }, [refreshKey]);
 
@@ -107,24 +99,17 @@ function MapContent(): JSX.Element {
     const id = setInterval(async () => {
       if (paused) return;
       try {
-        const res = await fetch("/api/data/locations", {
-          headers: apiKeyHeaders(),
-        });
-        if (!res.ok) return;
-        const json = (await res.json()) as {
-          locations: HistoricalLocation[];
-          lastUpdated: string;
-        };
-        if (json.lastUpdated && json.lastUpdated !== lastUpdatedRef.current) {
-          lastUpdatedRef.current = json.lastUpdated;
-          setLocations(json.locations);
+        const { locations, lastUpdated } = await mapClient.getLocations();
+        if (lastUpdated && lastUpdated !== lastUpdatedRef.current) {
+          lastUpdatedRef.current = lastUpdated;
+          setLocations(locations);
           // Persist, or the update is in-memory only and a reload drops back
           // to the stale localStorage copy — which is what made server-side
           // writes look like they had silently failed.
           saveEventsData({
             version: "1.0.0",
-            lastUpdated: json.lastUpdated,
-            locations: json.locations,
+            lastUpdated,
+            locations,
           });
         }
       } catch {

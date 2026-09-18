@@ -11,8 +11,11 @@
 
 import { NextResponse } from "next/server";
 import * as storage from "@/lib/server-storage";
+import { corsPreflight } from "@/lib/cors";
 
 export const dynamic = "force-dynamic";
+
+export const OPTIONS = corsPreflight;
 
 export async function GET(): Promise<NextResponse> {
   const sources = await storage.listSources();

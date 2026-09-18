@@ -9,7 +9,7 @@ const nextConfig = {
   // has to compile it itself. Today every import of it is `import type` and is
   // erased before bundling — this exists so the first runtime export added to
   // the package (a shared zod schema, say) doesn't fail resolution.
-  transpilePackages: ['@historical-map/domain'],
+  transpilePackages: ['@historical-map/domain', '@historical-map/api-client'],
 
   // The MCP App bundle is read at runtime, so Next's tracer can't see it.
   // Built by `npm run build:mcp`, which `prebuild` runs ahead of `next build`.
@@ -88,8 +88,10 @@ const nextConfig = {
         headers: [
           { key: 'Cache-Control', value: 'no-store' },
           { key: 'Access-Control-Allow-Origin', value: appUrl },
-          { key: 'Access-Control-Allow-Methods', value: 'POST, OPTIONS' },
-          { key: 'Access-Control-Allow-Headers', value: 'Content-Type' },
+          // GET/PATCH/DELETE and the x-api-key header are needed for
+          // apps/admin (a separate origin) to read and write /api/data/*.
+          { key: 'Access-Control-Allow-Methods', value: 'GET, POST, PATCH, DELETE, OPTIONS' },
+          { key: 'Access-Control-Allow-Headers', value: 'Content-Type, x-api-key' },
         ],
       },
     ]

@@ -11,7 +11,7 @@
  */
 import { ConfigService } from "@nestjs/config";
 import type { GeocodeHit, Geocoder } from "../libs/geocoding/src";
-import { FallbackGeocoder, WhgGeocoder } from "../libs/geocoding/src";
+import { FallbackGeocoder, NominatimGeocoder, WhgGeocoder } from "../libs/geocoding/src";
 
 const checks: Array<[string, boolean, string?]> = [];
 function check(name: string, ok: boolean, detail?: string): void {
@@ -283,6 +283,18 @@ async function main(): Promise<void> {
         hit?.displayName?.startsWith("Sutters Mill") ?? false,
         hit?.displayName,
       );
+      check(
+        "the tied Virginia candidate is stored as an alternate, not silently dropped",
+        hit?.alternates?.length === 1 &&
+          hit.alternates[0]?.lon === -77.656355 &&
+          hit.alternates[0]?.lat === 37.45198,
+        JSON.stringify(hit?.alternates),
+      );
+      check(
+        "the match:false Wikidata candidate never appears as an alternate",
+        !hit?.alternates?.some((a) => a.lon === -120.892361),
+        JSON.stringify(hit?.alternates),
+      );
     }
     check(
       "exactly one request is made — no second (entity) lookup",
@@ -378,6 +390,90 @@ async function main(): Promise<void> {
       "back-to-back requests are spaced by WHG_MIN_INTERVAL_MS",
       elapsed >= 45,
       `${elapsed}ms`,
+    );
+    mock.restore();
+  }
+
+  // ── NominatimGeocoder alternates ────────────────────────────────────────
+  {
+    const mock = installFetchMock([
+      {
+        status: 200,
+        body: [
+          {
+            lon: "-111.8910",
+            lat: "40.7608",
+            display_name: "Salt Lake Valley, Utah, USA",
+            category: "natural",
+            importance: 0.55,
+          },
+          {
+            lon: "-111.9",
+            lat: "40.75",
+            display_name: "Levoy Drive",
+            category: "highway",
+            importance: 0.9, // higher, but rejected category — must not win
+          },
+          {
+            lon: "-112.05",
+            lat: "40.7",
+            display_name: "Salt Lake Valley (alt)",
+            category: "natural",
+            importance: 0.55, // tied with the chosen result
+          },
+        ],
+      },
+    ]);
+    const geocoder = new NominatimGeocoder(
+      fakeConfig({ GEOCODER_MIN_INTERVAL_MS: 0 }),
+    );
+    const hit = await safeGeocode(
+      geocoder,
+      "Salt Lake Valley",
+      "a same-importance non-rejected-category result resolves without throwing",
+    );
+    if (hit !== undefined) {
+      check(
+        "a rejected category (highway) is skipped even at higher importance",
+        hit?.displayName === "Salt Lake Valley, Utah, USA",
+        hit?.displayName,
+      );
+      check(
+        "the tied natural-category candidate is stored as an alternate",
+        hit?.alternates?.length === 1 && hit.alternates[0]?.lon === -112.05,
+        JSON.stringify(hit?.alternates),
+      );
+    }
+    mock.restore();
+  }
+
+  {
+    const mock = installFetchMock([
+      {
+        status: 200,
+        body: [
+          {
+            lon: "-111.8910",
+            lat: "40.7608",
+            display_name: "Salt Lake Valley, Utah, USA",
+            category: "natural",
+            // No `importance` field at all — some Nominatim responses omit it.
+          },
+        ],
+      },
+    ]);
+    const geocoder = new NominatimGeocoder(
+      fakeConfig({ GEOCODER_MIN_INTERVAL_MS: 0 }),
+    );
+    const hit = await safeGeocode(
+      geocoder,
+      "Salt Lake Valley",
+      "a result with no importance field resolves without throwing",
+    );
+    check(
+      "missing importance means no alternates, not a guess",
+      hit !== undefined && hit?.alternates === undefined,
+      JSON.stringify(hit),
     );
     mock.restore();
   }

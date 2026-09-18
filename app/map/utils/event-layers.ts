@@ -22,11 +22,17 @@ export const DEMO_SOURCE_ID = "utah-historical";
  * written to the database. Deriving the list from `sources` makes a newly
  * published source visible without a code change, which is the whole point of
  * the pipeline writing a `sources` row in the first place.
+ *
+ * Deliberately does NOT append `withMartinLayer`'s comparison layer — that
+ * exists to check a *hardcoded static* geojson layer against live PostGIS
+ * (see `getEventLayers` below). Here, every layer is already PostGIS-backed
+ * MVT whenever Martin is configured, so appending it would just duplicate
+ * the demo source under a second, redundant "(PostGIS)" entry.
  */
 export function eventLayersFromSources(sources: EventSource[]): EventLayer[] {
   const martinUrl = process.env["NEXT_PUBLIC_MARTIN_URL"];
 
-  const layers: EventLayer[] = sources.map((source) =>
+  return sources.map((source) =>
     martinUrl
       ? {
           id: source.id,
@@ -53,8 +59,6 @@ export function eventLayersFromSources(sources: EventSource[]): EventLayer[] {
           enabled: true,
         },
   );
-
-  return withMartinLayer(layers);
 }
 
 export function getEventLayers(): EventLayer[] {

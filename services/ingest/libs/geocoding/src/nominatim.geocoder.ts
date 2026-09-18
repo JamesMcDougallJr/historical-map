@@ -1,6 +1,6 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import type { GeocodeHit, Geocoder } from "./geocoder.interface";
+import type { GeocodeCandidate, GeocodeHit, Geocoder } from "./geocoder.interface";
 
 const NOMINATIM_URL = "https://nominatim.openstreetmap.org/search";
 const REQUEST_TIMEOUT_MS = 15_000;
@@ -101,23 +101,54 @@ export class NominatimGeocoder implements Geocoder {
       lat?: string;
       display_name?: string;
       category?: string;
+      importance?: number;
     }>;
 
     // A historical place is a settlement, region, natural feature or historic
     // site — never a road, shop or office. Without this filter "Salt Lake
     // Valley" matches a street called Levoy Drive, which is both wrong and
     // wrong in a way that looks perfectly plausible on a map.
-    const usable = results.find(
+    const usable = results.filter(
       (r) =>
         r.lon && r.lat && (!r.category || !REJECTED_CATEGORIES.has(r.category)),
     );
-    if (!usable?.lon || !usable?.lat) return null;
+    const best = usable[0];
+    if (!best?.lon || !best?.lat) return null;
 
-    const lon = Number(usable.lon);
-    const lat = Number(usable.lat);
+    const lon = Number(best.lon);
+    const lat = Number(best.lat);
     if (!Number.isFinite(lon) || !Number.isFinite(lat)) return null;
 
-    return { lon, lat, displayName: usable.display_name ?? placeName };
+    // Ties on Nominatim's own `importance` score are real, but rarer than
+    // WHG's — exact float equality is the honest bar here, not an invented
+    // scoring scheme. `importance` isn't guaranteed present on every
+    // response; when it's absent there's no confidence signal to tie on, so
+    // alternates stays empty rather than guessing.
+    const alternates: GeocodeCandidate[] = [];
+    if (best.importance !== undefined) {
+      const seen = new Set([`${lon},${lat}`]);
+      for (const r of usable.slice(1)) {
+        if (r.importance !== best.importance || !r.lon || !r.lat) continue;
+        const altLon = Number(r.lon);
+        const altLat = Number(r.lat);
+        if (!Number.isFinite(altLon) || !Number.isFinite(altLat)) continue;
+        const key = `${altLon},${altLat}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        alternates.push({
+          lon: altLon,
+          lat: altLat,
+          displayName: r.display_name ?? placeName,
+        });
+      }
+    }
+
+    return {
+      lon,
+      lat,
+      displayName: best.display_name ?? placeName,
+      ...(alternates.length ? { alternates } : {}),
+    };
   }
 
   private async respectRateLimit(): Promise<void> {

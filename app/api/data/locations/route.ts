@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as storage from "@/lib/server-storage";
 import { generateLocationId } from "@/app/map/utils/storage";
+import { corsPreflight } from "@/lib/cors";
 import type { HistoricalLocation } from "@/app/map/types";
+
+export const OPTIONS = corsPreflight;
 
 function checkApiKey(req: NextRequest): boolean {
   const key = process.env["MAP_API_KEY"];

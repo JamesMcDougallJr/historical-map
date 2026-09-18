@@ -48,6 +48,16 @@ export class GeocodeCache {
   @Column({ name: "display_name", type: "text", nullable: true })
   displayName!: string | null;
 
+  /**
+   * Other candidates the provider considered equally confident to the chosen
+   * hit (tied top score/importance), excluding the hit itself. Stored even
+   * though nothing reads it yet — a human review tool needs to know a pick
+   * was ambiguous, and that can only be answered if the ties were kept at
+   * resolve time; the provider response isn't retained anywhere else.
+   */
+  @Column({ type: "jsonb", nullable: true })
+  candidates!: Array<{ lon: number; lat: number; displayName: string }> | null;
+
   @CreateDateColumn({ name: "created_at", type: "timestamptz" })
   createdAt!: Date;
 }

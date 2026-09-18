@@ -47,8 +47,19 @@ services:
       S3_BUCKET: ${S3_BUCKET:-ingest}
       S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-minioadmin}
       S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-minioadmin}
-      GEOCODER_USER_AGENT: ${GEOCODER_USER_AGENT}
+      # No default previously — docker-compose interpolates an unset var as
+      # an empty STRING, not undefined, and NominatimGeocoder/WhgGeocoder's
+      # `config.get(...) ?? fallback` only falls back on null/undefined, so
+      # an empty string here silently produced a blank User-Agent header and
+      # got every request 403'd by Nominatim's usage-policy enforcement.
+      GEOCODER_USER_AGENT: ${GEOCODER_USER_AGENT:-historical-map-ingest/0.1 (+https://github.com/JamesMcDougallJr/historical-map)}
       GEOCODER_COUNTRY_CODES: ${GEOCODER_COUNTRY_CODES:-}
+      # Added when the WHG geocoder merged, but this file never got updated —
+      # ingest-publish ran for days silently falling through to Nominatim on
+      # every place name because WHG_API_TOKEN was never in its environment.
+      WHG_API_TOKEN: ${WHG_API_TOKEN:-}
+      WHG_MIN_SCORE: ${WHG_MIN_SCORE:-40}
+      WHG_MIN_INTERVAL_MS: ${WHG_MIN_INTERVAL_MS:-250}
       PUBLISH_CONFIDENCE_MIN: ${PUBLISH_CONFIDENCE_MIN:-0.6}
       PORT: 3100
       BULL_BOARD_USER: ${BULL_BOARD_USER:-admin}
