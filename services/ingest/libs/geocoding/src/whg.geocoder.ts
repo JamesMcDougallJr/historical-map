@@ -1,6 +1,11 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import type { GeocodeCandidate, GeocodeHit, Geocoder } from "./geocoder.interface";
+import type {
+  GeocodeCandidate,
+  GeocodeHit,
+  Geocoder,
+} from "./geocoder.interface";
+import { RateLimiterService } from "@app/common/ratelimit/rate-limiter.service";
 
 const WHG_RECONCILE_URL = "https://whgazetteer.org/reconcile";
 const REQUEST_TIMEOUT_MS = 15_000;
@@ -69,15 +74,18 @@ export class WhgGeocoder implements Geocoder {
   private readonly userAgent: string;
   private readonly minScore: number;
   private readonly minIntervalMs: number;
-  private lastRequestAt = 0;
 
-  constructor(config: ConfigService) {
+  constructor(
+    config: ConfigService,
+    private readonly rateLimiter: RateLimiterService,
+  ) {
     this.token = config.get<string>("WHG_API_TOKEN");
     this.userAgent =
       config.get<string>("GEOCODER_USER_AGENT") ??
       "historical-map-ingest/0.1 (+https://github.com/JamesMcDougallJr/historical-map)";
     this.minScore = config.get<number>("WHG_MIN_SCORE") ?? 40;
     this.minIntervalMs = config.get<number>("WHG_MIN_INTERVAL_MS") ?? 250;
+    this.rateLimiter.registerRateLimit("whg", 30);
   }
 
   async geocode(placeName: string): Promise<GeocodeHit | null> {
@@ -173,10 +181,9 @@ export class WhgGeocoder implements Geocoder {
   }
 
   private async respectRateLimit(): Promise<void> {
-    const elapsed = Date.now() - this.lastRequestAt;
-    if (elapsed < this.minIntervalMs) {
-      await new Promise((r) => setTimeout(r, this.minIntervalMs - elapsed));
+    const canProceed = await this.rateLimiter.isAllowedForSource("whg")("whg");
+    if (!canProceed) {
+      await new Promise((r) => setTimeout(r, this.minIntervalMs));
     }
-    this.lastRequestAt = Date.now();
   }
 }

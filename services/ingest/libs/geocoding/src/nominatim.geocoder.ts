@@ -1,6 +1,11 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import type { GeocodeCandidate, GeocodeHit, Geocoder } from "./geocoder.interface";
+import type {
+  GeocodeCandidate,
+  GeocodeHit,
+  Geocoder,
+} from "./geocoder.interface";
+import { RateLimiterService } from "@app/common/ratelimit/rate-limiter.service";
 
 const NOMINATIM_URL = "https://nominatim.openstreetmap.org/search";
 const REQUEST_TIMEOUT_MS = 15_000;
@@ -47,9 +52,11 @@ export class NominatimGeocoder implements Geocoder {
   private readonly userAgent: string;
   private readonly minIntervalMs: number;
   private readonly countryCodes: string | undefined;
-  private lastRequestAt = 0;
 
-  constructor(config: ConfigService) {
+  constructor(
+    config: ConfigService,
+    private readonly rateLimiter: RateLimiterService,
+  ) {
     this.userAgent =
       config.get<string>("GEOCODER_USER_AGENT") ??
       "historical-map-ingest/0.1 (+https://github.com/JamesMcDougallJr/historical-map)";
@@ -58,6 +65,7 @@ export class NominatimGeocoder implements Geocoder {
     // it is per-corpus knowledge, so it stays configuration rather than a
     // hardcoded assumption about what any source contains.
     this.countryCodes = config.get<string>("GEOCODER_COUNTRY_CODES");
+    this.rateLimiter.registerRateLimit("nominatim", 30);
   }
 
   async geocode(placeName: string): Promise<GeocodeHit | null> {
@@ -152,10 +160,10 @@ export class NominatimGeocoder implements Geocoder {
   }
 
   private async respectRateLimit(): Promise<void> {
-    const elapsed = Date.now() - this.lastRequestAt;
-    if (elapsed < this.minIntervalMs) {
-      await new Promise((r) => setTimeout(r, this.minIntervalMs - elapsed));
+    const canProceed =
+      await this.rateLimiter.isAllowedForSource("nominatim")("nominatim");
+    if (!canProceed) {
+      await new Promise((r) => setTimeout(r, this.minIntervalMs));
     }
-    this.lastRequestAt = Date.now();
   }
 }

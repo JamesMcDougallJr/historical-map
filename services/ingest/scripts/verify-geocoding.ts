@@ -10,8 +10,13 @@
  *   WHG_API_TOKEN=... npm run geocoding:verify --workspace=services/ingest -- --live
  */
 import { ConfigService } from "@nestjs/config";
+import type { RateLimiterService } from "../libs/common/src";
 import type { GeocodeHit, Geocoder } from "../libs/geocoding/src";
-import { FallbackGeocoder, NominatimGeocoder, WhgGeocoder } from "../libs/geocoding/src";
+import {
+  FallbackGeocoder,
+  NominatimGeocoder,
+  WhgGeocoder,
+} from "../libs/geocoding/src";
 
 const checks: Array<[string, boolean, string?]> = [];
 function check(name: string, ok: boolean, detail?: string): void {
@@ -61,6 +66,18 @@ function fakeConfig(env: Record<string, string | number>): ConfigService {
   } as unknown as ConfigService;
 }
 
+/**
+ * Stands in for the Redis-backed limiter — no network, no Redis. Always
+ * allows, so `respectRateLimit` falls through to its own `minIntervalMs`
+ * wait every call, same as before the Redis limiter existed.
+ */
+function fakeRateLimiter(): RateLimiterService {
+  return {
+    registerRateLimit: () => {},
+    isAllowedForSource: () => async () => false,
+  } as unknown as RateLimiterService;
+}
+
 // ── A tiny in-memory Geocoder for exercising FallbackGeocoder ──────────────
 class StubGeocoder implements Geocoder {
   callCount = 0;
@@ -70,7 +87,7 @@ class StubGeocoder implements Geocoder {
       | { type: "hit"; hit: GeocodeHit }
       | { type: "miss" }
       | { type: "throw"; error: Error },
-  ) { }
+  ) {}
 
   async geocode(): Promise<GeocodeHit | null> {
     this.callCount++;
@@ -94,10 +111,7 @@ function installFetchMock(responses: MockResponse[]): {
   const queue = [...responses];
   const original = globalThis.fetch;
 
-  globalThis.fetch = (async (
-    input: RequestInfo | URL,
-    init?: RequestInit,
-  ) => {
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input.toString();
     calls.push({ url, init });
     const next = queue.shift();
@@ -253,7 +267,7 @@ async function main(): Promise<void> {
 
   // ── WhgGeocoder ───────────────────────────────────────────────────────
   {
-    const geocoder = new WhgGeocoder(fakeConfig({}));
+    const geocoder = new WhgGeocoder(fakeConfig({}), fakeRateLimiter());
     const result = await expectRejects(() => geocoder.geocode("Coloma"));
     check(
       "missing WHG_API_TOKEN throws a config error naming the variable",
@@ -266,6 +280,7 @@ async function main(): Promise<void> {
     const mock = installFetchMock([{ status: 200, body: RECONCILE_HIT_BODY }]);
     const geocoder = new WhgGeocoder(
       fakeConfig({ WHG_API_TOKEN: "test-token", WHG_MIN_INTERVAL_MS: 0 }),
+      fakeRateLimiter(),
     );
     const hit = await safeGeocode(
       geocoder,
@@ -329,9 +344,12 @@ async function main(): Promise<void> {
   }
 
   {
-    const mock = installFetchMock([{ status: 200, body: RECONCILE_NO_MATCH_BODY }]);
+    const mock = installFetchMock([
+      { status: 200, body: RECONCILE_NO_MATCH_BODY },
+    ]);
     const geocoder = new WhgGeocoder(
       fakeConfig({ WHG_API_TOKEN: "test-token", WHG_MIN_INTERVAL_MS: 0 }),
+      fakeRateLimiter(),
     );
     const hit = await safeGeocode(
       geocoder,
@@ -347,9 +365,12 @@ async function main(): Promise<void> {
   }
 
   {
-    const mock = installFetchMock([{ status: 200, body: RECONCILE_EMPTY_BODY }]);
+    const mock = installFetchMock([
+      { status: 200, body: RECONCILE_EMPTY_BODY },
+    ]);
     const geocoder = new WhgGeocoder(
       fakeConfig({ WHG_API_TOKEN: "test-token", WHG_MIN_INTERVAL_MS: 0 }),
+      fakeRateLimiter(),
     );
     const hit = await safeGeocode(
       geocoder,
@@ -364,6 +385,7 @@ async function main(): Promise<void> {
     const mock = installFetchMock([{ status: 401, body: {} }]);
     const geocoder = new WhgGeocoder(
       fakeConfig({ WHG_API_TOKEN: "bad-token", WHG_MIN_INTERVAL_MS: 0 }),
+      fakeRateLimiter(),
     );
     const result = await expectRejects(() => geocoder.geocode("Coloma"));
     check(
@@ -381,10 +403,19 @@ async function main(): Promise<void> {
     ]);
     const geocoder = new WhgGeocoder(
       fakeConfig({ WHG_API_TOKEN: "test-token", WHG_MIN_INTERVAL_MS: 50 }),
+      fakeRateLimiter(),
     );
     const start = Date.now();
-    await safeGeocode(geocoder, "Coloma", "first rate-limit call resolves without throwing");
-    await safeGeocode(geocoder, "Coloma", "second rate-limit call resolves without throwing");
+    await safeGeocode(
+      geocoder,
+      "Coloma",
+      "first rate-limit call resolves without throwing",
+    );
+    await safeGeocode(
+      geocoder,
+      "Coloma",
+      "second rate-limit call resolves without throwing",
+    );
     const elapsed = Date.now() - start;
     check(
       "back-to-back requests are spaced by WHG_MIN_INTERVAL_MS",
@@ -426,6 +457,7 @@ async function main(): Promise<void> {
     ]);
     const geocoder = new NominatimGeocoder(
       fakeConfig({ GEOCODER_MIN_INTERVAL_MS: 0 }),
+      fakeRateLimiter(),
     );
     const hit = await safeGeocode(
       geocoder,
@@ -464,6 +496,7 @@ async function main(): Promise<void> {
     ]);
     const geocoder = new NominatimGeocoder(
       fakeConfig({ GEOCODER_MIN_INTERVAL_MS: 0 }),
+      fakeRateLimiter(),
     );
     const hit = await safeGeocode(
       geocoder,
@@ -490,16 +523,27 @@ async function main(): Promise<void> {
     if (!token) {
       check("live call", false, "--live given but WHG_API_TOKEN is unset");
     } else {
-      const geocoder = new WhgGeocoder({
-        get: (key: string) => process.env[key],
-      } as unknown as ConfigService);
+      const geocoder = new WhgGeocoder(
+        {
+          get: (key: string) => process.env[key],
+        } as unknown as ConfigService,
+        fakeRateLimiter(),
+      );
 
-      for (const place of ["Sutter's Mill", "Promontory Summit", "Nonexistent Place Zzyzx123"]) {
+      for (const place of [
+        "Sutter's Mill",
+        "Promontory Summit",
+        "Nonexistent Place Zzyzx123",
+      ]) {
         const result = await expectRejects(async () => {
           const hit = await geocoder.geocode(place);
           console.log(`  "${place}" ->`, hit);
         });
-        check(`live geocode("${place}") does not throw`, !result.threw, result.message);
+        check(
+          `live geocode("${place}") does not throw`,
+          !result.threw,
+          result.message,
+        );
       }
     }
   }
