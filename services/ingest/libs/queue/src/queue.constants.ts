@@ -1,5 +1,15 @@
 import type { JobsOptions } from "bullmq";
 
+/**
+ * Every `Queue`/`Worker` connecting to these queues — the app's own
+ * `BullModule.forRootAsync` and every standalone script that opens its own
+ * `new Queue(...)` — must pass this same prefix. BullMQ's default is
+ * `"bull"`; a script that omits this reads and writes a completely
+ * different Redis keyspace from the running workers, which looks like a job
+ * silently vanishing rather than an error.
+ */
+export const BULLMQ_PREFIX = "bullmq";
+
 export const QUEUE_NAMES = {
   DETECT: "detect",
   /** Retrieval only: bytes in, original stored in object storage. */

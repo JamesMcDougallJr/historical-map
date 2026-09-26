@@ -15,7 +15,11 @@
 import { Queue } from "bullmq";
 import { createDataSource } from "../libs/database/src/data-source";
 import { IngestSource } from "../libs/database/src/entities";
-import { DETECT_JOB_OPTIONS, QUEUE_NAMES } from "../libs/queue/src";
+import {
+  BULLMQ_PREFIX,
+  DETECT_JOB_OPTIONS,
+  QUEUE_NAMES,
+} from "../libs/queue/src";
 
 function arg(name: string): string | undefined {
   return process.argv.find((a) => a.startsWith(`--${name}=`))?.split("=")[1];
@@ -56,6 +60,7 @@ async function main(): Promise<void> {
       host: process.env["REDIS_HOST"] ?? "localhost",
       port: Number(process.env["REDIS_PORT"] ?? 6379),
     },
+    prefix: BULLMQ_PREFIX,
   });
 
   try {

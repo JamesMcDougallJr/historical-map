@@ -1,6 +1,7 @@
 import { BullModule } from "@nestjs/bullmq";
 import { DynamicModule, Module } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
+import { BULLMQ_PREFIX } from "./queue.constants";
 
 /**
  * The Redis connection, and **no queues**.
@@ -24,7 +25,7 @@ export class QueueModule {
           host: config.get<string>("REDIS_HOST"),
           port: config.get<number>("REDIS_PORT"),
         },
-        prefix: "bullmq",
+        prefix: BULLMQ_PREFIX,
       }),
     });
 

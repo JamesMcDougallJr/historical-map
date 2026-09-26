@@ -11,6 +11,7 @@
  */
 import { Queue } from "bullmq";
 import {
+  BULLMQ_PREFIX,
   JOB_NAME_BY_QUEUE,
   JOB_OPTIONS_BY_QUEUE,
   QUEUE_NAMES,
@@ -70,6 +71,7 @@ async function main(): Promise<void> {
       host: process.env["REDIS_HOST"] ?? "localhost",
       port: Number(process.env["REDIS_PORT"] ?? 6379),
     },
+    prefix: BULLMQ_PREFIX,
   });
 
   try {

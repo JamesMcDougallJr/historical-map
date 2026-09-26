@@ -9,7 +9,7 @@
  * it is what you almost always want).
  */
 import { Queue, type JobState } from "bullmq";
-import { QUEUE_NAMES, type QueueName } from "../libs/queue/src";
+import { BULLMQ_PREFIX, QUEUE_NAMES, type QueueName } from "../libs/queue/src";
 
 function arg(name: string): string | undefined {
   const hit = process.argv.find((a) => a.startsWith(`--${name}=`));
@@ -33,6 +33,7 @@ async function main(): Promise<void> {
       host: process.env["REDIS_HOST"] ?? "localhost",
       port: Number(process.env["REDIS_PORT"] ?? 6379),
     },
+    prefix: BULLMQ_PREFIX,
   });
 
   try {
