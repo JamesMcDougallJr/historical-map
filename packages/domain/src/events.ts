@@ -29,6 +29,26 @@ export interface HistoricalEvent {
   documentId?: string;
   /** Page/segment within that document, e.g. `"p.43"`. See `/api/events/:id/source`. */
   anchor?: string;
+  /** Derived: which EventGroups list this event's id. Never written directly — storage layers populate it by scanning `memberEventIds`. */
+  groupIds?: string[];
+}
+
+/**
+ * A named, orderable, nestable sequence of events — e.g. "Mountain Meadows
+ * Massacre" grouping its constituent sub-events. Membership is many-to-many
+ * (an event can belong to several groups) and order is just array order:
+ * `memberEventIds` IS the narrative order, with no separate sequence field.
+ * Reordering means replacing the whole array in one write, never editing it
+ * in place.
+ */
+export interface EventGroup {
+  id: string;
+  title: string;
+  description?: string;
+  /** Parent group id, for nesting. Undefined means top-level. */
+  parentGroupId?: string;
+  /** Canonical (post-fusion) event ids, in narrative order. */
+  memberEventIds: string[];
 }
 
 /**
@@ -61,6 +81,7 @@ export interface HistoricalEventsData {
   lastUpdated: string;
   locations: HistoricalLocation[];
   sources?: EventSource[];
+  groups?: EventGroup[];
 }
 
 /**

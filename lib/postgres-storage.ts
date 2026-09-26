@@ -11,6 +11,7 @@
 import postgres from "postgres";
 import type {
   DatePrecision,
+  EventGroup,
   EventSource,
   HistoricalEventsData,
   HistoricalEvent,
@@ -119,11 +120,27 @@ export function ensureSchema(): Promise<void> {
     await db`CREATE INDEX IF NOT EXISTS events_location_id_idx ON events (location_id)`;
     await db`CREATE INDEX IF NOT EXISTS events_date_idx ON events (date)`;
     await db`CREATE INDEX IF NOT EXISTS events_source_id_idx ON events (source_id)`;
+
+    await db`
+      CREATE TABLE IF NOT EXISTS event_groups (
+        id              text PRIMARY KEY,
+        title           text NOT NULL,
+        description     text,
+        parent_group_id text REFERENCES event_groups(id) ON DELETE SET NULL
+      )`;
+    await db`
+      CREATE TABLE IF NOT EXISTS event_group_members (
+        group_id text NOT NULL REFERENCES event_groups(id) ON DELETE CASCADE,
+        event_id text NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+        seq      int  NOT NULL,
+        PRIMARY KEY (group_id, event_id)
+      )`;
+    await db`CREATE INDEX IF NOT EXISTS event_group_members_event_idx ON event_group_members (event_id)`;
   })();
   return schemaReady;
 }
 
-function toEvent(row: EventRow): HistoricalEvent {
+function toEvent(row: EventRow, groupIds?: string[]): HistoricalEvent {
   const event: HistoricalEvent = {
     id: row.id,
     title: row.title,
@@ -144,7 +161,27 @@ function toEvent(row: EventRow): HistoricalEvent {
   // it was never selected here, so it never reached the client either.
   if (row.document_id) event.documentId = row.document_id;
   if (row.anchor) event.anchor = row.anchor;
+  // Derived read-time convenience — never written directly, only populated
+  // by scanning event_group_members.
+  if (groupIds?.length) event.groupIds = groupIds;
   return event;
+}
+
+/** Batch-fetches group membership for a set of event ids, grouped by event. */
+async function groupIdsByEventId(
+  eventIds: string[],
+): Promise<Map<string, string[]>> {
+  const byEvent = new Map<string, string[]>();
+  if (eventIds.length === 0) return byEvent;
+  const rows = await sql()<
+    { group_id: string; event_id: string }[]
+  >`SELECT group_id, event_id FROM event_group_members WHERE event_id = ANY(${eventIds})`;
+  for (const row of rows) {
+    const list = byEvent.get(row.event_id) ?? [];
+    list.push(row.group_id);
+    byEvent.set(row.event_id, list);
+  }
+  return byEvent;
 }
 
 /** Assembles locations + their events. Two queries, joined in memory. */
@@ -156,11 +193,12 @@ async function assemble(
   const ids = locationRows.map((l) => l.id);
   const eventRows = await db<EventRow[]>`
     SELECT * FROM events WHERE location_id = ANY(${ids}) ORDER BY date ASC`;
+  const groupIds = await groupIdsByEventId(eventRows.map((r) => r.id));
 
   const byLocation = new Map<string, HistoricalEvent[]>();
   for (const row of eventRows) {
     const list = byLocation.get(row.location_id) ?? [];
-    list.push(toEvent(row));
+    list.push(toEvent(row, groupIds.get(row.id)));
     byLocation.set(row.location_id, list);
   }
 
@@ -391,6 +429,175 @@ export async function addEventsToLocation(
   return updated ?? null;
 }
 
+// ── Event groups ────────────────────────────────────────────────────────────
+
+interface EventGroupRow {
+  id: string;
+  title: string;
+  description: string | null;
+  parent_group_id: string | null;
+}
+
+function toEventGroup(
+  row: EventGroupRow,
+  memberEventIds: string[],
+): EventGroup {
+  const group: EventGroup = {
+    id: row.id,
+    title: row.title,
+    memberEventIds,
+  };
+  if (row.description) group.description = row.description;
+  if (row.parent_group_id) group.parentGroupId = row.parent_group_id;
+  return group;
+}
+
+/** Groups a member-rows query result by group_id, in seq order. */
+function memberIdsByGroup(
+  memberRows: { group_id: string; event_id: string }[],
+): Map<string, string[]> {
+  const byGroup = new Map<string, string[]>();
+  for (const row of memberRows) {
+    const list = byGroup.get(row.group_id) ?? [];
+    list.push(row.event_id);
+    byGroup.set(row.group_id, list);
+  }
+  return byGroup;
+}
+
+export async function listEventGroups(): Promise<EventGroup[]> {
+  await ensureSchema();
+  const db = sql();
+  const rows = await db<
+    EventGroupRow[]
+  >`SELECT * FROM event_groups ORDER BY title ASC`;
+  const memberRows = await db<
+    { group_id: string; event_id: string }[]
+  >`SELECT group_id, event_id FROM event_group_members ORDER BY group_id, seq`;
+  const byGroup = memberIdsByGroup(memberRows);
+  return rows.map((row) => toEventGroup(row, byGroup.get(row.id) ?? []));
+}
+
+/**
+ * Walks `parent_group_id` downward from `startId`, returning `startId` plus
+ * every descendant group id. Plain repeated queries rather than a recursive
+ * CTE, matching this file's existing style.
+ */
+async function descendantGroupIds(startId: string): Promise<string[]> {
+  const db = sql();
+  const all = new Set([startId]);
+  let frontier = [startId];
+  while (frontier.length > 0) {
+    const rows = await db<
+      { id: string }[]
+    >`SELECT id FROM event_groups WHERE parent_group_id = ANY(${frontier})`;
+    const next = rows.map((r) => r.id).filter((id) => !all.has(id));
+    for (const id of next) all.add(id);
+    frontier = next;
+  }
+  return Array.from(all);
+}
+
+export async function getEventGroup(
+  id: string,
+  opts?: { includeDescendants?: boolean },
+): Promise<{ group: EventGroup; members: HistoricalLocation[] } | null> {
+  await ensureSchema();
+  const db = sql();
+  const rows = await db<EventGroupRow[]>`SELECT * FROM event_groups WHERE id = ${id}`;
+  const row = rows[0];
+  if (!row) return null;
+
+  const groupIds = opts?.includeDescendants
+    ? await descendantGroupIds(id)
+    : [id];
+
+  const memberRows = await db<
+    { group_id: string; event_id: string }[]
+  >`SELECT group_id, event_id FROM event_group_members WHERE group_id = ANY(${groupIds}) ORDER BY group_id, seq`;
+  const byGroup = memberIdsByGroup(memberRows);
+
+  // Union member ids across the resolved groups, in first-seen order.
+  const memberEventIds: string[] = [];
+  const seen = new Set<string>();
+  for (const gid of groupIds) {
+    for (const eventId of byGroup.get(gid) ?? []) {
+      if (!seen.has(eventId)) {
+        seen.add(eventId);
+        memberEventIds.push(eventId);
+      }
+    }
+  }
+
+  const group = toEventGroup(row, byGroup.get(id) ?? []);
+
+  if (memberEventIds.length === 0) return { group, members: [] };
+
+  const eventRows = await db<
+    (EventRow & LocationRow & { loc_name: string })[]
+  >`
+    SELECT e.*, l.name AS loc_name, l.lon, l.lat
+    FROM events e
+    JOIN locations l ON l.id = e.location_id
+    WHERE e.id = ANY(${memberEventIds})`;
+
+  const byEventId = new Map(eventRows.map((r) => [r.id, r]));
+  const byLocation = new Map<string, HistoricalLocation>();
+  for (const eventId of memberEventIds) {
+    const r = byEventId.get(eventId);
+    if (!r) continue;
+    let loc = byLocation.get(r.location_id);
+    if (!loc) {
+      loc = {
+        id: r.location_id,
+        name: r.loc_name,
+        coordinates: [r.lon, r.lat] as [number, number],
+        events: [],
+      };
+      byLocation.set(r.location_id, loc);
+    }
+    loc.events.push(toEvent(r));
+  }
+
+  return { group, members: Array.from(byLocation.values()) };
+}
+
+export async function upsertEventGroup(
+  group: Pick<EventGroup, "id" | "title" | "description" | "parentGroupId">,
+): Promise<void> {
+  await ensureSchema();
+  await sql()`
+    INSERT INTO event_groups (id, title, description, parent_group_id)
+    VALUES (${group.id}, ${group.title}, ${group.description ?? null},
+            ${group.parentGroupId ?? null})
+    ON CONFLICT (id) DO UPDATE
+      SET title = EXCLUDED.title,
+          description = EXCLUDED.description,
+          parent_group_id = EXCLUDED.parent_group_id`;
+}
+
+export async function setEventGroupMembers(
+  groupId: string,
+  eventIds: string[],
+): Promise<void> {
+  await ensureSchema();
+  const db = sql();
+  await db.begin(async (tx) => {
+    await tx`DELETE FROM event_group_members WHERE group_id = ${groupId}`;
+    for (let i = 0; i < eventIds.length; i++) {
+      await tx`
+        INSERT INTO event_group_members (group_id, event_id, seq)
+        VALUES (${groupId}, ${eventIds[i]!}, ${i})`;
+    }
+  });
+}
+
+export async function deleteEventGroup(id: string): Promise<boolean> {
+  await ensureSchema();
+  const result = await sql()`DELETE FROM event_groups WHERE id = ${id}`;
+  return result.count > 0;
+}
+
 // ── Query ───────────────────────────────────────────────────────────────────
 
 /**
@@ -409,6 +616,9 @@ export async function searchEvents(
   const to = query.toYear !== undefined ? `${query.toYear}-12-31` : null;
   const bbox = query.bbox ?? null;
   const sourceIds = query.sourceIds?.length ? query.sourceIds : null;
+  const groupEventIds = query.groupId
+    ? await resolveGroupEventIds(query.groupId, query.includeDescendants)
+    : null;
 
   const rows = await db<(EventRow & LocationRow & { loc_name: string })[]>`
     SELECT e.*, l.name AS loc_name, l.lon, l.lat
@@ -419,6 +629,7 @@ export async function searchEvents(
       AND (${from}::date IS NULL OR e.date >= ${from}::date)
       AND (${to}::date IS NULL OR e.date <= ${to}::date)
       AND (${sourceIds}::text[] IS NULL OR e.source_id = ANY(${sourceIds}))
+      AND (${groupEventIds}::text[] IS NULL OR e.id = ANY(${groupEventIds}))
       AND (${bbox}::double precision[] IS NULL
            OR ST_Intersects(
                 l.geom,
@@ -435,4 +646,19 @@ export async function searchEvents(
       events: [toEvent(row)],
     },
   }));
+}
+
+/** Resolves a groupId (+ optional descendants) filter to its member event ids. */
+async function resolveGroupEventIds(
+  groupId: string,
+  includeDescendants?: boolean,
+): Promise<string[]> {
+  const db = sql();
+  const groupIds = includeDescendants
+    ? await descendantGroupIds(groupId)
+    : [groupId];
+  const rows = await db<
+    { event_id: string }[]
+  >`SELECT DISTINCT event_id FROM event_group_members WHERE group_id = ANY(${groupIds})`;
+  return rows.map((r) => r.event_id);
 }

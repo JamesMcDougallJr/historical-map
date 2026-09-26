@@ -18,6 +18,10 @@ export interface EventQuery {
   sourceIds?: string[];
   /** Free-text match against event title, description, and location name. */
   q?: string;
+  /** Restrict to events belonging to this EventGroup. */
+  groupId?: string;
+  /** With `groupId`, also include events belonging to its descendant groups. */
+  includeDescendants?: boolean;
 }
 
 export interface EventSearchResult {
@@ -47,6 +51,12 @@ export function parseEventQuery(params: URLSearchParams): EventQuery {
     if (parts.length === 4 && parts.every((n) => Number.isFinite(n))) {
       query.bbox = parts as [number, number, number, number];
     }
+  }
+
+  const groupId = params.get("group");
+  if (groupId) {
+    query.groupId = groupId;
+    if (params.get("descendants") === "1") query.includeDescendants = true;
   }
 
   return query;

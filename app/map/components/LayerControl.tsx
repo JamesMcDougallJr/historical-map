@@ -1,7 +1,12 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import type { EventLayer, HistoricalOverlay, OverlaySource } from "../types";
+import type {
+  EventGroup,
+  EventLayer,
+  HistoricalOverlay,
+  OverlaySource,
+} from "../types";
 import { generateOverlayId, getSourceAttribution } from "../utils/overlays";
 
 interface LayerControlProps {
@@ -15,6 +20,10 @@ interface LayerControlProps {
   /** Event source layers, rendered as their own section above the overlays. */
   eventLayers?: EventLayer[];
   onToggleEventLayer?: (id: string) => void;
+  /** Named sequences (EventGroup), rendered as a single-select section. */
+  eventGroups?: EventGroup[];
+  selectedGroupId?: string | null;
+  onSelectGroup?: (id: string | null) => void;
 }
 
 export function LayerControl({
@@ -27,6 +36,9 @@ export function LayerControl({
   isLoading = {},
   eventLayers = [],
   onToggleEventLayer,
+  eventGroups = [],
+  selectedGroupId = null,
+  onSelectGroup,
 }: LayerControlProps): JSX.Element {
   const [isExpanded, setIsExpanded] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
@@ -221,6 +233,52 @@ export function LayerControl({
                     </span>
                     <span className="block text-xs text-slate-400 uppercase tracking-wide">
                       {layer.kind === "mvt" ? "vector tiles" : "geojson"}
+                    </span>
+                  </span>
+                </label>
+              ))}
+            </div>
+          )}
+
+          {/* Sequences — single-select: at most one EventGroup drives the map
+              at a time, so drilling into a narrative doesn't fight the
+              general-purpose event source checkboxes above. */}
+          {eventGroups.length > 0 && (
+            <div className="border-b border-slate-700">
+              <div className="px-4 py-3 border-b border-slate-700">
+                <h3 className="text-white font-medium">Sequences</h3>
+              </div>
+              <label className="px-4 py-2.5 flex items-center gap-3 hover:bg-slate-800/50 cursor-pointer">
+                <input
+                  type="radio"
+                  name="event-group"
+                  checked={selectedGroupId === null}
+                  onChange={() => onSelectGroup?.(null)}
+                  className="w-4 h-4 border-slate-600 bg-slate-700 text-blue-500 focus:ring-blue-500 focus:ring-offset-0"
+                />
+                <span className="flex-1 min-w-0 text-sm text-slate-400">
+                  None
+                </span>
+              </label>
+              {eventGroups.map((group) => (
+                <label
+                  key={group.id}
+                  className="px-4 py-2.5 flex items-center gap-3 hover:bg-slate-800/50 cursor-pointer"
+                >
+                  <input
+                    type="radio"
+                    name="event-group"
+                    checked={selectedGroupId === group.id}
+                    onChange={() => onSelectGroup?.(group.id)}
+                    className="w-4 h-4 border-slate-600 bg-slate-700 text-blue-500 focus:ring-blue-500 focus:ring-offset-0"
+                  />
+                  <span className="flex-1 min-w-0">
+                    <span className="block text-sm text-white truncate">
+                      {group.title}
+                    </span>
+                    <span className="block text-xs text-slate-400">
+                      {group.memberEventIds.length} event
+                      {group.memberEventIds.length !== 1 ? "s" : ""}
                     </span>
                   </span>
                 </label>
