@@ -17,6 +17,8 @@
     "build:mcp": "vite build --config vite.config.mcp.ts",
     "mcp": "tsx mcp/server.ts",
     "seed:db": "tsx scripts/seed-db.ts",
+    "db:backup": "tsx scripts/db-backup.ts",
+    "db:restore": "tsx scripts/db-restore.ts",
     "type-check:all": "nx run-many -t type-check",
     "build:all": "nx run-many -t build",
     "graph": "nx graph"

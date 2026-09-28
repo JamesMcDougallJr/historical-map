@@ -4,6 +4,11 @@
 #   POSTGRES_URL=postgres://postgres:password@localhost:5433/db npm run seed:db
 #   NEXT_PUBLIC_MARTIN_URL=http://localhost:3001 npm run dev
 #
+# `db`'s data lives in ./pg_data (bind mount, gitignored) — `docker compose down -v`
+# or deleting that directory wipes it. `npm run db:backup` / `db:restore` dump/restore
+# just the app tables (not PostGIS's own tiger/topology schemas) to ./backups
+# (gitignored), so the local db is safe to tear down and rebuild on demand.
+#
 # The deployed demo runs none of these — it serves static GeoJSON from
 # data/map-data.json via /api/sources/[id]/features. See mcp/README.md.
 #

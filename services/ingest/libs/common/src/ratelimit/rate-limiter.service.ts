@@ -1,5 +1,5 @@
 import { Inject, Injectable } from "@nestjs/common";
-import type Redis from "ioredis";
+import Redis from "ioredis";
 import { REDIS_CLIENT } from "./ratelimit.constants";
 
 type Source = string;
