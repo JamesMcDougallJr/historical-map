@@ -37,7 +37,25 @@ const TILE_ORIGINS = [
   "https://allmaps.org",
   "https://*.allmaps.org",
   "https://cdn-icons-png.flaticon.com",
+  ...martinOrigin(),
 ];
+
+/**
+ * Derived, not hardcoded — a fixed CloudFront domain would break every time
+ * the Martin stack gets recreated. Whenever `NEXT_PUBLIC_MARTIN_URL` is set,
+ * `eventLayersFromSources` emits `mvt` layers pointing at it, and this is
+ * the CSP allowlist that decides whether the sandboxed iframe is allowed to
+ * fetch them — an origin missing here is a silently blank map, not an error.
+ */
+function martinOrigin(): string[] {
+  const martinUrl = process.env["NEXT_PUBLIC_MARTIN_URL"];
+  if (!martinUrl) return [];
+  try {
+    return [new URL(martinUrl).origin];
+  } catch {
+    return [];
+  }
+}
 
 /**
  * Stable origin for the sandbox, so tile hosts that echo `Origin` instead of
@@ -261,9 +279,7 @@ export function registerAll(
       });
       if (!result) {
         return {
-          content: [
-            { type: "text", text: `EventGroup ${args.id} not found.` },
-          ],
+          content: [{ type: "text", text: `EventGroup ${args.id} not found.` }],
           isError: true,
         };
       }
