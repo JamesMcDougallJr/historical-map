@@ -19,15 +19,19 @@ import {
   useMemo,
 } from "react";
 import { fromLonLat, toLonLat } from "ol/proj";
+import { boundingExtent } from "ol/extent";
 import Point from "ol/geom/Point";
+import LineString from "ol/geom/LineString";
 import Style from "ol/style/Style";
 import Icon from "ol/style/Icon";
 import Fill from "ol/style/Fill";
 import Stroke from "ol/style/Stroke";
+import Text from "ol/style/Text";
 import VectorLayer from "ol/layer/Vector";
 import VectorSource from "ol/source/Vector";
 import GeoJSON from "ol/format/GeoJSON";
 import type {
+  EventGroup,
   EventLayer,
   HistoricalEvent,
   HistoricalLocation,
@@ -35,6 +39,10 @@ import type {
 } from "../types";
 import { DEFAULT_OVERLAYS } from "../utils/overlays";
 import { getEventLayers, mvtQueryString } from "../utils/event-layers";
+import {
+  GROUP_CONNECTIVE_THRESHOLD_KM,
+  maxPairwiseDistanceKm,
+} from "../utils/event-groups";
 import {
   choosePopupPlacement,
   verticalSpace,
@@ -256,6 +264,8 @@ export interface MapViewProps {
    * The MCP App passes an `inline` layer, since it has no origin to fetch from.
    */
   initialEventLayers?: EventLayer[];
+  /** Named sequences (EventGroup) available to drill into. Defaults to []. */
+  eventGroups?: EventGroup[];
   /** Show navigation controls (Home link, Import Events link). Defaults true. */
   showNav?: boolean;
   homeHref?: string;
@@ -267,6 +277,7 @@ export function MapView({
   locations,
   initialOverlays,
   initialEventLayers,
+  eventGroups = [],
   showNav = true,
   homeHref = "/",
   importHref = "/map/import",
@@ -289,11 +300,13 @@ export function MapView({
   const hoveredLocationIdRef = useRef<string | null>(null);
   const overlayLayersRef = useRef<Map<string, BaseLayer>>(new Map());
   const eventLayersRef = useRef<Map<string, BaseLayer>>(new Map());
+  const groupConnectiveLayerRef = useRef<VectorLayer | null>(null);
   const mapRef = useRef<OlMap | null>(null);
 
   const [eventLayers, setEventLayers] = useState<EventLayer[]>(
     () => initialEventLayers ?? getEventLayers(),
   );
+  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
 
   // Tile/GeoJSON features carry only location_id — the nested location object
   // can't survive MVT encoding, whose properties are flat scalars. Popups
@@ -746,6 +759,167 @@ export function MapView({
     }
   }, [timelineRange, isTimelineEnabled, eventLayers]);
 
+  // Filter/connect pins for a selected Sequence (EventGroup).
+  //
+  // Simplification: when a group is selected, this takes precedence over the
+  // timeline's pin-hiding — group members show regardless of year, since
+  // drilling into a named sequence is a deliberate action. The timeline still
+  // filters overlays. If the user moves the timeline slider while a group is
+  // selected, the timeline effect above will overwrite these per-feature
+  // styles on its own next run; the two effects don't coordinate beyond that.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    const clearConnectiveLayer = () => {
+      if (groupConnectiveLayerRef.current) {
+        map.removeLayer(groupConnectiveLayerRef.current);
+        groupConnectiveLayerRef.current = null;
+      }
+    };
+
+    // Falls back to the layer's own style function/style — the same reset
+    // the timeline effect uses when disabled.
+    const restoreEventStyles = () => {
+      for (const olLayer of Array.from(eventLayersRef.current.values())) {
+        if (!(olLayer instanceof VectorLayer)) continue;
+        const source = olLayer.getSource();
+        source
+          ?.getFeatures()
+          .forEach((feature: Feature) => feature.setStyle(undefined));
+      }
+    };
+
+    if (!selectedGroupId) {
+      clearConnectiveLayer();
+      restoreEventStyles();
+      return;
+    }
+
+    const group = eventGroups.find((g) => g.id === selectedGroupId);
+    if (!group) {
+      clearConnectiveLayer();
+      restoreEventStyles();
+      return;
+    }
+
+    // Resolve member ids to {event, location} pairs, in memberEventIds order.
+    // Unknown ids are skipped rather than thrown on.
+    const orderedPairs: {
+      event: HistoricalEvent;
+      location: HistoricalLocation;
+    }[] = [];
+    for (const eventId of group.memberEventIds) {
+      for (const location of locations) {
+        const event = location.events.find((e) => e.id === eventId);
+        if (event) {
+          orderedPairs.push({ event, location });
+          break;
+        }
+      }
+    }
+
+    const memberLocationIds = new Set(
+      orderedPairs.map((pair) => pair.location.id),
+    );
+
+    // Hide every event pin that isn't a member of this group. MVT layers are
+    // left alone — a plain in-memory restyle needs already-loaded vector
+    // features, which tile layers don't expose.
+    for (const olLayer of Array.from(eventLayersRef.current.values())) {
+      if (!(olLayer instanceof VectorLayer)) continue;
+      const source = olLayer.getSource();
+      source?.getFeatures().forEach((feature: Feature) => {
+        const locationId = feature.get("location_id") as string | undefined;
+        feature.setStyle(
+          locationId && memberLocationIds.has(locationId)
+            ? undefined
+            : new Style({}),
+        );
+      });
+    }
+
+    if (orderedPairs.length === 0) {
+      clearConnectiveLayer();
+      return;
+    }
+
+    // Number each member's pin with its 1-based sequence order, layered on
+    // top of its existing pin style.
+    orderedPairs.forEach(({ location }, index) => {
+      for (const [layerId, olLayer] of Array.from(
+        eventLayersRef.current.entries(),
+      )) {
+        if (!(olLayer instanceof VectorLayer)) continue;
+        const source = olLayer.getSource();
+        const feature = source
+          ?.getFeatures()
+          .find((f: Feature) => f.get("location_id") === location.id);
+        if (!feature) continue;
+
+        const eventLayer = eventLayers.find((l) => l.id === layerId);
+        const baseStyle = pinStyleFor(eventLayer?.color);
+        feature.setStyle(
+          new Style({
+            image: baseStyle.getImage() ?? undefined,
+            text: new Text({
+              text: String(index + 1),
+              offsetY: -34,
+              font: "bold 13px sans-serif",
+              fill: new Fill({ color: "#ffffff" }),
+              stroke: new Stroke({ color: "#1e293b", width: 3 }),
+            }),
+          }),
+        );
+      }
+    });
+
+    const coords = orderedPairs.map(
+      (pair) => pair.location.coordinates as [number, number],
+    );
+    const distance = maxPairwiseDistanceKm(coords);
+
+    if (distance > GROUP_CONNECTIVE_THRESHOLD_KM) {
+      // Spread out: leave the hide-non-members styling in place, no path,
+      // no forced zoom.
+      clearConnectiveLayer();
+      return;
+    }
+
+    const lineFeatures = [];
+    for (let i = 0; i < orderedPairs.length - 1; i++) {
+      const from = orderedPairs[i]!.location.coordinates;
+      const to = orderedPairs[i + 1]!.location.coordinates;
+      lineFeatures.push(
+        new Feature({
+          geometry: new LineString([fromLonLat(from), fromLonLat(to)]),
+        }),
+      );
+    }
+
+    const lineStyle = new Style({
+      stroke: new Stroke({ color: "#1e293b", width: 2, lineDash: [6, 4] }),
+    });
+
+    let connectiveLayer = groupConnectiveLayerRef.current;
+    if (!connectiveLayer) {
+      connectiveLayer = new VectorLayer({
+        source: new VectorSource({ features: lineFeatures }),
+        style: lineStyle,
+      });
+      connectiveLayer.set("layerId", "group-connective");
+      groupConnectiveLayerRef.current = connectiveLayer;
+      map.addLayer(connectiveLayer);
+    } else {
+      const source = connectiveLayer.getSource();
+      source?.clear();
+      source?.addFeatures(lineFeatures);
+    }
+
+    const extent = boundingExtent(coords.map((c) => fromLonLat(c)));
+    map.getView().fit(extent, { padding: [80, 80, 80, 80], maxZoom: 12 });
+  }, [selectedGroupId, eventGroups, locations]);
+
   const handleToggleEventLayer = useCallback((id: string) => {
     setEventLayers((prev) =>
       prev.map((l) => (l.id === id ? { ...l, enabled: !l.enabled } : l)),
@@ -1121,6 +1295,9 @@ export function MapView({
       <LayerControl
         eventLayers={eventLayers}
         onToggleEventLayer={handleToggleEventLayer}
+        eventGroups={eventGroups}
+        selectedGroupId={selectedGroupId}
+        onSelectGroup={setSelectedGroupId}
         overlays={filteredOverlays}
         onToggleOverlay={handleToggleOverlay}
         onOpacityChange={handleOpacityChange}

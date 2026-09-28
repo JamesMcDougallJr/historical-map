@@ -14,6 +14,7 @@
 
 import type {
   DatePrecision,
+  EventGroup,
   EventSource,
   HistoricalEvent,
   HistoricalLocation,
@@ -33,6 +34,10 @@ export interface EventQueryInput {
   sourceIds?: string[];
   /** [minLon, minLat, maxLon, maxLat] in EPSG:4326. */
   bbox?: [number, number, number, number];
+  /** Restrict to events belonging to this EventGroup. */
+  groupId?: string;
+  /** With `groupId`, also include events belonging to its descendant groups. */
+  includeDescendants?: boolean;
 }
 
 export interface EventSearchResult {
@@ -203,12 +208,81 @@ export class MapClient {
     if (query.toYear !== undefined) params.set("to", String(query.toYear));
     if (query.sourceIds?.length) params.set("sources", query.sourceIds.join(","));
     if (query.bbox) params.set("bbox", query.bbox.join(","));
+    if (query.groupId) params.set("group", query.groupId);
+    if (query.includeDescendants) params.set("descendants", "1");
 
     const { results } = await this.request<{ results: EventSearchResult[] }>(
       "GET",
       `/api/data/search?${params.toString()}`,
     );
     return results;
+  }
+
+  async getEventGroups(): Promise<EventGroup[]> {
+    const { groups } = await this.request<{ groups: EventGroup[] }>(
+      "GET",
+      "/api/data/groups",
+    );
+    return groups;
+  }
+
+  async getEventGroup(
+    id: string,
+  ): Promise<{ group: EventGroup; members: HistoricalLocation[] } | null> {
+    try {
+      return await this.request<{
+        group: EventGroup;
+        members: HistoricalLocation[];
+      }>("GET", `/api/data/groups/${encodeURIComponent(id)}`);
+    } catch (error) {
+      if (error instanceof MapClientError && error.status === 404) return null;
+      throw error;
+    }
+  }
+
+  async createEventGroup(input: {
+    id?: string;
+    title: string;
+    description?: string;
+    parentGroupId?: string;
+  }): Promise<EventGroup> {
+    const { group } = await this.request<{ group: EventGroup }>(
+      "POST",
+      "/api/data/groups",
+      input,
+    );
+    return group;
+  }
+
+  async updateEventGroup(
+    id: string,
+    patch: Partial<Pick<EventGroup, "title" | "description" | "parentGroupId">>,
+  ): Promise<EventGroup> {
+    const { group } = await this.request<{ group: EventGroup }>(
+      "PATCH",
+      `/api/data/groups/${encodeURIComponent(id)}`,
+      patch,
+    );
+    return group;
+  }
+
+  async deleteEventGroup(id: string): Promise<boolean> {
+    const { deleted } = await this.request<{ deleted: boolean }>(
+      "DELETE",
+      `/api/data/groups/${encodeURIComponent(id)}`,
+    );
+    return deleted;
+  }
+
+  async setEventGroupMembers(
+    id: string,
+    eventIds: string[],
+  ): Promise<{ group: EventGroup; members: HistoricalLocation[] }> {
+    return this.request(
+      "PUT",
+      `/api/data/groups/${encodeURIComponent(id)}/members`,
+      { eventIds },
+    );
   }
 }
 

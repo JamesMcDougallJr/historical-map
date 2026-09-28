@@ -11,6 +11,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type {
+  EventGroup,
   EventSource,
   HistoricalEventsData,
   HistoricalEvent,
@@ -61,8 +62,39 @@ function writeFileData(data: HistoricalEventsData): void {
 
 // ── Public API ──────────────────────────────────────────────────────────────
 
+/**
+ * Derived/denormalized: sets `event.groupIds` from whichever groups list the
+ * event's id, so plain reads (not just `searchEvents`) can show it. Mirrors
+ * what `assemble()` does for the Postgres backend — never written directly.
+ */
+function attachGroupIds(data: HistoricalEventsData): HistoricalEventsData {
+  const groups = data.groups ?? [];
+  if (groups.length === 0) return data;
+
+  const groupIdsByEvent = new Map<string, string[]>();
+  for (const g of groups) {
+    for (const eventId of g.memberEventIds) {
+      const existing = groupIdsByEvent.get(eventId);
+      if (existing) existing.push(g.id);
+      else groupIdsByEvent.set(eventId, [g.id]);
+    }
+  }
+  if (groupIdsByEvent.size === 0) return data;
+
+  return {
+    ...data,
+    locations: data.locations.map((location) => ({
+      ...location,
+      events: location.events.map((event) => {
+        const groupIds = groupIdsByEvent.get(event.id);
+        return groupIds ? { ...event, groupIds } : event;
+      }),
+    })),
+  };
+}
+
 export async function readData(): Promise<HistoricalEventsData> {
-  return usePostgres() ? pg.readData() : readFileData();
+  return usePostgres() ? pg.readData() : attachGroupIds(readFileData());
 }
 
 export async function writeData(data: HistoricalEventsData): Promise<void> {
@@ -207,9 +239,13 @@ export async function searchEvents(
 ): Promise<EventSearchResult[]> {
   if (usePostgres()) return pg.searchEvents(query);
 
-  const { q, fromYear, toYear, sourceIds, bbox } = query;
+  const { q, fromYear, toYear, sourceIds, bbox, groupId, includeDescendants } =
+    query;
   const lower = q?.toLowerCase();
   const sourceFilter = sourceIds?.length ? new Set(sourceIds) : null;
+  const groupEventIds = groupId
+    ? resolveGroupEventIdsFromFile(groupId, includeDescendants)
+    : null;
   const results: EventSearchResult[] = [];
 
   for (const location of readFileData().locations) {
@@ -222,6 +258,7 @@ export async function searchEvents(
 
     for (const event of location.events) {
       if (sourceFilter && !sourceFilter.has(event.sourceId ?? "")) continue;
+      if (groupEventIds && !groupEventIds.has(event.id)) continue;
 
       if (lower) {
         const matchesText =
@@ -241,4 +278,131 @@ export async function searchEvents(
     }
   }
   return results;
+}
+
+// ── Event groups ────────────────────────────────────────────────────────────
+
+/** Walks `parentGroupId` downward from `startId` over the in-memory group list. */
+function descendantGroupIdsFromFile(
+  groups: EventGroup[],
+  startId: string,
+): string[] {
+  const all = new Set([startId]);
+  let frontier = [startId];
+  while (frontier.length > 0) {
+    const next = groups
+      .filter((g) => g.parentGroupId && frontier.includes(g.parentGroupId))
+      .map((g) => g.id)
+      .filter((id) => !all.has(id));
+    for (const id of next) all.add(id);
+    frontier = next;
+  }
+  return Array.from(all);
+}
+
+function resolveGroupEventIdsFromFile(
+  groupId: string,
+  includeDescendants?: boolean,
+): Set<string> {
+  const groups = readFileData().groups ?? [];
+  const groupIds = includeDescendants
+    ? descendantGroupIdsFromFile(groups, groupId)
+    : [groupId];
+  const ids = new Set<string>();
+  for (const g of groups) {
+    if (groupIds.includes(g.id)) {
+      for (const eventId of g.memberEventIds) ids.add(eventId);
+    }
+  }
+  return ids;
+}
+
+export async function listEventGroups(): Promise<EventGroup[]> {
+  if (usePostgres()) return pg.listEventGroups();
+  return readFileData().groups ?? [];
+}
+
+export async function getEventGroup(
+  id: string,
+  opts?: { includeDescendants?: boolean },
+): Promise<{ group: EventGroup; members: HistoricalLocation[] } | null> {
+  if (usePostgres()) return pg.getEventGroup(id, opts);
+
+  const data = readFileData();
+  const groups = data.groups ?? [];
+  const group = groups.find((g) => g.id === id);
+  if (!group) return null;
+
+  const groupIds = opts?.includeDescendants
+    ? descendantGroupIdsFromFile(groups, id)
+    : [id];
+
+  const memberEventIds: string[] = [];
+  const seen = new Set<string>();
+  for (const gid of groupIds) {
+    const g = groups.find((gr) => gr.id === gid);
+    if (!g) continue;
+    for (const eventId of g.memberEventIds) {
+      if (!seen.has(eventId)) {
+        seen.add(eventId);
+        memberEventIds.push(eventId);
+      }
+    }
+  }
+
+  const memberIdSet = new Set(memberEventIds);
+  const members: HistoricalLocation[] = [];
+  for (const location of data.locations) {
+    const matching = location.events.filter((e) => memberIdSet.has(e.id));
+    if (matching.length === 0) continue;
+    // Preserve the group's member order, not the location's event order.
+    const ordered = memberEventIds
+      .map((eventId) => matching.find((e) => e.id === eventId))
+      .filter((e): e is HistoricalEvent => Boolean(e));
+    members.push({ ...location, events: ordered });
+  }
+
+  return { group, members };
+}
+
+export async function upsertEventGroup(
+  group: Pick<EventGroup, "id" | "title" | "description" | "parentGroupId">,
+): Promise<void> {
+  if (usePostgres()) return pg.upsertEventGroup(group);
+
+  const data = readFileData();
+  data.groups = data.groups ?? [];
+  const idx = data.groups.findIndex((g) => g.id === group.id);
+  if (idx >= 0) {
+    data.groups[idx] = { ...data.groups[idx]!, ...group };
+  } else {
+    data.groups.push({ ...group, memberEventIds: [] });
+  }
+  writeFileData(data);
+}
+
+export async function setEventGroupMembers(
+  groupId: string,
+  eventIds: string[],
+): Promise<void> {
+  if (usePostgres()) return pg.setEventGroupMembers(groupId, eventIds);
+
+  const data = readFileData();
+  data.groups = data.groups ?? [];
+  const group = data.groups.find((g) => g.id === groupId);
+  if (!group) return;
+  group.memberEventIds = eventIds;
+  writeFileData(data);
+}
+
+export async function deleteEventGroup(id: string): Promise<boolean> {
+  if (usePostgres()) return pg.deleteEventGroup(id);
+
+  const data = readFileData();
+  data.groups = data.groups ?? [];
+  const before = data.groups.length;
+  data.groups = data.groups.filter((g) => g.id !== id);
+  if (data.groups.length === before) return false;
+  writeFileData(data);
+  return true;
 }

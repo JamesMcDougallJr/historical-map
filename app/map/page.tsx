@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { createMapClient } from "@historical-map/api-client";
-import type { EventLayer, HistoricalLocation } from "./types";
+import type { EventGroup, EventLayer, HistoricalLocation } from "./types";
 import { getLocations, saveEventsData } from "./utils/storage";
 import type { HistoricalEventsData } from "./types";
 import { MapView } from "./components/MapView";
@@ -43,6 +43,26 @@ function MapContent(): JSX.Element {
         // Fall back to the static registry rather than rendering no layers at
         // all — the deployed demo has no database to list sources from.
         if (!cancelled) setEventLayers(getEventLayers());
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Sequences (EventGroup) come from the server, same fetch-once-on-mount
+  // shape as sources. An empty array on error just means no Sequences
+  // section renders — nothing depends on this arriving.
+  const [eventGroups, setEventGroups] = useState<EventGroup[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    mapClient
+      .getEventGroups()
+      .then((groups) => {
+        if (!cancelled) setEventGroups(groups);
+      })
+      .catch(() => {
+        if (!cancelled) setEventGroups([]);
       });
     return () => {
       cancelled = true;
@@ -133,6 +153,7 @@ function MapContent(): JSX.Element {
     <MapView
       locations={locations}
       initialEventLayers={eventLayers}
+      eventGroups={eventGroups}
       onRefresh={handleRefresh}
     />
   );

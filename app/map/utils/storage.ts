@@ -1,6 +1,7 @@
 // localStorage read/write utilities for historical events
 
 import type {
+  EventGroup,
   HistoricalEventsData,
   HistoricalLocation,
   HistoricalEvent,
@@ -139,6 +140,39 @@ export function deleteEvent(locationId: string, eventId: string): void {
     location.events = location.events.filter((e) => e.id !== eventId);
     saveEventsData(data);
   }
+}
+
+/**
+ * Get all event groups
+ */
+export function getEventGroups(): EventGroup[] {
+  return getEventsData().groups ?? [];
+}
+
+/**
+ * Add or update an event group
+ */
+export function saveEventGroup(group: EventGroup): void {
+  const data = getEventsData();
+  data.groups = data.groups ?? [];
+  const existingIndex = data.groups.findIndex((g) => g.id === group.id);
+
+  if (existingIndex >= 0) {
+    data.groups[existingIndex] = group;
+  } else {
+    data.groups.push(group);
+  }
+
+  saveEventsData(data);
+}
+
+/**
+ * Delete an event group
+ */
+export function deleteEventGroup(groupId: string): void {
+  const data = getEventsData();
+  data.groups = (data.groups ?? []).filter((g) => g.id !== groupId);
+  saveEventsData(data);
 }
 
 /**

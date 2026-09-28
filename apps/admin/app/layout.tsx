@@ -1,3 +1,4 @@
+import Link from "next/link";
 import "./globals.css";
 
 export const metadata = {
@@ -12,7 +13,20 @@ export default function RootLayout({
 }): JSX.Element {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <nav
+          style={{
+            display: "flex",
+            gap: "1rem",
+            padding: "1rem 1.5rem",
+            borderBottom: "1px solid var(--border)",
+          }}
+        >
+          <Link href="/">Locations</Link>
+          <Link href="/sequences">Sequences</Link>
+        </nav>
+        {children}
+      </body>
     </html>
   );
 }

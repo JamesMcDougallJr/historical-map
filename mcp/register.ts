@@ -191,6 +191,16 @@ export function registerAll(
         .array(z.string())
         .optional()
         .describe("Restrict to these source ids (see list_sources)"),
+      groupId: z
+        .string()
+        .optional()
+        .describe("Restrict results to this EventGroup's member events"),
+      includeDescendants: z
+        .boolean()
+        .optional()
+        .describe(
+          "When groupId is set, also include descendant groups' members",
+        ),
     },
     async (args): Promise<CallToolResult> => {
       const query: EventQuery = {};
@@ -199,6 +209,9 @@ export function registerAll(
       if (args.toYear !== undefined) query.toYear = args.toYear;
       if (args.sourceIds) query.sourceIds = args.sourceIds;
       if (args.bbox) query.bbox = args.bbox as [number, number, number, number];
+      if (args.groupId) query.groupId = args.groupId;
+      if (args.includeDescendants !== undefined)
+        query.includeDescendants = args.includeDescendants;
 
       const results = await storage.searchEvents(query);
       return {
@@ -225,6 +238,40 @@ export function registerAll(
       content: [{ type: "text", text: JSON.stringify(summary, null, 2) }],
     };
   });
+
+  server.tool("list_event_groups", {}, async (): Promise<CallToolResult> => {
+    const groups = await storage.listEventGroups();
+    return {
+      content: [{ type: "text", text: JSON.stringify(groups, null, 2) }],
+    };
+  });
+
+  server.tool(
+    "get_event_group",
+    {
+      id: z.string().describe("EventGroup id"),
+      includeDescendants: z
+        .boolean()
+        .optional()
+        .describe("Also include member events from descendant groups"),
+    },
+    async (args): Promise<CallToolResult> => {
+      const result = await storage.getEventGroup(args.id, {
+        includeDescendants: args.includeDescendants,
+      });
+      if (!result) {
+        return {
+          content: [
+            { type: "text", text: `EventGroup ${args.id} not found.` },
+          ],
+          isError: true,
+        };
+      }
+      return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+      };
+    },
+  );
 
   if (writable) registerWriteTools(server);
 
