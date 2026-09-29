@@ -179,6 +179,7 @@ export function MapPopup({
           actually available beside the pin, less the header. */}
       <div
         ref={popupRef}
+        data-testid="map-popup"
         className="hidden md:block w-96 max-w-[90vw] bg-white dark:bg-neutral-800 rounded-xl shadow-xl border border-neutral-200 dark:border-neutral-700 overflow-hidden"
       >
         {header}

@@ -580,6 +580,17 @@ export function MapView({
     resizeObserver.observe(mapContainerRef.current);
     requestAnimationFrame(() => map.updateSize());
 
+    // The above still leaves first paint riding on requestAnimationFrame,
+    // which a backgrounded/unfocused tab throttles or pauses outright
+    // (verified via document.hidden while debugging a blank map that only
+    // painted once a click or drag forced a synchronous render) — a tab
+    // opened in the background, or a browser-automation session driving a
+    // non-foreground tab, would otherwise sit blank indefinitely with a
+    // perfectly correct size and no error. renderSync() paints immediately,
+    // independent of rAF ever firing; harmless to call redundantly since OL
+    // no-ops a render against an already-current frame.
+    map.renderSync();
+
     // Dev-only console handles, stripped from production builds: the map itself
     // for hit testing and layer state, and the popup/hover refs, which React
     // DevTools can't show. They're refs rather than state because OL's handlers

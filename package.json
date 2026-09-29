@@ -19,6 +19,7 @@
     "seed:db": "tsx scripts/seed-db.ts",
     "db:backup": "tsx scripts/db-backup.ts",
     "db:restore": "tsx scripts/db-restore.ts",
+    "test:e2e": "playwright test",
     "type-check:all": "nx run-many -t type-check",
     "build:all": "nx run-many -t build",
     "graph": "nx graph"
@@ -45,6 +46,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@types/node": "^25.0.9",
     "@types/react": "18.3.3",
     "@types/react-dom": "18.3.0",
