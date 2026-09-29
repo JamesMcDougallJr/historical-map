@@ -56,6 +56,8 @@ import { TimelineSlider } from "./TimelineSlider";
 import {
   getProgress,
   acknowledgeEvent as ackEvent,
+  getDefaultView,
+  saveDefaultView,
   type MapProgress,
 } from "../utils/storage";
 import { getYear } from "../utils/date-utils";
@@ -542,6 +544,22 @@ export function MapView({
     countableSources.forEach((s) => s.on("change", recountPins));
     recountPins();
 
+    // This effect re-runs (and rebuilds the map) whenever `locations` or
+    // `eventLayers` change, not just on first mount. Carrying over the live
+    // camera position from the map being replaced means a data refresh
+    // doesn't yank the user back to the default view mid-session; only a
+    // genuine first mount falls back to the persisted default.
+    const previousView = mapRef.current?.getView();
+    const previousCenter = previousView?.getCenter();
+    const previousZoom = previousView?.getZoom();
+    const initialView =
+      previousCenter && previousZoom !== undefined
+        ? { center: previousCenter, zoom: previousZoom }
+        : (() => {
+            const stored = getDefaultView();
+            return { center: fromLonLat(stored.center), zoom: stored.zoom };
+          })();
+
     const map = new OlMap({
       layers: [
         new TileLayer({
@@ -550,10 +568,7 @@ export function MapView({
         ...pinLayers,
       ],
       overlays: [overlay],
-      view: new View({
-        center: fromLonLat([-111.8881, 40.7606]),
-        zoom: 8,
-      }),
+      view: new View(initialView),
       // Drop OL's zoom/rotate buttons. The attribution stays: OSM's ODbL
       // requires it, and ol/source/OSM sets attributionsCollapsible:false so
       // OpenLayers keeps it visible. Deliberately not passing `collapsible` —
@@ -926,6 +941,14 @@ export function MapView({
     );
   }, []);
 
+  const handleSetDefaultView = useCallback(() => {
+    const view = mapRef.current?.getView();
+    const center = view?.getCenter();
+    const zoom = view?.getZoom();
+    if (!center || zoom === undefined) return;
+    saveDefaultView({ center: toLonLat(center) as [number, number], zoom });
+  }, []);
+
   const handleClosePopup = useCallback(() => {
     isPopupHoveredRef.current = false;
     setHoveredLocation(null);
@@ -1220,6 +1243,14 @@ export function MapView({
           >
             Import Events
           </a>
+          <button
+            onClick={handleSetDefaultView}
+            className="px-4 py-2 bg-white/90 hover:bg-white dark:bg-slate-800/90 dark:hover:bg-slate-800 text-neutral-800 dark:text-neutral-200 rounded-lg transition-colors text-sm font-medium shadow-lg hover:shadow-xl backdrop-blur-sm"
+            aria-label="Set current view as default"
+            title="Save the current center and zoom as the default view"
+          >
+            Set as Default View
+          </button>
         </div>
       )}
 

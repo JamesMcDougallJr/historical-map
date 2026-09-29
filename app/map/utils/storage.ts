@@ -277,3 +277,39 @@ export function acknowledgeEvent(eventId: string): MapProgress {
   }
   return { ...progress };
 }
+
+// --- Default map view ---
+
+const VIEW_KEY = "map-view-settings";
+
+export interface MapViewSettings {
+  center: [number, number]; // [lon, lat]
+  zoom: number;
+}
+
+// The map's original hardcoded center/zoom, kept here as the single source
+// of truth so MapView.tsx never has its own copy to drift out of sync with.
+export const DEFAULT_VIEW: MapViewSettings = {
+  center: [-111.8881, 40.7606],
+  zoom: 8,
+};
+
+export function getDefaultView(): MapViewSettings {
+  if (typeof window === "undefined") return DEFAULT_VIEW;
+  try {
+    const stored = localStorage.getItem(VIEW_KEY);
+    if (!stored) return DEFAULT_VIEW;
+    return JSON.parse(stored) as MapViewSettings;
+  } catch {
+    return DEFAULT_VIEW;
+  }
+}
+
+export function saveDefaultView(view: MapViewSettings): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(VIEW_KEY, JSON.stringify(view));
+  } catch (error) {
+    console.error("Failed to save default map view to localStorage:", error);
+  }
+}
