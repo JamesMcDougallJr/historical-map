@@ -8,6 +8,8 @@ interface EventCardProps {
   event: HistoricalEvent;
   isAcknowledged?: boolean;
   onAcknowledge?: (eventId: string) => void;
+  /** Resolved titles of the sequences (EventGroup) this event belongs to. */
+  groupTitles?: string[];
 }
 
 /**
@@ -28,6 +30,7 @@ export function EventCard({
   event,
   isAcknowledged,
   onAcknowledge,
+  groupTitles,
 }: EventCardProps) {
   return (
     <div
@@ -65,6 +68,11 @@ export function EventCard({
             showIndicator={false}
             className="font-medium text-neutral-900 dark:text-neutral-100"
           />
+          {groupTitles && groupTitles.length > 0 && (
+            <p className="text-xs text-neutral-500 dark:text-neutral-400 italic">
+              Part of: {groupTitles.join(", ")}
+            </p>
+          )}
           <ExpandableText
             text={event.description}
             maxLines={3}

@@ -5,6 +5,7 @@ import { JobLogger } from "@app/common";
 import {
   IngestDocument,
   IngestEventCandidate,
+  IngestEventSequence,
   IngestSource,
   jsonb,
 } from "@app/database";
@@ -34,6 +35,8 @@ export class PublishingService {
     private readonly candidateRepo: Repository<IngestEventCandidate>,
     @InjectRepository(IngestSource)
     private readonly sourceRepo: Repository<IngestSource>,
+    @InjectRepository(IngestEventSequence)
+    private readonly sequenceRepo: Repository<IngestEventSequence>,
     private readonly geocoding: GeocodingService,
     private readonly mapWriter: MapWriterService,
   ) {}
@@ -125,6 +128,8 @@ export class PublishingService {
         else alreadyPresent++;
       }
 
+      const groupsApplied = await this.applySequenceGroups(documentId);
+
       await this.documentRepo.update(documentId, {
         status: "published",
         completedAt: new Date(),
@@ -134,7 +139,8 @@ export class PublishingService {
       await this.jobLogger.log(
         job,
         `candidates=${candidates.length} published=${published} ` +
-          `already-present=${alreadyPresent} demoted-to-review=${demoted}`,
+          `already-present=${alreadyPresent} demoted-to-review=${demoted} ` +
+          `groups=${groupsApplied}`,
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -145,6 +151,56 @@ export class PublishingService {
       await this.jobLogger.error(job, `failed: ${message}`);
       throw error;
     }
+  }
+
+  /**
+   * Turns `extract-events`'s sequence proposals into real `event_groups` rows.
+   *
+   * A second, independent pass over **every** `verdict: "publish"` candidate
+   * for this document — not just the ones this invocation just inserted —
+   * because it has to see candidates published on a *previous* run too. That
+   * is what makes this safe to call from the backfill script: re-enqueuing
+   * `publish` for an already-published document inserts zero new events (the
+   * existing loop above is unaffected) but still finds and applies any
+   * `ingest_event_sequences` rows written after the fact.
+   *
+   * `memberEventIds` on a proposal are extraction-time ids
+   * (`"{chunkIndex}-{i}"`); resolving them through this map to the id actually
+   * written to `events` is what makes a proposal usable at all, and any id
+   * that does not resolve (its candidate was demoted or never geocoded)
+   * silently drops out of the group rather than erroring.
+   */
+  private async applySequenceGroups(documentId: string): Promise<number> {
+    const proposals = await this.sequenceRepo.find({ where: { documentId } });
+    if (proposals.length === 0) return 0;
+
+    const published = await this.candidateRepo.find({
+      where: { documentId, verdict: "publish" },
+    });
+    const eventKeyByExtractionId = new Map<string, string>();
+    for (const candidate of published) {
+      const event = candidate.event as ExtractedEvent;
+      eventKeyByExtractionId.set(event.id, candidate.eventKey);
+    }
+
+    let applied = 0;
+    for (const proposal of proposals) {
+      const memberKeys = proposal.memberEventIds
+        .map((id) => eventKeyByExtractionId.get(id))
+        .filter((key): key is string => key !== undefined);
+      if (memberKeys.length === 0) continue;
+
+      const groupId = await this.mapWriter.ensureEventGroup(
+        documentId,
+        proposal.title,
+        proposal.description,
+      );
+      for (const [seq, eventKey] of memberKeys.entries()) {
+        await this.mapWriter.addGroupMember(groupId, eventKey, seq);
+      }
+      applied++;
+    }
+    return applied;
   }
 
   /** Move a candidate back to review, recording why publishing declined it. */

@@ -86,6 +86,55 @@ export class MapWriterService {
   }
 
   /**
+   * Upserts the `EventGroup` row for one of `extract-events`'s sequence
+   * proposals. Id is derived from (title, documentId) — same slug+hash shape
+   * as `locationId` below — so re-publishing the same proposal (idempotent
+   * re-run, or the backfill script) updates the same row instead of piling up
+   * duplicates. Returns the id, the same shape as `findOrCreateLocation`.
+   *
+   * Raw SQL for the same reason as every other method here: `event_groups`
+   * belongs to the web app's `ensureSchema()`, not to this connection's
+   * TypeORM entities.
+   */
+  async ensureEventGroup(
+    documentId: string,
+    title: string,
+    description: string | null,
+  ): Promise<string> {
+    const id = slugId(title, documentId, "sequence");
+    await this.dataSource.query(
+      `INSERT INTO event_groups (id, title, description)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (id) DO UPDATE
+         SET title = EXCLUDED.title,
+             description = EXCLUDED.description`,
+      [id, title, description],
+    );
+    return id;
+  }
+
+  /**
+   * Adds an event to a group at a given narrative position.
+   *
+   * `ON CONFLICT DO NOTHING` on purpose: a member's `seq` is set once, at
+   * first insert, and never overwritten — an editor hand-reordering a group
+   * later (the admin "Sequences" UI) must not have their change clobbered by
+   * a later re-publish finding the same proposal again.
+   */
+  async addGroupMember(
+    groupId: string,
+    eventId: string,
+    seq: number,
+  ): Promise<void> {
+    await this.dataSource.query(
+      `INSERT INTO event_group_members (group_id, event_id, seq)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (group_id, event_id) DO NOTHING`,
+      [groupId, eventId, seq],
+    );
+  }
+
+  /**
    * Inserts an event. Returns false when the id already existed.
    *
    * `ON CONFLICT DO NOTHING` plus a content-derived id is what makes publishing
@@ -135,17 +184,22 @@ export class MapWriterService {
 }
 
 
-/** Readable slug plus a coordinate-derived suffix, so ids stay debuggable. */
-function locationId(name: string, lon: number, lat: number): string {
+/**
+ * Readable slug of `text` plus a hash-derived suffix of `salt`, so ids stay
+ * debuggable but never collide on the slug alone. Shared by `locationId`
+ * (salted with coordinates) and `ensureEventGroup` (salted with documentId).
+ */
+function slugId(text: string, salt: string, fallback: string): string {
   const slug =
-    name
+    text
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-|-$/g, "")
-      .slice(0, 40) || "place";
-  const digest = createHash("sha256")
-    .update(`${lon.toFixed(4)},${lat.toFixed(4)}`)
-    .digest("hex")
-    .slice(0, 8);
+      .slice(0, 40) || fallback;
+  const digest = createHash("sha256").update(salt).digest("hex").slice(0, 8);
   return `${slug}-${digest}`;
+}
+
+function locationId(name: string, lon: number, lat: number): string {
+  return slugId(name, `${lon.toFixed(4)},${lat.toFixed(4)}`, "place");
 }

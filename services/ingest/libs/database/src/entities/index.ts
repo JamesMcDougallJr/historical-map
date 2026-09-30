@@ -1,6 +1,7 @@
 import { GeocodeCache } from "./geocode-cache.entity";
 import { IngestDocument } from "./ingest-document.entity";
 import { IngestEventCandidate } from "./ingest-event-candidate.entity";
+import { IngestEventSequence } from "./ingest-event-sequence.entity";
 import { IngestExtraction } from "./ingest-extraction.entity";
 import { IngestSource } from "./ingest-source.entity";
 
@@ -8,6 +9,7 @@ export {
   GeocodeCache,
   IngestDocument,
   IngestEventCandidate,
+  IngestEventSequence,
   IngestExtraction,
   IngestSource,
 };
@@ -27,5 +29,6 @@ export const INGEST_ENTITIES = [
   IngestDocument,
   IngestExtraction,
   IngestEventCandidate,
+  IngestEventSequence,
   GeocodeCache,
 ];
