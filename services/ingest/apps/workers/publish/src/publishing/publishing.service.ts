@@ -119,6 +119,7 @@ export class PublishingService {
           dateText: event.dateText,
           documentId,
           anchor: event.anchor,
+          significance: event.significance,
         });
 
         await this.candidateRepo.update(candidate.id, {
@@ -129,6 +130,7 @@ export class PublishingService {
       }
 
       const groupsApplied = await this.applySequenceGroups(documentId);
+      const scoresBackfilled = await this.backfillSignificance(documentId);
 
       await this.documentRepo.update(documentId, {
         status: "published",
@@ -140,7 +142,7 @@ export class PublishingService {
         job,
         `candidates=${candidates.length} published=${published} ` +
           `already-present=${alreadyPresent} demoted-to-review=${demoted} ` +
-          `groups=${groupsApplied}`,
+          `groups=${groupsApplied} scores-backfilled=${scoresBackfilled}`,
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -201,6 +203,39 @@ export class PublishingService {
       applied++;
     }
     return applied;
+  }
+
+  /**
+   * Fills in `significance` for candidates whose row on the map was published
+   * on a *previous* run — the main loop above only inserts/backfills for
+   * candidates with `publishedAt IS NULL`, but `validate`'s `upsertCandidate`
+   * deliberately never sets `publishedAt` when it re-upserts a candidate (see
+   * its own docstring), so an event re-extracted with a score, whose eventKey
+   * happened to match one already published before `significance` existed,
+   * is invisible to that loop entirely: its candidate row already has
+   * `publishedAt` set, so it is excluded from the query that feeds the loop,
+   * and its fresh `event` JSON (with a real score) is never looked at again.
+   *
+   * Same "every verdict:publish candidate, not just this run's" shape as
+   * `applySequenceGroups`, and the same reason: re-extracting to backfill
+   * data onto already-published events is exactly this method's job.
+   */
+  private async backfillSignificance(documentId: string): Promise<number> {
+    const candidates = await this.candidateRepo.find({
+      where: { documentId, verdict: "publish" },
+    });
+
+    let backfilled = 0;
+    for (const candidate of candidates) {
+      const event = candidate.event as ExtractedEvent;
+      if (event.significance == null) continue;
+      await this.mapWriter.backfillSignificance(
+        candidate.eventKey,
+        event.significance,
+      );
+      backfilled++;
+    }
+    return backfilled;
   }
 
   /** Move a candidate back to review, recording why publishing declined it. */
