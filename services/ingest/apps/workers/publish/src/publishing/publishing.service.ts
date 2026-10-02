@@ -5,6 +5,7 @@ import { JobLogger } from "@app/common";
 import {
   IngestDocument,
   IngestEventCandidate,
+  IngestEventSequence,
   IngestSource,
   jsonb,
 } from "@app/database";
@@ -34,6 +35,8 @@ export class PublishingService {
     private readonly candidateRepo: Repository<IngestEventCandidate>,
     @InjectRepository(IngestSource)
     private readonly sourceRepo: Repository<IngestSource>,
+    @InjectRepository(IngestEventSequence)
+    private readonly sequenceRepo: Repository<IngestEventSequence>,
     private readonly geocoding: GeocodingService,
     private readonly mapWriter: MapWriterService,
   ) {}
@@ -116,6 +119,7 @@ export class PublishingService {
           dateText: event.dateText,
           documentId,
           anchor: event.anchor,
+          significance: event.significance,
         });
 
         await this.candidateRepo.update(candidate.id, {
@@ -124,6 +128,9 @@ export class PublishingService {
         if (inserted) published++;
         else alreadyPresent++;
       }
+
+      const groupsApplied = await this.applySequenceGroups(documentId);
+      const scoresBackfilled = await this.backfillSignificance(documentId);
 
       await this.documentRepo.update(documentId, {
         status: "published",
@@ -134,7 +141,8 @@ export class PublishingService {
       await this.jobLogger.log(
         job,
         `candidates=${candidates.length} published=${published} ` +
-          `already-present=${alreadyPresent} demoted-to-review=${demoted}`,
+          `already-present=${alreadyPresent} demoted-to-review=${demoted} ` +
+          `groups=${groupsApplied} scores-backfilled=${scoresBackfilled}`,
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -145,6 +153,89 @@ export class PublishingService {
       await this.jobLogger.error(job, `failed: ${message}`);
       throw error;
     }
+  }
+
+  /**
+   * Turns `extract-events`'s sequence proposals into real `event_groups` rows.
+   *
+   * A second, independent pass over **every** `verdict: "publish"` candidate
+   * for this document — not just the ones this invocation just inserted —
+   * because it has to see candidates published on a *previous* run too. That
+   * is what makes this safe to call from the backfill script: re-enqueuing
+   * `publish` for an already-published document inserts zero new events (the
+   * existing loop above is unaffected) but still finds and applies any
+   * `ingest_event_sequences` rows written after the fact.
+   *
+   * `memberEventIds` on a proposal are extraction-time ids
+   * (`"{chunkIndex}-{i}"`); resolving them through this map to the id actually
+   * written to `events` is what makes a proposal usable at all, and any id
+   * that does not resolve (its candidate was demoted or never geocoded)
+   * silently drops out of the group rather than erroring.
+   */
+  private async applySequenceGroups(documentId: string): Promise<number> {
+    const proposals = await this.sequenceRepo.find({ where: { documentId } });
+    if (proposals.length === 0) return 0;
+
+    const published = await this.candidateRepo.find({
+      where: { documentId, verdict: "publish" },
+    });
+    const eventKeyByExtractionId = new Map<string, string>();
+    for (const candidate of published) {
+      const event = candidate.event as ExtractedEvent;
+      eventKeyByExtractionId.set(event.id, candidate.eventKey);
+    }
+
+    let applied = 0;
+    for (const proposal of proposals) {
+      const memberKeys = proposal.memberEventIds
+        .map((id) => eventKeyByExtractionId.get(id))
+        .filter((key): key is string => key !== undefined);
+      if (memberKeys.length === 0) continue;
+
+      const groupId = await this.mapWriter.ensureEventGroup(
+        documentId,
+        proposal.title,
+        proposal.description,
+      );
+      for (const [seq, eventKey] of memberKeys.entries()) {
+        await this.mapWriter.addGroupMember(groupId, eventKey, seq);
+      }
+      applied++;
+    }
+    return applied;
+  }
+
+  /**
+   * Fills in `significance` for candidates whose row on the map was published
+   * on a *previous* run — the main loop above only inserts/backfills for
+   * candidates with `publishedAt IS NULL`, but `validate`'s `upsertCandidate`
+   * deliberately never sets `publishedAt` when it re-upserts a candidate (see
+   * its own docstring), so an event re-extracted with a score, whose eventKey
+   * happened to match one already published before `significance` existed,
+   * is invisible to that loop entirely: its candidate row already has
+   * `publishedAt` set, so it is excluded from the query that feeds the loop,
+   * and its fresh `event` JSON (with a real score) is never looked at again.
+   *
+   * Same "every verdict:publish candidate, not just this run's" shape as
+   * `applySequenceGroups`, and the same reason: re-extracting to backfill
+   * data onto already-published events is exactly this method's job.
+   */
+  private async backfillSignificance(documentId: string): Promise<number> {
+    const candidates = await this.candidateRepo.find({
+      where: { documentId, verdict: "publish" },
+    });
+
+    let backfilled = 0;
+    for (const candidate of candidates) {
+      const event = candidate.event as ExtractedEvent;
+      if (event.significance == null) continue;
+      await this.mapWriter.backfillSignificance(
+        candidate.eventKey,
+        event.significance,
+      );
+      backfilled++;
+    }
+    return backfilled;
   }
 
   /** Move a candidate back to review, recording why publishing declined it. */

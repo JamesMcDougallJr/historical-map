@@ -161,6 +161,16 @@ export interface ExtractedEvent extends ParsedEvent {
    * the event row, and the deep link parses the page number back out of it.
    */
   anchor: string | null;
+
+  /**
+   * 0 to 1: how much this event mattered to the narrative, as distinct from
+   * `confidence` (how sure the model is that it happened at all). A routine
+   * travel day and a battle can both be reported at high confidence; only the
+   * battle is highly significant. Deliberately never a gate — `validate` has
+   * no significance threshold, unlike `confidence`'s `confidenceMin` — this is
+   * carried-through metadata, not a decision about whether the event survives.
+   */
+  significance: number;
 }
 
 /**

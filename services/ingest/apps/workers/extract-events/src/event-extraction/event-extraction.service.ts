@@ -5,7 +5,12 @@ import { InjectRepository } from "@nestjs/typeorm";
 import { ConfigService } from "@nestjs/config";
 import { type ExtractedEvent, findDates } from "@historical-map/domain";
 import { JobLogger } from "@app/common";
-import { IngestDocument, IngestExtraction, jsonb } from "@app/database";
+import {
+  IngestDocument,
+  IngestEventSequence,
+  IngestExtraction,
+  jsonb,
+} from "@app/database";
 import { STORAGE_SERVICE, type StorageService } from "@app/storage";
 import { type TextArtifact, parseArtifact } from "@app/parsers";
 import {
@@ -36,6 +41,8 @@ export class EventExtractionService {
     private readonly documentRepo: Repository<IngestDocument>,
     @InjectRepository(IngestExtraction)
     private readonly extractionRepo: Repository<IngestExtraction>,
+    @InjectRepository(IngestEventSequence)
+    private readonly sequenceRepo: Repository<IngestEventSequence>,
     @Inject(EXTRACTION_ENGINE) private readonly engine: ExtractionEngine,
     @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
     @InjectQueue(QUEUE_NAMES.VALIDATE)
@@ -118,11 +125,61 @@ export class EventExtractionService {
           continue;
         }
 
-        const events = await this.engine.extractChunk(chunk);
+        let events: ExtractedEvent[];
+        try {
+          events = await this.engine.extractChunk(chunk);
+        } catch (error) {
+          // A chunk whose *generation* persistently fails strict-schema
+          // validation (the model reliably adding a disallowed field on this
+          // specific passage, observed in practice on real corpus text) will
+          // fail identically on every job-level retry too — it is not a
+          // transient condition retrying the whole document can fix. Network
+          // and rate-limit errors are different: those genuinely do resolve
+          // with time, so they still propagate and fail the job, which is
+          // what gives them BullMQ's backoff. Only the "generation failed"
+          // class (see `GroqExtractionEngine.isGenerationFailure`) is treated
+          // as "this chunk has no usable events" rather than "this document
+          // cannot proceed."
+          const message = error instanceof Error ? error.message : String(error);
+          if (!message.startsWith("generation failed:")) throw error;
+
+          this.jobLogger.debug(
+            `chunk ${chunk.index} skipped after exhausting retries: ${message}`,
+          );
+          events = [];
+        }
         // Written as each chunk succeeds, so an exhausted retry budget on
         // chunk 15 of 18 does not re-send the 14 that already worked.
         await this.record(documentId, modelRun, chunk, events);
         extracted += events.length;
+      }
+
+      // Whole-document, after every chunk — never gates the job. A flaky or
+      // hallucinating sequence-proposal call must not stand between real,
+      // already-extracted event data and `validate`/`publish`; the worst
+      // outcome of this failing is that no sequences exist for this run, not
+      // that the document fails to progress.
+      //
+      // Re-reads every chunk's events from `ingest_extractions` rather than
+      // accumulating them in this loop, because a *resumed* job only runs the
+      // chunks that were not already checkpointed — an in-memory array here
+      // would silently propose sequences over a partial document whenever a
+      // prior attempt had already completed some chunks.
+      let proposedSequences = 0;
+      try {
+        const allEvents = await this.allExtractedEvents(documentId, modelRun);
+        proposedSequences = await this.proposeSequences(
+          document,
+          documentId,
+          modelRun,
+          allEvents,
+        );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        await this.jobLogger.log(
+          job,
+          `sequence proposal failed (non-fatal): ${message}`,
+        );
       }
 
       await this.documentRepo.update(documentId, {
@@ -133,7 +190,7 @@ export class EventExtractionService {
 
       await this.jobLogger.log(
         job,
-        `chunks=${chunks.length} no-date-skipped=${skipped} events=${extracted} run=${modelRun}`,
+        `chunks=${chunks.length} no-date-skipped=${skipped} events=${extracted} sequences=${proposedSequences} run=${modelRun}`,
       );
 
       await this.validateQueue.add(
@@ -153,6 +210,54 @@ export class EventExtractionService {
       await job.updateData({ ...job.data, modelRun });
       throw error;
     }
+  }
+
+  /**
+   * Calls the engine's whole-document sequence proposal and persists the
+   * result. Returns the number of sequences written, purely for the summary
+   * log line — callers that only care about success/failure can ignore it.
+   */
+  private async proposeSequences(
+    document: IngestDocument,
+    documentId: string,
+    modelRun: string,
+    events: ExtractedEvent[],
+  ): Promise<number> {
+    if (events.length === 0) return 0;
+
+    const proposals = await this.engine.proposeSequences(
+      { title: document.title ?? document.externalId },
+      events.map((e) => ({
+        id: e.id,
+        title: e.title,
+        dateText: e.dateText,
+        placeName: e.placeName,
+      })),
+    );
+    if (proposals.length === 0) return 0;
+
+    await this.sequenceRepo.insert(
+      proposals.map((proposal) => ({
+        documentId,
+        modelRun,
+        title: proposal.title,
+        description: proposal.description,
+        memberEventIds: proposal.memberEventIds,
+      })),
+    );
+    return proposals.length;
+  }
+
+  /** Flattens every chunk's events for one run, in chunk order. */
+  private async allExtractedEvents(
+    documentId: string,
+    modelRun: string,
+  ): Promise<ExtractedEvent[]> {
+    const rows = await this.extractionRepo.find({
+      where: { documentId, modelRun },
+      order: { chunkIndex: "ASC" },
+    });
+    return rows.flatMap((row) => row.events as ExtractedEvent[]);
   }
 
   private async completedChunkIndices(

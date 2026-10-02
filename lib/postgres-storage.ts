@@ -51,6 +51,7 @@ interface EventRow {
   date_text: string | null;
   document_id: string | null;
   anchor: string | null;
+  significance: number | null;
 }
 
 let schemaReady: Promise<void> | null = null;
@@ -110,6 +111,9 @@ export function ensureSchema(): Promise<void> {
     await db`ALTER TABLE events ADD COLUMN IF NOT EXISTS document_id uuid`;
     await db`ALTER TABLE events ADD COLUMN IF NOT EXISTS anchor text`;
     await db`CREATE INDEX IF NOT EXISTS events_document_id_idx ON events (document_id)`;
+    // 0-1, extraction-time only — see ExtractedEvent.significance. Never a
+    // gate, just carried-through metadata; absent on hand-curated events.
+    await db`ALTER TABLE events ADD COLUMN IF NOT EXISTS significance real`;
 
     // Change watermark, read by readData(). Without it `lastUpdated` was
     // regenerated on every read, so the map's poll saw a "change" every 5s and
@@ -161,6 +165,7 @@ function toEvent(row: EventRow, groupIds?: string[]): HistoricalEvent {
   // it was never selected here, so it never reached the client either.
   if (row.document_id) event.documentId = row.document_id;
   if (row.anchor) event.anchor = row.anchor;
+  if (row.significance !== null) event.significance = row.significance;
   // Derived read-time convenience — never written directly, only populated
   // by scanning event_group_members.
   if (groupIds?.length) event.groupIds = groupIds;
@@ -381,6 +386,7 @@ export async function updateEvent(
       | "sourceId"
       | "tags"
       | "imageUrl"
+      | "significance"
     >
   >,
 ): Promise<HistoricalEvent | null> {
@@ -396,6 +402,7 @@ export async function updateEvent(
         source_id = COALESCE(${patch.sourceId ?? null}, source_id),
         tags = COALESCE(${patch.tags ?? null}, tags),
         image_url = COALESCE(${patch.imageUrl ?? null}, image_url),
+        significance = COALESCE(${patch.significance ?? null}, significance),
         updated_at = now()
     WHERE id = ${eventId} AND location_id = ${locationId}
     RETURNING *`;

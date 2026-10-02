@@ -5,17 +5,23 @@ import { estimateTokens } from "../chunker";
 import type {
   ExtractionChunk,
   ExtractionEngine,
+  SequenceProposal,
 } from "../extraction-engine.interface";
 import {
   EXTRACTION_JSON_SCHEMA,
   extractionResponseSchema,
 } from "./event-schema";
 import { SYSTEM_PROMPT, buildUserPrompt } from "./prompt";
+import {
+  SEQUENCE_JSON_SCHEMA,
+  sequenceResponseSchema,
+} from "./sequence-schema";
+import { SEQUENCE_SYSTEM_PROMPT, buildSequenceUserPrompt } from "./sequence-prompt";
 import { TokenBucket, sleep } from "./token-bucket";
 
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 const REQUEST_TIMEOUT_MS = 120_000;
-const MAX_ATTEMPTS_PER_CHUNK = 3;
+const MAX_ATTEMPTS_PER_REQUEST = 3;
 const RETRY_BASE_DELAY_MS = 2_000;
 
 /**
@@ -32,6 +38,16 @@ const RETRY_BASE_DELAY_MS = 2_000;
  * low is a hard 400, not a truncated result.
  */
 const MAX_COMPLETION_TOKENS = 2_500;
+
+/**
+ * Ceiling for the once-per-document sequence-proposal call (see
+ * `proposeSequences`). Larger than the per-chunk budget above because one
+ * response can need to enumerate dozens of member event ids across several
+ * proposed sequences, rather than a handful of event fields — sized off the
+ * largest event count measured in the corpus so far (67, on
+ * `short_history_of_mexico.pdf`).
+ */
+const SEQUENCE_MAX_COMPLETION_TOKENS = 4_000;
 
 /**
  * Extraction is mechanical: find the events, fill the schema. It does not need
@@ -56,6 +72,15 @@ class RetryableGroqError extends Error {
     super(message);
     this.name = "RetryableGroqError";
   }
+}
+
+/** One structured-output request: everything that varies between call sites. */
+interface RequestParams {
+  systemPrompt: string;
+  userPrompt: string;
+  jsonSchema: unknown;
+  schemaName: string;
+  maxCompletionTokens: number;
 }
 
 /**
@@ -95,25 +120,73 @@ export class GroqExtractionEngine implements ExtractionEngine {
 
     await this.bucket.take(estimated);
 
-    const { content, usedTokens } = await this.requestWithRetry(userPrompt);
+    const { content, usedTokens } = await this.requestWithRetry({
+      systemPrompt: SYSTEM_PROMPT,
+      userPrompt,
+      jsonSchema: EXTRACTION_JSON_SCHEMA,
+      schemaName: "historical_events",
+      maxCompletionTokens: MAX_COMPLETION_TOKENS,
+    });
     if (usedTokens) this.bucket.reconcile(estimated, usedTokens);
 
-    return this.parse(content, chunk);
+    return this.parseEvents(content, chunk);
+  }
+
+  /**
+   * One call per document, after every chunk has been extracted — not one per
+   * chunk. Sequence membership is a whole-document judgment ("does this event
+   * belong to the same narrative arc as that one, fifty pages later?"), which a
+   * chunk-isolated call structurally cannot make: chunks carry zero awareness
+   * of anything outside themselves (see `ExtractionChunk`'s own docstring).
+   *
+   * Shares `this.bucket` with `extractChunk` on purpose — both count against
+   * the same Groq account's TPM limit, so a second, separately-budgeted bucket
+   * would under-reserve and reintroduce the exact 429 problem the bucket
+   * exists to prevent.
+   */
+  async proposeSequences(
+    document: { title: string },
+    events: Array<{
+      id: string;
+      title: string;
+      dateText: string;
+      placeName: string | null;
+    }>,
+  ): Promise<SequenceProposal[]> {
+    if (events.length === 0) return [];
+
+    const userPrompt = buildSequenceUserPrompt(document, events);
+    const estimated =
+      estimateTokens(SEQUENCE_SYSTEM_PROMPT + userPrompt) +
+      SEQUENCE_MAX_COMPLETION_TOKENS;
+
+    await this.bucket.take(estimated);
+
+    const { content, usedTokens } = await this.requestWithRetry({
+      systemPrompt: SEQUENCE_SYSTEM_PROMPT,
+      userPrompt,
+      jsonSchema: SEQUENCE_JSON_SCHEMA,
+      schemaName: "event_sequences",
+      maxCompletionTokens: SEQUENCE_MAX_COMPLETION_TOKENS,
+    });
+    if (usedTokens) this.bucket.reconcile(estimated, usedTokens);
+
+    return this.parseSequences(content, new Set(events.map((e) => e.id)));
   }
 
   private async requestWithRetry(
-    userPrompt: string,
+    params: RequestParams,
   ): Promise<{ content: string; usedTokens?: number }> {
     let lastError: Error = new Error("unreachable");
 
-    for (let attempt = 1; attempt <= MAX_ATTEMPTS_PER_CHUNK; attempt++) {
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS_PER_REQUEST; attempt++) {
       try {
-        return await this.request(userPrompt);
+        return await this.request(params);
       } catch (error) {
         if (!(error instanceof RetryableGroqError)) throw error;
         lastError = error;
 
-        if (attempt === MAX_ATTEMPTS_PER_CHUNK) break;
+        if (attempt === MAX_ATTEMPTS_PER_REQUEST) break;
 
         // Honour Retry-After when the API supplies it. Doubling a fixed base
         // delay instead — as the transcription engine this is modelled on does
@@ -132,7 +205,7 @@ export class GroqExtractionEngine implements ExtractionEngine {
   }
 
   private async request(
-    userPrompt: string,
+    params: RequestParams,
   ): Promise<{ content: string; usedTokens?: number }> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -150,16 +223,16 @@ export class GroqExtractionEngine implements ExtractionEngine {
           model: this.model,
           // Explicit ceiling — see MAX_COMPLETION_TOKENS. Without it Groq
           // reserves the model default against TPM.
-          max_completion_tokens: MAX_COMPLETION_TOKENS,
+          max_completion_tokens: params.maxCompletionTokens,
           reasoning_effort: REASONING_EFFORT,
           messages: [
-            { role: "system", content: SYSTEM_PROMPT },
-            { role: "user", content: userPrompt },
+            { role: "system", content: params.systemPrompt },
+            { role: "user", content: params.userPrompt },
           ],
           response_format: {
             type: "json_schema",
             json_schema: {
-              name: "historical_events",
+              name: params.schemaName,
               // `strict` DEFAULTS TO FALSE, and must be set explicitly.
               //
               // It buys less than the docs imply: it guarantees you never
@@ -169,7 +242,7 @@ export class GroqExtractionEngine implements ExtractionEngine {
               // out-of-enum `datePrecision`. Hence the retry classification
               // below; without it a single unlucky sample fails a whole chunk.
               strict: true,
-              schema: EXTRACTION_JSON_SCHEMA,
+              schema: params.jsonSchema,
             },
           },
           // Neither streaming nor tools may be combined with strict
@@ -225,25 +298,13 @@ export class GroqExtractionEngine implements ExtractionEngine {
     return { content, usedTokens: payload.usage?.total_tokens };
   }
 
-  private parse(content: string, chunk: ExtractionChunk): ExtractedEvent[] {
-    let raw: unknown;
-    try {
-      raw = JSON.parse(content);
-    } catch {
-      // Should be impossible under strict decoding; surfaced rather than
-      // swallowed so a regression in that guarantee is visible.
-      throw new Error(
-        `Groq returned non-JSON under strict decoding: ${content.slice(0, 200)}`,
-      );
-    }
+  private parseEvents(content: string, chunk: ExtractionChunk): ExtractedEvent[] {
+    const raw = parseJson(content);
 
     const parsed = extractionResponseSchema.safeParse(raw);
     if (!parsed.success) {
       throw new Error(
-        `Groq response failed validation: ${parsed.error.issues
-          .map((i) => `${i.path.join(".")}: ${i.message}`)
-          .join("; ")
-          .slice(0, 300)}`,
+        `Groq response failed validation: ${formatZodIssues(parsed.error.issues)}`,
       );
     }
 
@@ -258,6 +319,55 @@ export class GroqExtractionEngine implements ExtractionEngine {
       anchor: chunk.anchors[0] ?? null,
     }));
   }
+
+  /**
+   * Drops any `memberEventIds` entry the model invented rather than copied
+   * from the input — strict JSON schema constrains shape, not content, so
+   * nothing stops the model from hallucinating an id that was never given.
+   * A sequence left with zero real members after filtering is dropped
+   * entirely rather than persisted as an empty group.
+   */
+  private parseSequences(
+    content: string,
+    validIds: Set<string>,
+  ): SequenceProposal[] {
+    const raw = parseJson(content);
+
+    const parsed = sequenceResponseSchema.safeParse(raw);
+    if (!parsed.success) {
+      throw new Error(
+        `Groq sequence response failed validation: ${formatZodIssues(parsed.error.issues)}`,
+      );
+    }
+
+    return parsed.data.sequences
+      .map((seq) => ({
+        ...seq,
+        memberEventIds: seq.memberEventIds.filter((id) => validIds.has(id)),
+      }))
+      .filter((seq) => seq.memberEventIds.length > 0);
+  }
+}
+
+function parseJson(content: string): unknown {
+  try {
+    return JSON.parse(content);
+  } catch {
+    // Should be impossible under strict decoding; surfaced rather than
+    // swallowed so a regression in that guarantee is visible.
+    throw new Error(
+      `Groq returned non-JSON under strict decoding: ${content.slice(0, 200)}`,
+    );
+  }
+}
+
+function formatZodIssues(
+  issues: Array<{ path: PropertyKey[]; message: string }>,
+): string {
+  return issues
+    .map((i) => `${i.path.join(".")}: ${i.message}`)
+    .join("; ")
+    .slice(0, 300);
 }
 
 /**

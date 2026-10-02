@@ -86,12 +86,72 @@ export class MapWriterService {
   }
 
   /**
+   * Upserts the `EventGroup` row for one of `extract-events`'s sequence
+   * proposals. Id is derived from (title, documentId) — same slug+hash shape
+   * as `locationId` below — so re-publishing the same proposal (idempotent
+   * re-run, or the backfill script) updates the same row instead of piling up
+   * duplicates. Returns the id, the same shape as `findOrCreateLocation`.
+   *
+   * Raw SQL for the same reason as every other method here: `event_groups`
+   * belongs to the web app's `ensureSchema()`, not to this connection's
+   * TypeORM entities.
+   */
+  async ensureEventGroup(
+    documentId: string,
+    title: string,
+    description: string | null,
+  ): Promise<string> {
+    const id = slugId(title, documentId, "sequence");
+    await this.dataSource.query(
+      `INSERT INTO event_groups (id, title, description)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (id) DO UPDATE
+         SET title = EXCLUDED.title,
+             description = EXCLUDED.description`,
+      [id, title, description],
+    );
+    return id;
+  }
+
+  /**
+   * Adds an event to a group at a given narrative position.
+   *
+   * `ON CONFLICT DO NOTHING` on purpose: a member's `seq` is set once, at
+   * first insert, and never overwritten — an editor hand-reordering a group
+   * later (the admin "Sequences" UI) must not have their change clobbered by
+   * a later re-publish finding the same proposal again.
+   */
+  async addGroupMember(
+    groupId: string,
+    eventId: string,
+    seq: number,
+  ): Promise<void> {
+    await this.dataSource.query(
+      `INSERT INTO event_group_members (group_id, event_id, seq)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (group_id, event_id) DO NOTHING`,
+      [groupId, eventId, seq],
+    );
+  }
+
+  /**
    * Inserts an event. Returns false when the id already existed.
    *
    * `ON CONFLICT DO NOTHING` plus a content-derived id is what makes publishing
    * idempotent: re-running produces the same ids, so nothing duplicates. Note
    * this means an event is never *corrected* by re-publishing — matching the
    * existing behaviour of the web app's own insert path.
+   *
+   * `significance` is the one deliberate exception, and gets a second,
+   * narrower statement rather than folding into the `INSERT`'s own conflict
+   * clause: changing `ON CONFLICT DO NOTHING` to `DO UPDATE` would make
+   * `RETURNING id` return a row on every conflict too, breaking the
+   * insert-vs-already-present count this method's boolean return feeds
+   * (`publishing.service.ts`'s `published`/`already-present` log counters).
+   * Keeping the `INSERT` untouched and backfilling separately preserves that
+   * exactly, while still letting re-extracting a document (the only way an
+   * already-published row gets a significance score today, since the column
+   * did not exist when it was first published) fill in what was null.
    */
   async insertEvent(event: {
     id: string;
@@ -106,13 +166,15 @@ export class MapWriterService {
     dateText?: string | null;
     documentId?: string | null;
     anchor?: string | null;
+    significance?: number | null;
   }): Promise<boolean> {
     const result: unknown[] = await this.dataSource.query(
       `INSERT INTO events (
          id, location_id, source_id, title, date, description,
-         source, tags, date_precision, date_text, document_id, anchor
+         source, tags, date_precision, date_text, document_id, anchor,
+         significance
        )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
        ON CONFLICT (id) DO NOTHING
        RETURNING id`,
       [
@@ -128,24 +190,60 @@ export class MapWriterService {
         event.dateText ?? null,
         event.documentId ?? null,
         event.anchor ?? null,
+        event.significance ?? null,
       ],
     );
-    return result.length > 0;
+    const inserted = result.length > 0;
+
+    if (!inserted && event.significance != null) {
+      await this.backfillSignificance(event.id, event.significance);
+    }
+
+    return inserted;
+  }
+
+  /**
+   * Fills in `significance` on an already-published row, without overwriting
+   * a value it already has. Split out from `insertEvent` because it has a
+   * second caller: a candidate whose `eventKey` matched an old, already-
+   * `publishedAt`-set row never goes through `insertEvent` again on a re-run
+   * (`validate`'s `upsertCandidate` updates `event`/`checks`/`verdict` in
+   * place but deliberately never touches `publishedAt`), so re-extracting a
+   * document to add scores to events it already published needs this called
+   * directly — see `publishing.service.ts`'s `backfillSignificance` pass.
+   */
+  async backfillSignificance(
+    eventId: string,
+    significance: number,
+  ): Promise<void> {
+    await this.dataSource.query(
+      `UPDATE events SET significance = COALESCE(significance, $1) WHERE id = $2`,
+      [significance, eventId],
+    );
   }
 }
 
 
-/** Readable slug plus a coordinate-derived suffix, so ids stay debuggable. */
-function locationId(name: string, lon: number, lat: number): string {
+/**
+ * Readable slug of `text` plus a hash-derived suffix of `salt`, so ids stay
+ * debuggable but never collide on the slug alone. Shared by `locationId`
+ * (salted with coordinates) and `ensureEventGroup` (salted with documentId).
+ *
+ * Exported so a forced-re-extraction script can recompute an *old* proposal's
+ * group id (from its title + documentId) to find and delete the group it
+ * produced, without duplicating this formula a second time.
+ */
+export function slugId(text: string, salt: string, fallback: string): string {
   const slug =
-    name
+    text
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-|-$/g, "")
-      .slice(0, 40) || "place";
-  const digest = createHash("sha256")
-    .update(`${lon.toFixed(4)},${lat.toFixed(4)}`)
-    .digest("hex")
-    .slice(0, 8);
+      .slice(0, 40) || fallback;
+  const digest = createHash("sha256").update(salt).digest("hex").slice(0, 8);
   return `${slug}-${digest}`;
+}
+
+function locationId(name: string, lon: number, lat: number): string {
+  return slugId(name, `${lon.toFixed(4)},${lat.toFixed(4)}`, "place");
 }

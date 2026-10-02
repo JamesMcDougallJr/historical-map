@@ -4,5 +4,7 @@ export * from "./groq/event-schema";
 export * from "./groq/groq.engine";
 export * from "./groq/groq.module";
 export * from "./groq/prompt";
+export * from "./groq/sequence-schema";
+export * from "./groq/sequence-prompt";
 export * from "./groq/token-bucket";
 export * from "./tokens";
