@@ -125,7 +125,29 @@ export class EventExtractionService {
           continue;
         }
 
-        const events = await this.engine.extractChunk(chunk);
+        let events: ExtractedEvent[];
+        try {
+          events = await this.engine.extractChunk(chunk);
+        } catch (error) {
+          // A chunk whose *generation* persistently fails strict-schema
+          // validation (the model reliably adding a disallowed field on this
+          // specific passage, observed in practice on real corpus text) will
+          // fail identically on every job-level retry too — it is not a
+          // transient condition retrying the whole document can fix. Network
+          // and rate-limit errors are different: those genuinely do resolve
+          // with time, so they still propagate and fail the job, which is
+          // what gives them BullMQ's backoff. Only the "generation failed"
+          // class (see `GroqExtractionEngine.isGenerationFailure`) is treated
+          // as "this chunk has no usable events" rather than "this document
+          // cannot proceed."
+          const message = error instanceof Error ? error.message : String(error);
+          if (!message.startsWith("generation failed:")) throw error;
+
+          this.jobLogger.debug(
+            `chunk ${chunk.index} skipped after exhausting retries: ${message}`,
+          );
+          events = [];
+        }
         // Written as each chunk succeeds, so an exhausted retry budget on
         // chunk 15 of 18 does not re-send the 14 that already worked.
         await this.record(documentId, modelRun, chunk, events);
