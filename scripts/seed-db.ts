@@ -16,7 +16,7 @@ import {
 } from "../lib/postgres-storage";
 
 /** Installs the Martin tile function source (db/martin-functions.sql). */
-async function applyMartinFunctions(): Promise<void> {
+export async function applyMartinFunctions(): Promise<void> {
   const file = path.resolve("db/martin-functions.sql");
   if (!fs.existsSync(file)) return;
   await execSql(fs.readFileSync(file, "utf-8"));

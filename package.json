@@ -20,6 +20,8 @@
     "db:backup": "tsx scripts/db-backup.ts",
     "db:restore": "tsx scripts/db-restore.ts",
     "test:e2e": "playwright test",
+    "test:e2e:real": "playwright test --config=e2e-real/playwright.config.ts",
+    "test:e2e:real:reset-db": "tsx scripts/reset-test-db.ts",
     "type-check:all": "nx run-many -t type-check",
     "build:all": "nx run-many -t build",
     "graph": "nx graph"

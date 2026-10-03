@@ -214,12 +214,14 @@ export function LayerControl({
               {eventLayers.map((layer) => (
                 <label
                   key={layer.id}
+                  data-testid={`event-layer-row-${layer.id}`}
                   className="px-4 py-2.5 flex items-center gap-3 hover:bg-slate-800/50 cursor-pointer"
                 >
                   <input
                     type="checkbox"
                     checked={layer.enabled}
                     onChange={() => onToggleEventLayer?.(layer.id)}
+                    data-testid={`event-layer-checkbox-${layer.id}`}
                     className="w-4 h-4 rounded border-slate-600 bg-slate-700 text-blue-500 focus:ring-blue-500 focus:ring-offset-0"
                   />
                   <span
@@ -248,7 +250,10 @@ export function LayerControl({
               <div className="px-4 py-3 border-b border-slate-700">
                 <h3 className="text-white font-medium">Sequences</h3>
               </div>
-              <label className="px-4 py-2.5 flex items-center gap-3 hover:bg-slate-800/50 cursor-pointer">
+              <label
+                data-testid="event-group-radio-none"
+                className="px-4 py-2.5 flex items-center gap-3 hover:bg-slate-800/50 cursor-pointer"
+              >
                 <input
                   type="radio"
                   name="event-group"
@@ -263,6 +268,7 @@ export function LayerControl({
               {eventGroups.map((group) => (
                 <label
                   key={group.id}
+                  data-testid={`event-group-radio-${group.id}`}
                   className="px-4 py-2.5 flex items-center gap-3 hover:bg-slate-800/50 cursor-pointer"
                 >
                   <input
@@ -419,6 +425,7 @@ export function LayerControl({
               overlays.map((overlay) => (
                 <div
                   key={overlay.id}
+                  data-testid={`overlay-row-${overlay.id}`}
                   draggable={!!onReorderOverlays}
                   onDragStart={(e) => handleDragStart(e, overlay.id)}
                   onDragEnd={handleDragEnd}
@@ -461,6 +468,7 @@ export function LayerControl({
                           type="checkbox"
                           checked={overlay.enabled}
                           onChange={() => onToggleOverlay(overlay.id)}
+                          data-testid={`overlay-toggle-${overlay.id}`}
                           className="sr-only peer"
                         />
                         <div className="w-9 h-5 bg-slate-600 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
@@ -524,6 +532,7 @@ export function LayerControl({
                             parseInt(e.target.value) / 100,
                           )
                         }
+                        data-testid={`overlay-opacity-${overlay.id}`}
                         className="flex-1 h-1 bg-slate-600 rounded-lg appearance-none cursor-pointer accent-blue-500"
                       />
                       <span className="text-xs text-slate-400 w-8">
