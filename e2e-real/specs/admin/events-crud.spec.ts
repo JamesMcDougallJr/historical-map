@@ -9,10 +9,18 @@ const loc = FX_LOCATIONS[1]!;
 
 test.describe("admin: event fields (real backend)", () => {
   test("date precision, tags, and image URL persist", async ({ page }) => {
+    // Unique per run, not a fixed title: if a previous CI attempt's cleanup
+    // never ran (the exact failure this test once hit), a fixed title would
+    // leave a stray same-titled row behind, and the next attempt's
+    // `.filter({ hasText })` locator would match both — "strict mode
+    // violation: resolved to 2 elements" — on top of whatever the real
+    // failure was.
+    const title = `Precision Fields Event ${Date.now()}`;
+
     await page.goto(`/locations/${encodeURIComponent(loc.id)}`);
 
     await page.getByTestId("add-event-button").click();
-    await page.getByTestId("event-form-title").fill("Precision Fields Event");
+    await page.getByTestId("event-form-title").fill(title);
     await page.getByTestId("event-form-date").fill("1912-01-01");
     await page
       .getByTestId("event-form-date-precision")
@@ -25,9 +33,13 @@ test.describe("admin: event fields (real backend)", () => {
       .getByTestId("event-form-image-url")
       .fill("https://example.com/fixture.jpg");
     await page.getByTestId("event-form-submit").click();
+    // The form only unmounts once the add round-trip (API call + reload)
+    // finishes — wait for that before looking for the resulting row, rather
+    // than relying on the row locator's own auto-wait to paper over it.
+    await expect(page.getByTestId("event-form-submit")).toBeHidden();
 
     const row = page.locator('[data-testid^="event-row-"]', {
-      hasText: "Precision Fields Event",
+      hasText: title,
     });
     await expect(row).toBeVisible();
     await expect(row).toContainText("decade");
@@ -46,8 +58,10 @@ test.describe("admin: event fields (real backend)", () => {
 
     // Clean up.
     page.once("dialog", (d) => void d.accept());
-    await page.getByTestId("event-form-title").fill("Precision Fields Event");
+    await page.getByTestId("event-form-title").fill(title);
     await page.getByTestId("event-form-submit").click();
+    await expect(page.getByTestId("event-form-submit")).toBeHidden();
+
     await page.getByTestId(`event-delete-button-${eventId}`).click();
     await expect(page.locator(`[data-testid="event-row-${eventId}"]`)).toBeHidden();
   });

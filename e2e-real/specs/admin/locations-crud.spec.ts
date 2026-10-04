@@ -66,18 +66,25 @@ test.describe("admin: locations CRUD (real backend)", () => {
   test("add, edit, and delete an event — covering both confirm() outcomes", async ({
     page,
   }) => {
+    // Unique per run: a fixed title surviving a failed prior attempt's
+    // cleanup would leave a stray row behind, and the next attempt's
+    // `.filter({ hasText })` locator would then match both.
+    const addedTitle = `Admin-Added Event ${Date.now()}`;
+    const editedTitle = `Admin-Edited Event ${Date.now()}`;
+
     await page.goto(`/locations/${encodeURIComponent(loc1.id)}`);
 
     await page.getByTestId("add-event-button").click();
-    await page.getByTestId("event-form-title").fill("Admin-Added Event");
+    await page.getByTestId("event-form-title").fill(addedTitle);
     await page.getByTestId("event-form-date").fill("1905-05-05");
     await page
       .getByTestId("event-form-description")
       .fill("Added via the admin app's event form.");
     await page.getByTestId("event-form-submit").click();
+    await expect(page.getByTestId("event-form-submit")).toBeHidden();
 
     const row = page.locator('[data-testid^="event-row-"]', {
-      hasText: "Admin-Added Event",
+      hasText: addedTitle,
     });
     await expect(row).toBeVisible();
     const eventId = (await row.getAttribute("data-testid"))!.replace(
@@ -87,11 +94,11 @@ test.describe("admin: locations CRUD (real backend)", () => {
 
     // Edit it.
     await page.getByTestId(`event-edit-button-${eventId}`).click();
-    await page.getByTestId("event-form-title").fill("Admin-Edited Event");
+    await page.getByTestId("event-form-title").fill(editedTitle);
     await page.getByTestId("event-form-submit").click();
     await expect(
       page.locator(`[data-testid="event-row-${eventId}"]`),
-    ).toContainText("Admin-Edited Event");
+    ).toContainText(editedTitle);
 
     // Delete, cancel path first.
     autoDismissConfirm(page);

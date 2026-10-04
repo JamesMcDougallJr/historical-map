@@ -6,11 +6,16 @@ import { waitForRealMapReady } from "../../fixtures/map-ready";
 // asserting against that request is far less flaky than counting rendered
 // tile features.
 //
-// `timeline-toggle-button` needs `{ force: true }`: Next.js dev mode's
-// error-overlay portal (<nextjs-portal>, always mounted, regardless of
-// `devIndicators`) happens to sit over TimelineSlider's bottom-left corner
-// and blocks the click's actionability check otherwise — dev-only DOM
-// noise unrelated to anything this suite is testing.
+// `timeline-toggle-button` uses `dispatchEvent("click")`, not `.click()`:
+// Next.js dev mode's error-overlay portal (<nextjs-portal>, always
+// mounted, regardless of `devIndicators`) sits over TimelineSlider's
+// bottom-left corner. `.click({ force: true })` skips Playwright's
+// actionability check but still dispatches a real mouse event at that
+// screen position, which the browser's own hit-testing then routes to
+// whichever element is actually topmost there — the portal, not the
+// button, so the click silently did nothing. `dispatchEvent` fires
+// directly on the target DOM node, bypassing hit-testing (and the
+// portal) entirely, while still triggering React's onClick normally.
 test.describe("timeline filter (real backend, MVT)", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/map");
@@ -20,7 +25,7 @@ test.describe("timeline filter (real backend, MVT)", () => {
   test("enabling the timeline and choosing a preset re-requests tiles with a year range", async ({
     page,
   }) => {
-    await page.getByTestId("timeline-toggle-button").click({ force: true });
+    await page.getByTestId("timeline-toggle-button").dispatchEvent("click");
     await page.getByTestId("timeline-enable-checkbox").check();
 
     const tileRequest = page.waitForRequest((req) =>
@@ -36,7 +41,7 @@ test.describe("timeline filter (real backend, MVT)", () => {
   });
 
   test("decade marker buttons move the nearer thumb", async ({ page }) => {
-    await page.getByTestId("timeline-toggle-button").click({ force: true });
+    await page.getByTestId("timeline-toggle-button").dispatchEvent("click");
     await page.getByTestId("timeline-enable-checkbox").check();
 
     const tileRequest = page.waitForRequest((req) =>
@@ -52,7 +57,7 @@ test.describe("timeline filter (real backend, MVT)", () => {
   test("disabling the timeline removes the year filter from tile requests", async ({
     page,
   }) => {
-    await page.getByTestId("timeline-toggle-button").click({ force: true });
+    await page.getByTestId("timeline-toggle-button").dispatchEvent("click");
     await page.getByTestId("timeline-enable-checkbox").check();
     await page.getByTestId("timeline-preset-pre-1850").click();
 
