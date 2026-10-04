@@ -56,12 +56,15 @@ services:
 
   # Object storage for document originals and extracted text.
   #
-  # quay.io, not Docker Hub: MinIO stopped serving anonymous/free pulls of
-  # minio/minio and minio/mc from Docker Hub in late 2024 ("pull access
-  # denied... repository does not exist" for an image that visibly exists),
-  # and publishes the same images to quay.io/minio/* instead.
+  # Both minio/minio and minio/mc now require an authenticated pull on
+  # Docker Hub *and* quay.io/minio/* — confirmed directly against each
+  # registry's v2 API, not just inferred from a CI error. If a fresh pull
+  # here starts failing with "unauthorized"/"pull access denied", that's
+  # this, not a local misconfiguration; `docker login` to an account with
+  # access is the only fix for local dev today. CI sidesteps it entirely —
+  # see docker-compose.ci.yml.
   minio:
-    image: quay.io/minio/minio
+    image: minio/minio
     restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
@@ -85,7 +88,7 @@ services:
   # *container* to start, not for the server inside it to accept connections,
   # and that race fails outright with `connection refused` without it.
   minio-init:
-    image: quay.io/minio/mc
+    image: minio/mc
     depends_on:
       - minio
     entrypoint: >

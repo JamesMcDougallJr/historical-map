@@ -35,14 +35,24 @@ jobs:
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
 
+      # `minio-ci` (docker-compose.ci.yml), not `minio`/`minio-init` — the real
+      # MinIO images now require an authenticated pull on both Docker Hub and
+      # quay.io (confirmed directly against each registry's v2 API), which
+      # fails outright on a GitHub-hosted runner's anonymous pull. See
+      # docker-compose.ci.yml's comment for what's substituted and why it's
+      # safe for this repo's narrow S3 usage.
       - name: Start docker services
-        run: docker compose up -d db redis minio minio-init martin
+        run: docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d db redis minio-ci martin
 
-      - name: Wait for Postgres, Redis, and MinIO
+      - name: Wait for Postgres, Redis, and the S3 mock
+        env:
+          AWS_ACCESS_KEY_ID: minioadmin
+          AWS_SECRET_ACCESS_KEY: minioadmin
+          AWS_DEFAULT_REGION: us-east-1
         run: |
           timeout 60 bash -c 'until docker compose exec -T db pg_isready -U postgres -d db; do sleep 2; done'
           timeout 60 bash -c 'until docker compose exec -T redis redis-cli ping; do sleep 2; done'
-          timeout 60 bash -c 'until curl -sf http://localhost:9000/minio/health/live; do sleep 2; done'
+          timeout 60 bash -c 'until aws --endpoint-url http://localhost:9000 s3 ls; do sleep 2; done'
 
       - name: Wait for Martin
         run: timeout 60 bash -c 'until curl -sf http://localhost:3001/catalog; do sleep 2; done'
@@ -74,4 +84,4 @@ jobs:
 
       - name: Tear down docker services
         if: always()
-        run: docker compose down -v
+        run: docker compose -f docker-compose.yml -f docker-compose.ci.yml down -v
