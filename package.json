@@ -17,6 +17,7 @@
     "build:mcp": "vite build --config vite.config.mcp.ts",
     "mcp": "tsx mcp/server.ts",
     "seed:db": "tsx scripts/seed-db.ts",
+    "db:ensure-schema": "tsx scripts/ensure-schema.ts",
     "db:backup": "tsx scripts/db-backup.ts",
     "db:restore": "tsx scripts/db-restore.ts",
     "test:e2e": "playwright test",
