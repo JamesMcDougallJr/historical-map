@@ -34,6 +34,23 @@ import {
   waitForQueueIdle,
 } from "../libs/queue/src";
 
+// Safety net: the previous `main().catch(...)` form printed nothing at all
+// in CI (confirmed twice — no stack trace, no Node crash output, process
+// gone in well under a second), which a normal thrown Error inside main()
+// wouldn't do. Something is bypassing that catch entirely — these two
+// top-level handlers exist to find out what, since they catch things a
+// `.catch()` on one specific promise chain cannot: a synchronous throw
+// during module evaluation of a dynamically-imported file, or a rejection
+// from a promise this script never awaited.
+process.on("uncaughtException", (error) => {
+  console.error("[uncaughtException]", error);
+  process.exitCode = 1;
+});
+process.on("unhandledRejection", (reason) => {
+  console.error("[unhandledRejection]", reason);
+  process.exitCode = 1;
+});
+
 async function resetIngestTables(): Promise<void> {
   if (process.env["ALLOW_TEST_DB_RESET"] !== "1") {
     throw new Error(
@@ -141,25 +158,50 @@ async function main(): Promise<void> {
   console.log("Booting pipeline stages...");
   // Each stage's root module registers its BullMQ processor(s) on
   // instantiation — createApplicationContext is enough, no HTTP needed.
+  // Logged individually, not as one block: a prior run died in well under
+  // a second with zero error output, too fast to be any of the six
+  // createApplicationContext calls actually bootstrapping — these
+  // pinpoint whether it's one specific dynamic import instead.
+  console.log("  importing DetectModule...");
   const { DetectModule } = await import("../apps/workers/detect/src/detect.module");
+  console.log("  importing FetchModule...");
   const { FetchModule } = await import("../apps/workers/fetch/src/fetch.module");
+  console.log("  importing ExtractTextModule...");
   const { ExtractTextModule } = await import(
     "../apps/workers/extract-text/src/extract-text.module"
   );
+  console.log("  importing ExtractEventsModule...");
   const { ExtractEventsModule } = await import(
     "../apps/workers/extract-events/src/extract-events.module"
   );
+  console.log("  importing ValidateModule...");
   const { ValidateModule } = await import("../apps/workers/validate/src/validate.module");
+  console.log("  importing PublishModule...");
   const { PublishModule } = await import("../apps/workers/publish/src/publish.module");
 
-  const apps = await Promise.all([
-    NestFactory.createApplicationContext(DetectModule, { logger: false }),
-    NestFactory.createApplicationContext(FetchModule, { logger: false }),
-    NestFactory.createApplicationContext(ExtractTextModule, { logger: false }),
-    NestFactory.createApplicationContext(ExtractEventsModule, { logger: false }),
-    NestFactory.createApplicationContext(ValidateModule, { logger: false }),
-    NestFactory.createApplicationContext(PublishModule, { logger: false }),
-  ]);
+  // Sequential, not Promise.all — if one hangs or throws, this says which.
+  console.log("  creating DetectModule context...");
+  const detectApp = await NestFactory.createApplicationContext(DetectModule, { logger: false });
+  console.log("  creating FetchModule context...");
+  const fetchApp = await NestFactory.createApplicationContext(FetchModule, { logger: false });
+  console.log("  creating ExtractTextModule context...");
+  const extractTextApp = await NestFactory.createApplicationContext(ExtractTextModule, {
+    logger: false,
+  });
+  console.log("  creating ExtractEventsModule context...");
+  const extractEventsApp = await NestFactory.createApplicationContext(ExtractEventsModule, {
+    logger: false,
+  });
+  console.log("  creating ValidateModule context...");
+  const validateApp = await NestFactory.createApplicationContext(ValidateModule, {
+    logger: false,
+  });
+  console.log("  creating PublishModule context...");
+  const publishApp = await NestFactory.createApplicationContext(PublishModule, {
+    logger: false,
+  });
+  const apps = [detectApp, fetchApp, extractTextApp, extractEventsApp, validateApp, publishApp];
+  console.log("All pipeline stages booted.");
 
   const connection = redisConnection();
   const queues = Object.values(QUEUE_NAMES).map(
