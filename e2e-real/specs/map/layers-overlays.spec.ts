@@ -61,7 +61,11 @@ test.describe("layer control (real backend)", () => {
     // the slider doesn't exist yet on the first row without this.
     const row = page.locator('[data-testid^="overlay-row-"]').first();
     const id = (await row.getAttribute("data-testid"))!.replace("overlay-row-", "");
-    await page.getByTestId(`overlay-toggle-${id}`).check();
+    // `.check()` refuses: this toggle is the `sr-only` input of a styled
+    // switch (a sibling <div> drawn on top is the visible part, toggled via
+    // native <label> association) — not a plain visible checkbox like
+    // event-layer-checkbox-* elsewhere in this file, which can use .check().
+    await page.getByTestId(`overlay-toggle-${id}`).click({ force: true });
 
     const slider = page.getByTestId(`overlay-opacity-${id}`);
     await slider.fill("40");
