@@ -41,8 +41,10 @@ jobs:
       # fails outright on a GitHub-hosted runner's anonymous pull. See
       # docker-compose.ci.yml's comment for what's substituted and why it's
       # safe for this repo's narrow S3 usage.
+      # Not `martin` yet — it must start *after* db/martin-functions.sql
+      # exists (see "Ensure web app schema exists" below for why).
       - name: Start docker services
-        run: docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d db redis minio-ci martin
+        run: docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d db redis minio-ci
 
       - name: Wait for Postgres, Redis, and the S3 mock
         env:
@@ -54,14 +56,23 @@ jobs:
           timeout 60 bash -c 'until docker compose exec -T redis redis-cli ping; do sleep 2; done'
           timeout 60 bash -c 'until aws --endpoint-url http://localhost:9000 s3 ls; do sleep 2; done'
 
-      - name: Wait for Martin
-        run: timeout 60 bash -c 'until curl -sf http://localhost:3001/catalog; do sleep 2; done'
-
-      # Must run before ingest migrations on a fresh database: that
-      # migration's `ALTER TABLE events ADD COLUMN IF NOT EXISTS ...`
-      # requires the table to already exist (see scripts/ensure-schema.ts).
+      # Must run before `martin` starts, not just before ingest migrations:
+      # Martin discovers SQL functions from the Postgres catalog once at
+      # boot and never picks up ones created later, so starting it ahead of
+      # this serves empty vector tiles for its entire process lifetime —
+      # every page.goto("/map") test then hangs waiting for features that
+      # can never arrive. Also must run before ingest migrations on a fresh
+      # database: that migration's `ALTER TABLE events ADD COLUMN IF NOT
+      # EXISTS ...` requires the table to already exist (see
+      # scripts/ensure-schema.ts).
       - name: Ensure web app schema exists
         run: npm run db:ensure-schema
+
+      - name: Start Martin
+        run: docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d martin
+
+      - name: Wait for Martin
+        run: timeout 60 bash -c 'until curl -sf http://localhost:3001/catalog; do sleep 2; done'
 
       - name: Run ingest migrations
         run: npm run migrate --workspace=services/ingest
