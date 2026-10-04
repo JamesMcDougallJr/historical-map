@@ -1,11 +1,11 @@
 import { test, expect } from "@playwright/test";
-import { waitForMapReady } from "../../../e2e/fixtures";
 import { FX_GROUP } from "../../fixtures/seed-data";
+import { waitForRealMapReady } from "../../fixtures/map-ready";
 
 test.describe("sequences (real backend)", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/map");
-    await waitForMapReady(page);
+    await waitForRealMapReady(page);
     await page.getByLabel("Toggle layer controls").click();
   });
 

@@ -1,7 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
-import { waitForMapReady } from "../../../e2e/fixtures";
 import { dragReorderOverlay } from "../../fixtures/dnd";
 import { FX_SOURCES } from "../../fixtures/seed-data";
+import { waitForRealMapReady } from "../../fixtures/map-ready";
 
 // `window.__olMap` is already typed (loosely, as `DebugMap`) by e2e/fixtures.ts
 // — declared globally there, so it must not be redeclared with a conflicting
@@ -20,7 +20,7 @@ async function eventLayerIds(page: Page): Promise<string[]> {
 test.describe("layer control (real backend)", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/map");
-    await waitForMapReady(page);
+    await waitForRealMapReady(page);
     await page.getByLabel("Toggle layer controls").click();
   });
 

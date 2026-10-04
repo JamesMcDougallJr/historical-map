@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { waitForMapReady } from "../../../e2e/fixtures";
+import { waitForRealMapReady } from "../../fixtures/map-ready";
 
 // Timeline filtering for an MVT event layer re-requests Martin tiles with
 // from_year/to_year query params (MapView.tsx's mvtQueryString effect) —
@@ -8,7 +8,7 @@ import { waitForMapReady } from "../../../e2e/fixtures";
 test.describe("timeline filter (real backend, MVT)", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/map");
-    await waitForMapReady(page);
+    await waitForRealMapReady(page);
   });
 
   test("enabling the timeline and choosing a preset re-requests tiles with a year range", async ({

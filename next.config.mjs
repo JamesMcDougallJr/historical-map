@@ -88,9 +88,14 @@ const nextConfig = {
         headers: [
           { key: 'Cache-Control', value: 'no-store' },
           { key: 'Access-Control-Allow-Origin', value: appUrl },
-          // GET/PATCH/DELETE and the x-api-key header are needed for
+          // GET/PUT/PATCH/DELETE and the x-api-key header are needed for
           // apps/admin (a separate origin) to read and write /api/data/*.
-          { key: 'Access-Control-Allow-Methods', value: 'GET, POST, PATCH, DELETE, OPTIONS' },
+          // PUT specifically is /api/data/groups/[id]/members — missing it
+          // here let every cross-origin setEventGroupMembers call fail
+          // the browser's CORS preflight silently (admin's own sequence
+          // reorder/add-member/remove-member UI had no working write path
+          // from apps/admin until this was added).
+          { key: 'Access-Control-Allow-Methods', value: 'GET, POST, PUT, PATCH, DELETE, OPTIONS' },
           { key: 'Access-Control-Allow-Headers', value: 'Content-Type, x-api-key' },
         ],
       },

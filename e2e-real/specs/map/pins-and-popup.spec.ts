@@ -1,6 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
-import { waitForMapReady, findHoverPixel } from "../../../e2e/fixtures";
+import { findHoverPixel } from "../../../e2e/fixtures";
 import { FX_LOCATIONS } from "../../fixtures/seed-data";
+import { waitForRealMapReady } from "../../fixtures/map-ready";
 
 // fx-loc-1 sits at MapView's hardcoded default view center (see
 // e2e-real/fixtures/seed-data.ts), same trick as the mocked suite's
@@ -18,7 +19,7 @@ function pinAnchor(page: Page): { x: number; y: number } {
 test.describe("pins and popup (real backend)", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/map");
-    await waitForMapReady(page);
+    await waitForRealMapReady(page);
   });
 
   test("pin at fx-loc-1 renders and hover opens a popup with the right content", async ({
