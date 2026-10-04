@@ -238,9 +238,19 @@ async function assertResults(): Promise<void> {
   }
 }
 
+// `process.exitCode =`, not `process.exit()`: the latter can truncate a
+// large `console.error(error)` write to a piped (non-TTY) stdout/stderr —
+// Node doesn't guarantee that write has actually flushed before the
+// process-exit call tears the process down, so a big NestJS exception
+// dump can vanish entirely in CI's captured log while still "crashing" in
+// under a second with nothing visible — exactly what happened here before
+// this fix. Setting exitCode and letting the event loop drain naturally
+// guarantees the write completes first.
 main()
-  .then(() => process.exit(0))
+  .then(() => {
+    process.exitCode = 0;
+  })
   .catch((error: unknown) => {
     console.error(error);
-    process.exit(1);
+    process.exitCode = 1;
   });

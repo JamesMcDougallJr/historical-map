@@ -38,10 +38,14 @@ test.describe("timeline filter (real backend, MVT)", () => {
     await page.getByTestId("timeline-toggle-button").dispatchEvent("click");
     await page.getByTestId("timeline-enable-checkbox").dispatchEvent("click");
 
+    // Matched on the exact expected value, not just that from_year/to_year
+    // are present: enabling the checkbox *also* re-requests tiles, using
+    // whatever the default range happens to be — a matcher that only
+    // checks presence can resolve on that earlier request instead of the
+    // preset click's, a real race observed once in CI (asserted "1850",
+    // got the enable-triggered request's own default instead).
     const tileRequest = page.waitForRequest((req) =>
-      /\/event_pins\/\d+\/\d+\/\d+/.test(req.url()) &&
-      req.url().includes("from_year=") &&
-      req.url().includes("to_year="),
+      /\/event_pins\/\d+\/\d+\/\d+/.test(req.url()) && req.url().includes("to_year=1850"),
     );
     await page.getByTestId("timeline-preset-pre-1850").click();
     const request = await tileRequest;
