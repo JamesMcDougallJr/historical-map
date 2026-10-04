@@ -2,6 +2,15 @@
 const nextConfig = {
   poweredByHeader: false,
 
+  // The dev-mode build-activity badge (<nextjs-portal>) renders fixed to a
+  // screen corner and, at this app's chosen positions for TimelineSlider /
+  // LayerControl (both `fixed bottom-4 …`), sits directly on top of them —
+  // "subtree intercepts pointer events" blocked every real click on the
+  // timeline toggle button in the real-backend E2E suite (which, unlike the
+  // mocked suite, has no test exercising that button to have caught it
+  // sooner). Dev-only; stripped from production builds regardless.
+  devIndicators: false,
+
   serverExternalPackages: ['unpdf'],
 
   // `packages/domain` ships TypeScript source, not a build artifact, so neither

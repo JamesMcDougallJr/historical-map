@@ -56,10 +56,14 @@ test.describe("layer control (real backend)", () => {
   });
 
   test("opacity slider changes the displayed percentage", async ({ page }) => {
+    // The opacity slider only renders while `overlay.enabled` (see
+    // LayerControl.tsx) — every DEFAULT_OVERLAYS entry starts disabled, so
+    // the slider doesn't exist yet on the first row without this.
     const row = page.locator('[data-testid^="overlay-row-"]').first();
     const id = (await row.getAttribute("data-testid"))!.replace("overlay-row-", "");
-    const slider = page.getByTestId(`overlay-opacity-${id}`);
+    await page.getByTestId(`overlay-toggle-${id}`).check();
 
+    const slider = page.getByTestId(`overlay-opacity-${id}`);
     await slider.fill("40");
     await expect(row).toContainText("40%");
   });

@@ -14,26 +14,43 @@ export async function dragReorderOverlay(
   draggedId: string,
   targetId: string,
 ): Promise<void> {
-  await page.evaluate(
-    ({ draggedTestId, targetTestId }) => {
-      const dt = new DataTransfer();
-      const source = document.querySelector(`[data-testid="${draggedTestId}"]`);
-      const target = document.querySelector(`[data-testid="${targetTestId}"]`);
-      if (!source || !target) {
-        throw new Error(
-          `drag source or target not found: ${draggedTestId} / ${targetTestId}`,
-        );
-      }
-      const fire = (el: Element, type: string) =>
+  const draggedTestId = `overlay-row-${draggedId}`;
+  const targetTestId = `overlay-row-${targetId}`;
+
+  // One page.evaluate per event, not all five in one synchronous call:
+  // handleDragStart's setDraggedId(id) only takes effect once React commits
+  // and re-renders, and drop's handler reads `draggedId` through a closure
+  // captured at render time. Firing every event in one tick with no yield
+  // back to the event loop meant drop always read the pre-drag (null)
+  // closure value and hit its `if (!draggedId) return` guard — the reorder
+  // silently never happened, the symptom this bug actually had.
+  // All five events must share one DataTransfer, the same as a real drag —
+  // stashed on `window` since it has to survive across separate
+  // page.evaluate calls, each a fresh round-trip into the page.
+  type DndWindow = Window & { __dndDataTransfer?: DataTransfer };
+
+  const fire = (testId: string, type: string, isLast = false) =>
+    page.evaluate(
+      ({ testId, type, isLast }) => {
+        const el = document.querySelector(`[data-testid="${testId}"]`);
+        if (!el) throw new Error(`drag element not found: ${testId}`);
+        const w = window as DndWindow;
+        w.__dndDataTransfer ??= new DataTransfer();
         el.dispatchEvent(
-          new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt }),
+          new DragEvent(type, {
+            bubbles: true,
+            cancelable: true,
+            dataTransfer: w.__dndDataTransfer,
+          }),
         );
-      fire(source, "dragstart");
-      fire(target, "dragenter");
-      fire(target, "dragover");
-      fire(target, "drop");
-      fire(source, "dragend");
-    },
-    { draggedTestId: `overlay-row-${draggedId}`, targetTestId: `overlay-row-${targetId}` },
-  );
+        if (isLast) delete w.__dndDataTransfer;
+      },
+      { testId, type, isLast },
+    );
+
+  await fire(draggedTestId, "dragstart");
+  await fire(targetTestId, "dragenter");
+  await fire(targetTestId, "dragover");
+  await fire(targetTestId, "drop");
+  await fire(draggedTestId, "dragend", true);
 }
