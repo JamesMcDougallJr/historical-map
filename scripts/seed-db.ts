@@ -7,6 +7,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import type { HistoricalEventsData } from "../app/map/types";
 import {
   ensureSchema,
@@ -54,7 +55,16 @@ async function main() {
   process.exit(0);
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+// Only when run directly (`tsx scripts/seed-db.ts`), never on import —
+// `applyMartinFunctions` above is also imported by e2e-real/fixtures/db.ts,
+// and this file used to have no exports at all, so nothing ever imported it
+// before. An unconditional `main()` here seeds the *real* demo dataset from
+// data/map-data.json into whatever database a mere import happens to share,
+// racing any other seeding the importer is doing on the same connection —
+// found by reproducing a CI foreign-key error that made no sense otherwise.
+if (fileURLToPath(import.meta.url) === path.resolve(process.argv[1] ?? "")) {
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}
