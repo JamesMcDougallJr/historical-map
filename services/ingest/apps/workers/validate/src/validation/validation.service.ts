@@ -24,9 +24,15 @@ import {
   publishJobId,
 } from "@app/queue";
 import { STORAGE_SERVICE, type StorageService } from "@app/storage";
+import { JevClient } from "@app/jev";
 import type { Job, Queue } from "bullmq";
 import { Repository } from "typeorm";
 import { eventKeyFor } from "./event-key";
+import {
+  rescoreConfidenceWithJev,
+  scoreDuplicateWithJev,
+  scoreGroundingWithJev,
+} from "./jev-checks";
 import {
   type ValidationContext,
   checkConfidence,
@@ -66,6 +72,7 @@ export class ValidationService {
     // Explicit @Inject — see HealthController for why bare constructor-param-type
     // injection of a cross-file class silently resolves to undefined under tsx.
     @Inject(ConfigService) private readonly config: ConfigService,
+    @Inject(JevClient) private readonly jev: JevClient,
   ) {}
 
   async validate(job: Job<ValidateJobData>): Promise<void> {
@@ -111,9 +118,13 @@ export class ValidationService {
       let toPublish = 0;
       let toReview = 0;
       const reasons: Record<string, number> = {};
+      // Separate from `context.seen` (exact-key `Set` for `checkDuplicate`):
+      // the Jev dedup check needs full event bodies to judge, not just a key.
+      const seenEvents: ExtractedEvent[] = [];
 
       for (const raw of events) {
-        const { event, checks } = this.runChecks(raw, context);
+        const { event, checks } = await this.runChecks(raw, context, seenEvents);
+        seenEvents.push(event);
 
         const failedGate = checks.find((c) => c.gating && !c.passed);
         const verdict: EventVerdict = failedGate ? "review" : "publish";
@@ -161,26 +172,43 @@ export class ValidationService {
   /**
    * Runs every check, in an order where corrections happen before the checks
    * that depend on them — precision downgrades feed the date checks.
+   *
+   * Async because the opt-in Jev checks are real HTTP calls; the original
+   * deterministic checks stay synchronous pure functions in `validators.ts`
+   * and are simply awaited-for-free alongside them.
    */
-  private runChecks(
+  private async runChecks(
     raw: ExtractedEvent,
     context: ValidationContext,
-  ): { event: ExtractedEvent; checks: ValidationCheck[] } {
+    seenEvents: ExtractedEvent[],
+  ): Promise<{ event: ExtractedEvent; checks: ValidationCheck[] }> {
     const precision = checkPrecision(raw);
     const event = precision.corrected ?? raw;
 
-    return {
-      event,
-      checks: [
-        checkGrounding(event, context),
-        checkConfidence(event, context),
-        checkDatePresent(event),
-        checkDatePlausible(event),
-        precision.check,
-        checkPlace(event),
-        checkDuplicate(event, context),
-      ],
-    };
+    const checks: ValidationCheck[] = [
+      checkGrounding(event, context),
+      checkConfidence(event, context),
+      checkDatePresent(event),
+      checkDatePlausible(event),
+      precision.check,
+      checkPlace(event),
+      checkDuplicate(event, context),
+    ];
+
+    // Each of these is independently flagged and non-gating (see
+    // `jev-checks.ts`): disabled, uncredentialed, or a failed call all
+    // resolve to `null` and are simply not appended, reproducing pre-Jev
+    // behaviour exactly.
+    const [grounding, duplicate, confidence] = await Promise.all([
+      scoreGroundingWithJev(this.jev, this.config, event, context.documentText),
+      scoreDuplicateWithJev(this.jev, this.config, event, seenEvents),
+      rescoreConfidenceWithJev(this.jev, this.config, event),
+    ]);
+    if (grounding) checks.push(grounding);
+    if (duplicate) checks.push(duplicate);
+    if (confidence) checks.push(confidence);
+
+    return { event, checks };
   }
 
   private async finish(

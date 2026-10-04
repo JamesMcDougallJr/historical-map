@@ -22,6 +22,19 @@ function optionalNonEmpty() {
 }
 
 /**
+ * A feature-flag env var: "true"/"1" is on, anything else (unset, "", any
+ * other string) is off. Not `z.coerce.boolean()` — that coerces *any*
+ * non-empty string to `true`, so `JEV_GROUNDING_ENABLED=false` would enable
+ * the feature it names.
+ */
+function boolFlag() {
+  return z.preprocess(
+    (v) => v === "true" || v === "1",
+    z.boolean(),
+  );
+}
+
+/**
  * One schema for all five apps.
  *
  * Anything only one app needs is `.optional()` or `.default()`ed, so the other
@@ -138,6 +151,31 @@ export const envSchema = z.object({
   BULL_BOARD_PASSWORD: optionalNonEmpty(),
 
   PORT: z.coerce.number().int().positive().optional(),
+
+  /**
+   * TypeSafe's Jev — a fast/cheap typed-decision model (Choice/Score/yes-no),
+   * used as an opt-in verification/reranking layer alongside the existing
+   * deterministic checks, never in place of them. Unset means every
+   * `JevClient` call site falls back to its pre-Jev behaviour untouched.
+   *
+   * Wire format targeted is OpenRouter's chat-completions endpoint — see
+   * `libs/jev/src/jev.client.ts` for why, and what to change if TypeSafe's
+   * actual `/v1/systemone` contract differs.
+   */
+  JEV_API_KEY: optionalNonEmpty(),
+  JEV_MODEL: z.string().min(1).default("typesafe/jev-latest"),
+  JEV_BASE_URL: optionalNonEmpty(),
+  JEV_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
+
+  /**
+   * Each Jev-backed enhancement is its own flag, independently opt-in and
+   * defaulting off — Jev is billed usage, however cheap, and a cost-conscious
+   * rollout needs to turn features on one at a time, not all-or-nothing.
+   */
+  JEV_GROUNDING_ENABLED: boolFlag(),
+  JEV_GEOCODE_RERANK_ENABLED: boolFlag(),
+  JEV_DEDUP_SCORING_ENABLED: boolFlag(),
+  JEV_CONFIDENCE_RESCORE_ENABLED: boolFlag(),
 });
 
 export type Env = z.infer<typeof envSchema>;

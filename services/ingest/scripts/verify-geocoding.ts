@@ -11,6 +11,7 @@
  */
 import { ConfigService } from "@nestjs/config";
 import type { RateLimiterService } from "../libs/common/src";
+import type { JevClient } from "../libs/jev/src";
 import type { GeocodeHit, Geocoder } from "../libs/geocoding/src";
 import {
   FallbackGeocoder,
@@ -76,6 +77,21 @@ function fakeRateLimiter(): RateLimiterService {
     registerRateLimit: () => {},
     isAllowedForSource: () => async () => false,
   } as unknown as RateLimiterService;
+}
+
+/**
+ * `enabled: false` so `NominatimGeocoder.rerank` short-circuits before ever
+ * calling `tryAsk` — these fixtures exercise the pre-Jev reranking path, and
+ * should keep doing so regardless of what `JevClient` would otherwise do.
+ */
+function fakeJevClient(): JevClient {
+  return {
+    enabled: false,
+    ask: async () => {
+      throw new Error("fakeJevClient.ask should not be called when disabled");
+    },
+    tryAsk: async () => null,
+  } as unknown as JevClient;
 }
 
 // ── A tiny in-memory Geocoder for exercising FallbackGeocoder ──────────────
@@ -458,6 +474,7 @@ async function main(): Promise<void> {
     const geocoder = new NominatimGeocoder(
       fakeConfig({ GEOCODER_MIN_INTERVAL_MS: 0 }),
       fakeRateLimiter(),
+      fakeJevClient(),
     );
     const hit = await safeGeocode(
       geocoder,
@@ -497,6 +514,7 @@ async function main(): Promise<void> {
     const geocoder = new NominatimGeocoder(
       fakeConfig({ GEOCODER_MIN_INTERVAL_MS: 0 }),
       fakeRateLimiter(),
+      fakeJevClient(),
     );
     const hit = await safeGeocode(
       geocoder,

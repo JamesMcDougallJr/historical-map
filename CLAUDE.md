@@ -325,6 +325,44 @@ Three things about `openai/gpt-oss-120b` that cost real debugging time:
   on real text with an out-of-enum `datePrecision`. Those are retried; every
   other 400 stays fatal.
 
+#### Jev — opt-in verification/reranking layer
+
+`libs/jev` wraps TypeSafe's Jev, a fast/cheap typed-decision model (Choice /
+Score / yes-no questions, not a generative LLM) used **alongside** the
+existing deterministic checks, never in place of them. It touches four spots,
+each behind its own env flag, all defaulting off:
+
+| Flag                              | Where                                                          | What it adds                                                      |
+| ---------------------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------- |
+| `JEV_GROUNDING_ENABLED`            | `validate` → `grounding-jev` check                             | paraphrase-tolerant yes/no on `checkGrounding`'s exact-substring match |
+| `JEV_DEDUP_SCORING_ENABLED`        | `validate` → `duplicate-jev` check                             | same-year near-duplicate flag beyond `checkDuplicate`'s exact title match |
+| `JEV_CONFIDENCE_RESCORE_ENABLED`   | `validate` → `confidence-jev` check                            | independent re-score of the extraction model's self-reported confidence |
+| `JEV_GEOCODE_RERANK_ENABLED`       | `NominatimGeocoder.geocode`                                    | Jev picks among the top 5 results instead of always taking `usable[0]` |
+
+All three `validate` additions are **non-gating** — recorded the same way
+`checkGrounding` itself already is, per that check's own stated policy: let
+evidence accumulate before anything new gates publication. The geocode flag
+is the one place Jev actually changes the chosen output, since there is no
+safe "record only" version of picking a coordinate.
+
+Every call site requires both its flag **and** `JEV_API_KEY` to be set
+(`isJevFeatureEnabled` checks both), and every call goes through
+`JevClient.tryAsk`, which swallows any failure and returns `null` — a Jev
+outage, timeout, or malformed response always falls back to the pre-Jev
+behavior, never breaks the pipeline. Flipping all four flags off (or leaving
+`JEV_API_KEY` unset) reproduces the pipeline's behavior before this layer
+existed, byte for byte.
+
+**The wire format in `jev.client.ts` is inferred, not taken from verified
+docs.** Jev's described interface is a dedicated `/v1/systemone` endpoint;
+this client instead targets OpenRouter's standard chat-completions endpoint
+with JSON-schema structured output (the same pattern `groq.engine.ts` already
+uses), because that contract is well-documented and Jev is sold as reachable
+through any OpenRouter key. Confirm against TypeSafe's actual docs before
+depending on this in production — if the real contract differs, only
+`buildRequestBody`/`parseResponse` need to change, since every call site
+talks to `JevClient.ask`/`tryAsk`, never to the wire format directly.
+
 #### One TypeScript, pinned by path
 
 `services/ingest`'s `type-check` script invokes `../../node_modules/typescript/bin/tsc`

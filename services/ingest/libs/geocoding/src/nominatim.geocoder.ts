@@ -6,9 +6,20 @@ import type {
   Geocoder,
 } from "./geocoder.interface";
 import { RateLimiterService } from "@app/common/ratelimit/rate-limiter.service";
+import { JevClient, isJevFeatureEnabled } from "@app/jev";
 
 const NOMINATIM_URL = "https://nominatim.openstreetmap.org/search";
 const REQUEST_TIMEOUT_MS = 15_000;
+/** Reranking only ever considers this many candidates, bounding call cost. */
+const MAX_RERANK_CANDIDATES = 5;
+
+interface NominatimResult {
+  lon?: string;
+  lat?: string;
+  display_name?: string;
+  category?: string;
+  importance?: number;
+}
 
 /**
  * OSM categories a historical place is never in. Everything else is allowed,
@@ -54,8 +65,9 @@ export class NominatimGeocoder implements Geocoder {
   private readonly countryCodes: string | undefined;
 
   constructor(
-    config: ConfigService,
+    private readonly config: ConfigService,
     private readonly rateLimiter: RateLimiterService,
+    private readonly jev: JevClient,
   ) {
     this.userAgent =
       config.get<string>("GEOCODER_USER_AGENT") ??
@@ -104,13 +116,7 @@ export class NominatimGeocoder implements Geocoder {
       throw new Error(`geocoder returned ${response.status}`);
     }
 
-    const results = (await response.json()) as Array<{
-      lon?: string;
-      lat?: string;
-      display_name?: string;
-      category?: string;
-      importance?: number;
-    }>;
+    const results = (await response.json()) as NominatimResult[];
 
     // A historical place is a settlement, region, natural feature or historic
     // site — never a road, shop or office. Without this filter "Salt Lake
@@ -120,7 +126,11 @@ export class NominatimGeocoder implements Geocoder {
       (r) =>
         r.lon && r.lat && (!r.category || !REJECTED_CATEGORIES.has(r.category)),
     );
-    const best = usable[0];
+    // Behind JEV_GEOCODE_RERANK_ENABLED: today's default is "take Nominatim's
+    // own top-ranked result, full stop" — which is exactly how "Sutter's
+    // Mill" resolves to a ranch in Idaho (see class doc). Disabled, missing
+    // credentials, or a failed call all fall back to that unchanged.
+    const best = (await this.rerank(placeName, usable)) ?? usable[0];
     if (!best?.lon || !best?.lat) return null;
 
     const lon = Number(best.lon);
@@ -157,6 +167,51 @@ export class NominatimGeocoder implements Geocoder {
       displayName: best.display_name ?? placeName,
       ...(alternates.length ? { alternates } : {}),
     };
+  }
+
+  /**
+   * Picks the best of `usable`'s results with a Jev Choice question, given the
+   * historical place name as written. Returns `null` (meaning "use
+   * `usable[0]` as before") when the flag is off, there's nothing to choose
+   * between, or the call fails — reranking only ever narrows toward a better
+   * pick, it never produces a result the unmodified path wouldn't accept.
+   */
+  private async rerank(
+    placeName: string,
+    usable: NominatimResult[],
+  ): Promise<NominatimResult | null> {
+    if (usable.length < 2) return null;
+    if (!isJevFeatureEnabled(this.config, this.jev, "JEV_GEOCODE_RERANK_ENABLED"))
+      return null;
+
+    const candidates = usable.slice(0, MAX_RERANK_CANDIDATES);
+    const options = candidates.map(
+      (c) => `${c.display_name ?? "(no label)"} [${c.category ?? "unknown category"}]`,
+    );
+
+    const answers = await this.jev.tryAsk({
+      context: [
+        `Historical place name as written in a source document: "${placeName}"`,
+        "",
+        "These are modern OpenStreetMap results for that name. A modern gazetteer " +
+          "can confidently match the wrong modern place that happens to share a " +
+          "historical name (e.g. a historical \"Sutter's Mill\" resolving to an " +
+          "unrelated modern town also named Sutter).",
+      ].join("\n"),
+      questions: [
+        {
+          id: "best",
+          kind: "choice",
+          prompt:
+            "Which result most plausibly refers to the historical place named above?",
+          options,
+        },
+      ],
+    });
+    const answer = answers?.[0];
+    if (!answer) return null;
+
+    return candidates[answer.value] ?? null;
   }
 
   private async respectRateLimit(): Promise<void> {
