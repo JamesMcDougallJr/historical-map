@@ -8,7 +8,7 @@ import {
   upsertSource,
   setEventGroupMembers,
 } from "../../lib/postgres-storage";
-import { applyMartinFunctions } from "../../scripts/seed-db";
+import { applyMartinFunctions } from "../../scripts/apply-martin-functions";
 import { FX_GROUP, FX_LOCATIONS, FX_SOURCES } from "./seed-data";
 
 export async function seedFixtureData(): Promise<void> {

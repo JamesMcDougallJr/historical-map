@@ -4,25 +4,17 @@
 //
 // Idempotent: locations upsert, events are ON CONFLICT DO NOTHING, so re-running
 // picks up newly added entries without duplicating or clobbering existing ones.
+//
+// A pure CLI entry point, deliberately with no exports: this `main()` call
+// is unconditional, so anything that imported from this file would also
+// trigger a full demo-data seed as a side effect of the import — see
+// scripts/apply-martin-functions.ts, split out for exactly that reason.
 
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import type { HistoricalEventsData } from "../app/map/types";
-import {
-  ensureSchema,
-  execSql,
-  upsertLocation,
-  upsertSource,
-} from "../lib/postgres-storage";
-
-/** Installs the Martin tile function source (db/martin-functions.sql). */
-export async function applyMartinFunctions(): Promise<void> {
-  const file = path.resolve("db/martin-functions.sql");
-  if (!fs.existsSync(file)) return;
-  await execSql(fs.readFileSync(file, "utf-8"));
-  console.log("Applied db/martin-functions.sql");
-}
+import { ensureSchema, upsertLocation, upsertSource } from "../lib/postgres-storage";
+import { applyMartinFunctions } from "./apply-martin-functions";
 
 async function main() {
   if (!process.env["POSTGRES_URL"]) {
@@ -55,16 +47,7 @@ async function main() {
   process.exit(0);
 }
 
-// Only when run directly (`tsx scripts/seed-db.ts`), never on import —
-// `applyMartinFunctions` above is also imported by e2e-real/fixtures/db.ts,
-// and this file used to have no exports at all, so nothing ever imported it
-// before. An unconditional `main()` here seeds the *real* demo dataset from
-// data/map-data.json into whatever database a mere import happens to share,
-// racing any other seeding the importer is doing on the same connection —
-// found by reproducing a CI foreign-key error that made no sense otherwise.
-if (fileURLToPath(import.meta.url) === path.resolve(process.argv[1] ?? "")) {
-  main().catch((err) => {
-    console.error(err);
-    process.exit(1);
-  });
-}
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

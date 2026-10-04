@@ -15,7 +15,7 @@
 // the ingestion fixture test (services/ingest/scripts/run-ingestion-fixture.ts).
 
 import { ensureSchema, execSql } from "../lib/postgres-storage";
-import { applyMartinFunctions } from "./seed-db";
+import { applyMartinFunctions } from "./apply-martin-functions";
 
 const WEB_APP_TABLES = [
   "event_group_members",
