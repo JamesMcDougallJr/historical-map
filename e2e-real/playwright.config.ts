@@ -59,7 +59,15 @@ export default defineConfig({
       // `dev`/`start` scripts: that default (3001) collides with Martin's
       // host port in docker-compose.yml, but it's also what every developer
       // running admin standalone expects.
-      command: `npm run dev --workspace=apps/admin -- -p ${ADMIN_PORT}`,
+      //
+      // By package name, not path (`--workspace=apps/admin`): Playwright
+      // spawns webServer commands with this config file's own directory as
+      // cwd, and npm resolves a *path* workspace filter relative to cwd —
+      // `apps/admin` from inside `e2e-real/` resolves to a directory that
+      // doesn't exist and fails with "No workspaces found". The package
+      // name isn't cwd-relative; npm just walks up to the nearest
+      // package.json regardless of where it started.
+      command: `npm run dev --workspace=@historical-map/admin -- -p ${ADMIN_PORT}`,
       url: `http://localhost:${ADMIN_PORT}`,
       reuseExistingServer: false,
       timeout: 120_000,
