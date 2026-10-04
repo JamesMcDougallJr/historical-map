@@ -10,10 +10,17 @@
  *     S3_SECRET_ACCESS_KEY=minioadmin S3_BUCKET=ingest \
  *     npm run test:ingestion-fixture --workspace=services/ingest
  *
- * Boots each stage's root module with `NestFactory.createApplicationContext`
- * rather than `create()` — no HTTP listener needed, only the BullMQ
- * processors each module registers, which start consuming as soon as Nest
- * instantiates them.
+ * Each stage runs as its own child process (`tsx apps/workers/<name>/src/
+ * main.ts`), the same topology docker-compose.yml runs in every other
+ * environment — not six NestFactory.createApplicationContext calls sharing
+ * one Node process. That in-process approach silently died partway through
+ * FetchModule's bootstrap with zero error output (confirmed: no stack
+ * trace, no uncaughtException, no unhandledRejection — something more
+ * severe than a catchable JS exception), immediately after DetectModule's
+ * own context had already registered a BullMQ queue under the same name
+ * FetchModule's queue registration collides with. Separate processes are
+ * what every other environment actually runs, and don't share that kind
+ * of in-process state at all.
  *
  * Resets only the ingest-owned tables (ingest_documents, ingest_sources,
  * ingest_extractions, ingest_event_candidates, geocode_cache) — never
@@ -22,8 +29,8 @@
  * script's fixture ids (local-directory source, "Fixture Town" et al.) never
  * collide with e2e-real's (fx-source-*, fx-loc-*).
  */
+import { spawn, type ChildProcess } from "node:child_process";
 import path from "node:path";
-import { NestFactory } from "@nestjs/core";
 import { Queue } from "bullmq";
 import { createDataSource } from "../libs/database/src/data-source";
 import { GeocodeCache, IngestDocument, IngestSource } from "../libs/database/src/entities";
@@ -33,23 +40,6 @@ import {
   QUEUE_NAMES,
   waitForQueueIdle,
 } from "../libs/queue/src";
-
-// Safety net: the previous `main().catch(...)` form printed nothing at all
-// in CI (confirmed twice — no stack trace, no Node crash output, process
-// gone in well under a second), which a normal thrown Error inside main()
-// wouldn't do. Something is bypassing that catch entirely — these two
-// top-level handlers exist to find out what, since they catch things a
-// `.catch()` on one specific promise chain cannot: a synchronous throw
-// during module evaluation of a dynamically-imported file, or a rejection
-// from a promise this script never awaited.
-process.on("uncaughtException", (error) => {
-  console.error("[uncaughtException]", error);
-  process.exitCode = 1;
-});
-process.on("unhandledRejection", (reason) => {
-  console.error("[unhandledRejection]", reason);
-  process.exitCode = 1;
-});
 
 async function resetIngestTables(): Promise<void> {
   if (process.env["ALLOW_TEST_DB_RESET"] !== "1") {
@@ -135,6 +125,72 @@ function redisConnection() {
   };
 }
 
+interface WorkerSpec {
+  name: string;
+  mainPath: string;
+  port: number;
+}
+
+const WORKERS: WorkerSpec[] = [
+  { name: "detect", mainPath: "apps/workers/detect/src/main.ts", port: 3101 },
+  { name: "fetch", mainPath: "apps/workers/fetch/src/main.ts", port: 3102 },
+  { name: "extract-text", mainPath: "apps/workers/extract-text/src/main.ts", port: 3105 },
+  { name: "extract-events", mainPath: "apps/workers/extract-events/src/main.ts", port: 3103 },
+  { name: "validate", mainPath: "apps/workers/validate/src/main.ts", port: 3106 },
+  { name: "publish", mainPath: "apps/workers/publish/src/main.ts", port: 3104 },
+];
+
+const REPO_ROOT = path.resolve(__dirname, "..");
+
+function startWorker(spec: WorkerSpec): ChildProcess {
+  const child = spawn(
+    "npx",
+    ["tsx", spec.mainPath],
+    {
+      cwd: REPO_ROOT,
+      env: { ...process.env, PORT: String(spec.port) },
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
+  const prefix = `[${spec.name}]`;
+  child.stdout?.on("data", (chunk: Buffer) => {
+    for (const line of chunk.toString().split("\n").filter(Boolean)) {
+      console.log(`${prefix} ${line}`);
+    }
+  });
+  child.stderr?.on("data", (chunk: Buffer) => {
+    for (const line of chunk.toString().split("\n").filter(Boolean)) {
+      console.error(`${prefix} ${line}`);
+    }
+  });
+  child.on("exit", (code, signal) => {
+    if (code !== null && code !== 0) {
+      console.error(`${prefix} exited early with code ${code}`);
+    } else if (signal) {
+      console.log(`${prefix} killed by ${signal}`);
+    }
+  });
+  return child;
+}
+
+async function waitForHealth(port: number, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  let lastError: unknown;
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetch(`http://localhost:${port}/health`);
+      if (res.ok) return;
+      lastError = new Error(`health check returned ${res.status}`);
+    } catch (error) {
+      lastError = error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  throw new Error(
+    `worker on port ${port} never became healthy within ${timeoutMs}ms: ${String(lastError)}`,
+  );
+}
+
 async function main(): Promise<void> {
   if (process.env["EXTRACTION_ENGINE"] !== "fake") {
     throw new Error(
@@ -155,53 +211,8 @@ async function main(): Promise<void> {
   await seedIngestSource();
   await seedGeocodeCache();
 
-  console.log("Booting pipeline stages...");
-  // Each stage's root module registers its BullMQ processor(s) on
-  // instantiation — createApplicationContext is enough, no HTTP needed.
-  // Logged individually, not as one block: a prior run died in well under
-  // a second with zero error output, too fast to be any of the six
-  // createApplicationContext calls actually bootstrapping — these
-  // pinpoint whether it's one specific dynamic import instead.
-  console.log("  importing DetectModule...");
-  const { DetectModule } = await import("../apps/workers/detect/src/detect.module");
-  console.log("  importing FetchModule...");
-  const { FetchModule } = await import("../apps/workers/fetch/src/fetch.module");
-  console.log("  importing ExtractTextModule...");
-  const { ExtractTextModule } = await import(
-    "../apps/workers/extract-text/src/extract-text.module"
-  );
-  console.log("  importing ExtractEventsModule...");
-  const { ExtractEventsModule } = await import(
-    "../apps/workers/extract-events/src/extract-events.module"
-  );
-  console.log("  importing ValidateModule...");
-  const { ValidateModule } = await import("../apps/workers/validate/src/validate.module");
-  console.log("  importing PublishModule...");
-  const { PublishModule } = await import("../apps/workers/publish/src/publish.module");
-
-  // Sequential, not Promise.all — if one hangs or throws, this says which.
-  console.log("  creating DetectModule context...");
-  const detectApp = await NestFactory.createApplicationContext(DetectModule, { logger: false });
-  console.log("  creating FetchModule context...");
-  const fetchApp = await NestFactory.createApplicationContext(FetchModule, { logger: false });
-  console.log("  creating ExtractTextModule context...");
-  const extractTextApp = await NestFactory.createApplicationContext(ExtractTextModule, {
-    logger: false,
-  });
-  console.log("  creating ExtractEventsModule context...");
-  const extractEventsApp = await NestFactory.createApplicationContext(ExtractEventsModule, {
-    logger: false,
-  });
-  console.log("  creating ValidateModule context...");
-  const validateApp = await NestFactory.createApplicationContext(ValidateModule, {
-    logger: false,
-  });
-  console.log("  creating PublishModule context...");
-  const publishApp = await NestFactory.createApplicationContext(PublishModule, {
-    logger: false,
-  });
-  const apps = [detectApp, fetchApp, extractTextApp, extractEventsApp, validateApp, publishApp];
-  console.log("All pipeline stages booted.");
+  console.log("Starting pipeline stage worker processes...");
+  const children = WORKERS.map((spec) => startWorker(spec));
 
   const connection = redisConnection();
   const queues = Object.values(QUEUE_NAMES).map(
@@ -209,6 +220,12 @@ async function main(): Promise<void> {
   );
 
   try {
+    for (const spec of WORKERS) {
+      console.log(`Waiting for ${spec.name} to report healthy on :${spec.port}...`);
+      await waitForHealth(spec.port, 30_000);
+    }
+    console.log("All pipeline stages healthy.");
+
     console.log("Triggering detect...");
     const detectQueue = queues.find((q) => q.name === QUEUE_NAMES.DETECT)!;
     await detectQueue.add(
@@ -235,7 +252,7 @@ async function main(): Promise<void> {
     console.log("OK — ingestion fixture pipeline produced the expected rows.");
   } finally {
     await Promise.all(queues.map((q) => q.close()));
-    await Promise.all(apps.map((app) => app.close()));
+    for (const child of children) child.kill("SIGTERM");
   }
 }
 
@@ -280,14 +297,6 @@ async function assertResults(): Promise<void> {
   }
 }
 
-// `process.exitCode =`, not `process.exit()`: the latter can truncate a
-// large `console.error(error)` write to a piped (non-TTY) stdout/stderr —
-// Node doesn't guarantee that write has actually flushed before the
-// process-exit call tears the process down, so a big NestJS exception
-// dump can vanish entirely in CI's captured log while still "crashing" in
-// under a second with nothing visible — exactly what happened here before
-// this fix. Setting exitCode and letting the event loop drain naturally
-// guarantees the write completes first.
 main()
   .then(() => {
     process.exitCode = 0;
