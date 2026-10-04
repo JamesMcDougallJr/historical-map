@@ -35,26 +35,14 @@ jobs:
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
 
-      # Not `minio-init` (docker-compose.yml's own bucket-creation service) —
-      # Docker Hub rate-limits/blocks anonymous pulls of `minio/mc` from
-      # GitHub-hosted runners' shared IPs often enough to fail CI outright.
-      # The runner ships `aws` CLI preinstalled, so the bucket is created
-      # directly against MinIO's S3-compatible endpoint instead, below.
       - name: Start docker services
-        run: docker compose up -d db redis minio martin
+        run: docker compose up -d db redis minio minio-init martin
 
       - name: Wait for Postgres, Redis, and MinIO
         run: |
           timeout 60 bash -c 'until docker compose exec -T db pg_isready -U postgres -d db; do sleep 2; done'
           timeout 60 bash -c 'until docker compose exec -T redis redis-cli ping; do sleep 2; done'
           timeout 60 bash -c 'until curl -sf http://localhost:9000/minio/health/live; do sleep 2; done'
-
-      - name: Create the MinIO bucket
-        env:
-          AWS_ACCESS_KEY_ID: minioadmin
-          AWS_SECRET_ACCESS_KEY: minioadmin
-          AWS_DEFAULT_REGION: us-east-1
-        run: aws --endpoint-url http://localhost:9000 s3 mb s3://ingest
 
       - name: Wait for Martin
         run: timeout 60 bash -c 'until curl -sf http://localhost:3001/catalog; do sleep 2; done'
