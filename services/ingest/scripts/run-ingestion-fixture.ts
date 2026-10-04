@@ -297,7 +297,30 @@ async function assertResults(): Promise<void> {
   }
 }
 
-main()
+// An overall hard ceiling, independent of every individual timeout inside
+// main() (30s per health check, 60s per queue-idle wait — nowhere near
+// enough, on their own, to add up to this): a run was cancelled after
+// sitting on this step for 31+ minutes with no sign of any of those
+// per-step timeouts having fired. Whatever the actual cause (a stuck
+// Redis call that never resolves rather than rejecting, a worker process
+// wedged in a way that doesn't affect job *counts*, ...), this guarantees
+// the script fails fast and visibly instead of hanging the CI job for
+// however long GitHub's own job timeout allows.
+const HARD_TIMEOUT_MS = 5 * 60_000;
+
+function withHardTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(
+        () => reject(new Error(`run-ingestion-fixture.ts exceeded its ${ms}ms hard timeout`)),
+        ms,
+      ).unref(),
+    ),
+  ]);
+}
+
+withHardTimeout(main(), HARD_TIMEOUT_MS)
   .then(() => {
     process.exitCode = 0;
   })
