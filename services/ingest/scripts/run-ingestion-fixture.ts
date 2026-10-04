@@ -191,6 +191,12 @@ async function waitForHealth(port: number, timeoutMs: number): Promise<void> {
   );
 }
 
+// Populated inside main() and read by the hard-timeout handler at the
+// bottom of this file — see that handler's own comment for why this has
+// to be reachable from outside main() at all.
+const activeChildren: ChildProcess[] = [];
+const activeQueues: Queue[] = [];
+
 async function main(): Promise<void> {
   if (process.env["EXTRACTION_ENGINE"] !== "fake") {
     throw new Error(
@@ -213,11 +219,13 @@ async function main(): Promise<void> {
 
   console.log("Starting pipeline stage worker processes...");
   const children = WORKERS.map((spec) => startWorker(spec));
+  activeChildren.push(...children);
 
   const connection = redisConnection();
   const queues = Object.values(QUEUE_NAMES).map(
     (name) => new Queue(name, { connection, prefix: BULLMQ_PREFIX }),
   );
+  activeQueues.push(...queues);
 
   try {
     for (const spec of WORKERS) {
@@ -299,28 +307,44 @@ async function assertResults(): Promise<void> {
 
 // An overall hard ceiling, independent of every individual timeout inside
 // main() (30s per health check, 60s per queue-idle wait — nowhere near
-// enough, on their own, to add up to this): a run was cancelled after
-// sitting on this step for 31+ minutes with no sign of any of those
-// per-step timeouts having fired. Whatever the actual cause (a stuck
-// Redis call that never resolves rather than rejecting, a worker process
-// wedged in a way that doesn't affect job *counts*, ...), this guarantees
-// the script fails fast and visibly instead of hanging the CI job for
-// however long GitHub's own job timeout allows.
+// enough, on their own, to add up to this): two runs in a row sat on this
+// step for 30-45+ minutes with no sign of any of those per-step timeouts
+// having fired, both manually cancelled.
+//
+// The first attempt at this safety net (`Promise.race` + `process.exitCode
+// = 1`) did NOT work — the race's losing side (`main()`) keeps running in
+// the background regardless of which promise "wins", so whatever was
+// actually stuck stayed stuck, still holding the child-process/Redis
+// handles that keep Node's event loop alive. `exitCode` only picks the
+// code used *when* the process naturally exits; it is not a request to
+// exit, and nothing was making that happen.
+//
+// This version actually tears down what it knows about — SIGKILL every
+// spawned worker, force-close every Queue — and then calls `process.exit()`
+// directly rather than waiting for a drain that was never going to happen
+// on its own. `activeChildren`/`activeQueues` exist at module scope
+// specifically so this handler can reach them without main() having to
+// hand them back through a return value it may never produce.
 const HARD_TIMEOUT_MS = 5 * 60_000;
 
-function withHardTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<T>((_, reject) =>
-      setTimeout(
-        () => reject(new Error(`run-ingestion-fixture.ts exceeded its ${ms}ms hard timeout`)),
-        ms,
-      ).unref(),
-    ),
-  ]);
+function armHardTimeout(ms: number): void {
+  setTimeout(() => {
+    console.error(
+      `run-ingestion-fixture.ts exceeded its ${ms}ms hard timeout — force-killing ` +
+        `${activeChildren.length} worker process(es) and closing ${activeQueues.length} queue(s), then exiting.`,
+    );
+    for (const child of activeChildren) child.kill("SIGKILL");
+    // Queue.close() is itself async, but this path exists for exactly the
+    // case where awaiting things doesn't work — fire-and-forget, then exit
+    // on a short fixed delay so a slow close() can't reintroduce the hang.
+    for (const queue of activeQueues) void queue.close();
+    setTimeout(() => process.exit(1), 2000).unref();
+  }, ms).unref();
 }
 
-withHardTimeout(main(), HARD_TIMEOUT_MS)
+armHardTimeout(HARD_TIMEOUT_MS);
+
+main()
   .then(() => {
     process.exitCode = 0;
   })
