@@ -91,6 +91,15 @@ jobs:
           EXTRACTION_ENGINE: fake
         run: npm run test:ingestion-fixture --workspace=services/ingest
 
+      - name: Verify the Jev client and checks (mocked)
+        run: npm run jev:verify --workspace=services/ingest
+
+      - name: Run the ingestion fixture test with Jev enabled
+        env:
+          EXTRACTION_ENGINE: fake
+          JEV_FIXTURE: "1"
+        run: npm run test:ingestion-fixture:jev --workspace=services/ingest
+
       - name: Upload Playwright report
         if: failure()
         uses: actions/upload-artifact@v4

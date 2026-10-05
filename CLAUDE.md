@@ -65,12 +65,39 @@ npm run migrate --workspace=services/ingest
 ALLOW_TEST_DB_RESET=1 EXTRACTION_ENGINE=fake npm run test:ingestion-fixture --workspace=services/ingest
 ```
 
-CI (`.github/workflows/e2e.yml`) runs all three — mocked, real, ingestion fixture — in that
-order, every PR and every push to `main`. It swaps `minio-ci` (docker-compose.ci.yml) in for
-`minio`/`minio-init`, since the real MinIO images now require an authenticated pull on
-GitHub-hosted runners, and it starts Martin only after the web app schema exists — Martin
-discovers SQL functions from the Postgres catalog once at boot, so starting it earlier serves
-empty vector tiles for the job's entire lifetime.
+**A fourth check, `JEV_FIXTURE=1`, runs the same script a second way**: with
+`JEV_GROUNDING_ENABLED`/`JEV_DEDUP_SCORING_ENABLED`/`JEV_CONFIDENCE_RESCORE_ENABLED` turned on
+and `JEV_API_KEY`/`JEV_BASE_URL` pointed at a fake local Jev HTTP server the script starts
+itself, then asserts the resulting `grounding-jev`/`confidence-jev` checks actually landed in
+`ingest_event_candidates.checks`. It's the one test in the whole suite that boots the real
+`validate` worker process (via `tsx`) with Jev wired in — `jev:verify`'s mocked-fetch tests
+(below) prove the client and check functions are correct in isolation, but can't catch a Nest
+DI wiring mistake, which silently resolves to `undefined` under `tsx` rather than failing to
+boot (see `HealthController`'s comment on why that's a real failure mode here):
+
+```bash
+JEV_FIXTURE=1 ALLOW_TEST_DB_RESET=1 EXTRACTION_ENGINE=fake \
+  npm run test:ingestion-fixture:jev --workspace=services/ingest
+```
+
+Both share the hardcoded worker ports (3101–3106) and the `bullmq` queue prefix — running either
+one against a Redis another ingestion pipeline is actively using (e.g. a second worktree's
+long-lived dev workers) races jobs between the two and produces confusing cross-contaminated
+results, not a code bug. Use a database/Redis nothing else is actively polling.
+
+`services/ingest/scripts/verify-jev.ts` (`npm run jev:verify --workspace=services/ingest`) is
+the fast, every-commit layer for the Jev integration itself: `JevClient`'s request/response
+shape, value/probability clamping, every error path, and the `grounding`/`duplicate`/
+`confidence` check functions — all against a mocked `fetch`, no database, no Redis, same spirit
+as `extract:verify`/`geocoding:verify`. `geocoding:verify` itself also covers
+`JEV_GEOCODE_RERANK_ENABLED` the same way, with a fake `JevClient` instead of a fake `fetch`.
+
+CI (`.github/workflows/e2e.yml`) runs all of these — mocked, real, ingestion fixture, Jev
+unit-style, Jev fixture — in that order, every PR and every push to `main`. It swaps `minio-ci`
+(docker-compose.ci.yml) in for `minio`/`minio-init`, since the real MinIO images now require an
+authenticated pull on GitHub-hosted runners, and it starts Martin only after the web app schema
+exists — Martin discovers SQL functions from the Postgres catalog once at boot, so starting it
+earlier serves empty vector tiles for the job's entire lifetime.
 
 ### After opening a PR: watch CI and fix e2e failures until green
 

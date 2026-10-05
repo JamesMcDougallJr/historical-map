@@ -28,10 +28,28 @@
  * (e2e-real/) owns. The two can share the same database safely: this
  * script's fixture ids (local-directory source, "Fixture Town" et al.) never
  * collide with e2e-real's (fx-source-*, fx-loc-*).
+ *
+ * `JEV_FIXTURE=1` runs the same pipeline a second way: with
+ * `JEV_GROUNDING_ENABLED`/`JEV_DEDUP_SCORING_ENABLED`/
+ * `JEV_CONFIDENCE_RESCORE_ENABLED` turned on and `JEV_API_KEY`/`JEV_BASE_URL`
+ * pointed at a fake local Jev HTTP server, then asserts the resulting
+ * `*-jev` checks actually landed in `ingest_event_candidates.checks`. This
+ * is the one test in the whole suite that boots the real `validate` worker
+ * process (via `tsx`, exactly like every other environment) with Jev wired
+ * in — `verify-jev.ts`'s mocked-fetch tests prove the client and check
+ * functions are correct in isolation, but cannot catch a Nest DI wiring
+ * mistake (see `HealthController`'s comment for why that failure mode is
+ * real here: it silently resolves to `undefined` under `tsx`, not a boot
+ * error). This mode is what would have caught it.
+ *
+ *   JEV_FIXTURE=1 ALLOW_TEST_DB_RESET=1 EXTRACTION_ENGINE=fake \
+ *     npm run test:ingestion-fixture:jev --workspace=services/ingest
  */
 import { spawn, type ChildProcess } from "node:child_process";
+import http from "node:http";
 import path from "node:path";
 import { Queue } from "bullmq";
+import type { DataSource } from "typeorm";
 import { createDataSource } from "../libs/database/src/data-source";
 import { GeocodeCache, IngestDocument, IngestSource } from "../libs/database/src/entities";
 import {
@@ -116,6 +134,70 @@ async function seedGeocodeCache(): Promise<void> {
   } finally {
     await dataSource.destroy();
   }
+}
+
+interface FakeJevServer {
+  port: number;
+  close: () => Promise<void>;
+}
+
+/**
+ * A minimal stand-in for Jev itself (the real service isn't reachable from
+ * CI, and this script doesn't spend real API quota any more than it spends
+ * real Groq quota — see `EXTRACTION_ENGINE=fake` above).
+ *
+ * Answers every question the same way: `{ value: 1, probability: 0.77 }`.
+ * That single canned answer is deliberately uniform across question kinds
+ * rather than parsed per-kind, and it's safe for all three because `index 1`
+ * is always in range — `JevClient`'s own `clampValue` guarantees that even
+ * if it weren't:
+ *   - noul (`grounding-jev`): 1 = "yes, grounded"
+ *   - choice (`duplicate-jev`): 1 is a valid option index whenever the pool
+ *     has at least one same-year prior event (the only time this check runs)
+ *   - score (`confidence-jev`): 1 is a valid tier index into the 5-tier scale
+ *
+ * The one thing this *must* get right is the wire shape `JevClient.ask`
+ * actually sends: it reads the question ids back out of
+ * `response_format.json_schema.schema.required` rather than hardcoding them,
+ * so a change to that request shape breaks this fixture the same way it
+ * would break the real integration — which is the point.
+ */
+function startFakeJevServer(): Promise<FakeJevServer> {
+  return new Promise((resolve, reject) => {
+    const server = http.createServer((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on("data", (chunk: Buffer) => chunks.push(chunk));
+      req.on("end", () => {
+        try {
+          const body = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
+          const required: string[] =
+            body?.response_format?.json_schema?.schema?.required ?? [];
+          const answers: Record<string, { value: number; probability: number }> = {};
+          for (const id of required) answers[id] = { value: 1, probability: 0.77 };
+          const payload = JSON.stringify({
+            choices: [{ message: { content: JSON.stringify(answers) } }],
+          });
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(payload);
+        } catch (error) {
+          res.writeHead(500, { "Content-Type": "text/plain" });
+          res.end(error instanceof Error ? error.message : String(error));
+        }
+      });
+    });
+    server.on("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      if (typeof address !== "object" || address === null) {
+        reject(new Error("fake Jev server has no address after listen()"));
+        return;
+      }
+      resolve({
+        port: address.port,
+        close: () => new Promise<void>((r) => server.close(() => r())),
+      });
+    });
+  });
 }
 
 function redisConnection() {
@@ -222,6 +304,7 @@ async function waitForHealth(port: number, timeoutMs: number): Promise<void> {
 // to be reachable from outside main() at all.
 const activeChildren: ChildProcess[] = [];
 const activeQueues: Queue[] = [];
+let activeFakeJevServer: FakeJevServer | undefined;
 
 async function main(): Promise<void> {
   if (process.env["EXTRACTION_ENGINE"] !== "fake") {
@@ -236,6 +319,24 @@ async function main(): Promise<void> {
     "test-fixtures",
     "corpus",
   );
+
+  const jevMode = process.env["JEV_FIXTURE"] === "1";
+  let fakeJevServer: FakeJevServer | undefined;
+  if (jevMode) {
+    fakeJevServer = await startFakeJevServer();
+    activeFakeJevServer = fakeJevServer;
+    // Set before `startWorker` spawns anything below — each child inherits
+    // `process.env` as a snapshot taken at spawn time, so these must land
+    // first or the workers never see them.
+    process.env["JEV_API_KEY"] = "fixture-test-key";
+    process.env["JEV_BASE_URL"] = `http://127.0.0.1:${fakeJevServer.port}`;
+    process.env["JEV_GROUNDING_ENABLED"] = "true";
+    process.env["JEV_DEDUP_SCORING_ENABLED"] = "true";
+    process.env["JEV_CONFIDENCE_RESCORE_ENABLED"] = "true";
+    console.log(
+      `JEV_FIXTURE=1 — fake Jev server on :${fakeJevServer.port}, grounding/dedup/confidence checks enabled`,
+    );
+  }
 
   console.log("Resetting ingest tables...");
   await resetIngestTables();
@@ -286,15 +387,16 @@ async function main(): Promise<void> {
     }
 
     console.log("Asserting results...");
-    await assertResults();
+    await assertResults(jevMode);
     console.log("OK — ingestion fixture pipeline produced the expected rows.");
   } finally {
     await Promise.all(queues.map((q) => q.close()));
     for (const child of children) killWorker(child, "SIGTERM");
+    if (fakeJevServer) await fakeJevServer.close();
   }
 }
 
-async function assertResults(): Promise<void> {
+async function assertResults(jevMode: boolean): Promise<void> {
   const dataSource = createDataSource();
   await dataSource.initialize();
   try {
@@ -330,8 +432,47 @@ async function assertResults(): Promise<void> {
         );
       }
     }
+
+    // Events still publish with every Jev check enabled — none of them are
+    // gating, and a wiring mistake (wrong DI token, wrong env var name, the
+    // fake server unreachable) must not be able to silently prevent
+    // publication; it must show up as a missing check below instead.
+    if (jevMode) {
+      await assertJevChecksRecorded(dataSource);
+    }
   } finally {
     await dataSource.destroy();
+  }
+}
+
+/**
+ * Proves the Jev checks actually got into `ingest_event_candidates.checks`,
+ * not just that `JevClient` can be unit-tested in isolation (`verify-jev.ts`
+ * does that). Every one of these three names comes from a real HTTP round
+ * trip, through the real `validate` worker process, through Nest's DI
+ * container — exactly the path a wiring mistake would break silently.
+ *
+ * Does not assert on `duplicate-jev`: it only fires when a same-year event
+ * was already seen earlier in the same run, which this three-event fixture
+ * corpus may or may not produce depending on fixture dates, so asserting on
+ * it would make the test depend on corpus details unrelated to what this is
+ * actually checking.
+ */
+async function assertJevChecksRecorded(dataSource: DataSource): Promise<void> {
+  const rows: Array<{ checks: Array<{ name: string }> }> = await dataSource.query(
+    `SELECT checks FROM ingest_event_candidates`,
+  );
+  const names = new Set(rows.flatMap((r) => r.checks.map((c) => c.name)));
+
+  for (const expectedName of ["grounding-jev", "confidence-jev"]) {
+    if (!names.has(expectedName)) {
+      throw new Error(
+        `JEV_FIXTURE=1 but no "${expectedName}" check was recorded on any ` +
+          `candidate — the Jev integration either isn't wired correctly in ` +
+          `the validate worker, or the fake Jev server was never reached. ` +
+          `Recorded check names: ${[...names].join(", ") || "(none)"}`,
+      );
+    }
   }
 }
 
@@ -368,6 +509,7 @@ function armHardTimeout(ms: number): void {
     // case where awaiting things doesn't work — fire-and-forget, then exit
     // on a short fixed delay so a slow close() can't reintroduce the hang.
     for (const queue of activeQueues) void queue.close();
+    if (activeFakeJevServer) void activeFakeJevServer.close();
     setTimeout(() => process.exit(1), 2000).unref();
   }, ms).unref();
 }

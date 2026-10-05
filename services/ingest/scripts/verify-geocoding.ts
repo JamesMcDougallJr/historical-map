@@ -61,7 +61,7 @@ async function safeGeocode(
   }
 }
 
-function fakeConfig(env: Record<string, string | number>): ConfigService {
+function fakeConfig(env: Record<string, string | number | boolean>): ConfigService {
   return {
     get: (key: string) => env[key],
   } as unknown as ConfigService;
@@ -80,17 +80,21 @@ function fakeRateLimiter(): RateLimiterService {
 }
 
 /**
- * `enabled: false` so `NominatimGeocoder.rerank` short-circuits before ever
- * calling `tryAsk` — these fixtures exercise the pre-Jev reranking path, and
- * should keep doing so regardless of what `JevClient` would otherwise do.
+ * `enabled: false` by default, so `NominatimGeocoder.rerank` short-circuits
+ * before ever calling `tryAsk` — every fixture that exercises the pre-Jev
+ * reranking path uses the no-args form, and keeps doing so regardless of
+ * what a real `JevClient` would otherwise do. Pass `tryAskResult` to
+ * simulate an enabled client answering a rerank question instead.
  */
-function fakeJevClient(): JevClient {
+function fakeJevClient(
+  options: { enabled?: boolean; tryAskResult?: { value: number; probability: number } | null } = {},
+): JevClient {
   return {
-    enabled: false,
+    enabled: options.enabled ?? false,
     ask: async () => {
-      throw new Error("fakeJevClient.ask should not be called when disabled");
+      throw new Error("fakeJevClient.ask should not be called directly in these fixtures");
     },
-    tryAsk: async () => null,
+    tryAsk: async () => (options.tryAskResult ? [{ id: "best", ...options.tryAskResult }] : null),
   } as unknown as JevClient;
 }
 
@@ -525,6 +529,138 @@ async function main(): Promise<void> {
       "missing importance means no alternates, not a guess",
       hit !== undefined && hit?.alternates === undefined,
       JSON.stringify(hit),
+    );
+    mock.restore();
+  }
+
+  // ── JEV_GEOCODE_RERANK_ENABLED ──────────────────────────────────────────
+  // Three usable candidates, none tied on importance — without reranking,
+  // `usable[0]` ("Old Fort Hamlet") always wins. These prove the flag
+  // actually changes which one is picked, and that disabling it at any of
+  // the three points that gate it (feature flag, client credentials, or a
+  // failed/empty Jev call) reproduces the unmodified `usable[0]` behaviour.
+  const RERANK_CANDIDATES_BODY = [
+    {
+      lon: "-111.1",
+      lat: "40.1",
+      display_name: "Old Fort Hamlet",
+      category: "natural",
+      importance: 0.5,
+    },
+    {
+      lon: "-111.2",
+      lat: "40.2",
+      display_name: "Fort Hamlet (historic site)",
+      category: "historic",
+      importance: 0.4,
+    },
+    {
+      lon: "-111.3",
+      lat: "40.3",
+      display_name: "New Fort Hamlet Estates",
+      category: "natural",
+      importance: 0.3,
+    },
+  ];
+
+  {
+    const mock = installFetchMock([{ status: 200, body: RERANK_CANDIDATES_BODY }]);
+    const geocoder = new NominatimGeocoder(
+      fakeConfig({ GEOCODER_MIN_INTERVAL_MS: 0, JEV_GEOCODE_RERANK_ENABLED: true }),
+      fakeRateLimiter(),
+      fakeJevClient({ enabled: true, tryAskResult: { value: 1, probability: 0.82 } }),
+    );
+    const hit = await safeGeocode(
+      geocoder,
+      "Fort Hamlet",
+      "reranking enabled resolves without throwing",
+    );
+    check(
+      "flag on + credentials: Jev's pick (index 1) wins over usable[0]",
+      hit?.displayName === "Fort Hamlet (historic site)",
+      hit?.displayName,
+    );
+    mock.restore();
+  }
+
+  {
+    const mock = installFetchMock([{ status: 200, body: RERANK_CANDIDATES_BODY }]);
+    // Client has credentials but the flag itself is off.
+    const geocoder = new NominatimGeocoder(
+      fakeConfig({ GEOCODER_MIN_INTERVAL_MS: 0, JEV_GEOCODE_RERANK_ENABLED: false }),
+      fakeRateLimiter(),
+      fakeJevClient({ enabled: true, tryAskResult: { value: 1, probability: 0.82 } }),
+    );
+    const hit = await safeGeocode(geocoder, "Fort Hamlet", "flag off resolves without throwing");
+    check(
+      "flag off (even with credentials) falls back to usable[0] unchanged",
+      hit?.displayName === "Old Fort Hamlet",
+      hit?.displayName,
+    );
+    mock.restore();
+  }
+
+  {
+    const mock = installFetchMock([{ status: 200, body: RERANK_CANDIDATES_BODY }]);
+    // Flag on, but the client reports no credentials (JEV_API_KEY unset).
+    const geocoder = new NominatimGeocoder(
+      fakeConfig({ GEOCODER_MIN_INTERVAL_MS: 0, JEV_GEOCODE_RERANK_ENABLED: true }),
+      fakeRateLimiter(),
+      fakeJevClient({ enabled: false, tryAskResult: { value: 1, probability: 0.82 } }),
+    );
+    const hit = await safeGeocode(geocoder, "Fort Hamlet", "no credentials resolves without throwing");
+    check(
+      "flag on but client disabled falls back to usable[0] unchanged",
+      hit?.displayName === "Old Fort Hamlet",
+      hit?.displayName,
+    );
+    mock.restore();
+  }
+
+  {
+    const mock = installFetchMock([{ status: 200, body: RERANK_CANDIDATES_BODY }]);
+    // Flag on, credentials present, but the call itself failed/returned
+    // nothing — `tryAsk`'s whole contract is to resolve to `null` here.
+    const geocoder = new NominatimGeocoder(
+      fakeConfig({ GEOCODER_MIN_INTERVAL_MS: 0, JEV_GEOCODE_RERANK_ENABLED: true }),
+      fakeRateLimiter(),
+      fakeJevClient({ enabled: true, tryAskResult: null }),
+    );
+    const hit = await safeGeocode(geocoder, "Fort Hamlet", "a failed Jev call resolves without throwing");
+    check(
+      "a failed/empty Jev call falls back to usable[0], never breaks the geocode",
+      hit?.displayName === "Old Fort Hamlet",
+      hit?.displayName,
+    );
+    mock.restore();
+  }
+
+  {
+    // Only one usable candidate — nothing to choose between, so `rerank`
+    // must short-circuit before ever calling Jev.
+    const mock = installFetchMock([
+      {
+        status: 200,
+        body: [RERANK_CANDIDATES_BODY[0]],
+      },
+    ]);
+    let askCalled = false;
+    const geocoder = new NominatimGeocoder(
+      fakeConfig({ GEOCODER_MIN_INTERVAL_MS: 0, JEV_GEOCODE_RERANK_ENABLED: true }),
+      fakeRateLimiter(),
+      {
+        enabled: true,
+        tryAsk: async () => {
+          askCalled = true;
+          return null;
+        },
+      } as unknown as JevClient,
+    );
+    const hit = await safeGeocode(geocoder, "Fort Hamlet", "a single candidate resolves without throwing");
+    check(
+      "a single usable candidate never calls Jev at all",
+      hit?.displayName === "Old Fort Hamlet" && !askCalled,
+      `askCalled=${askCalled}`,
     );
     mock.restore();
   }
