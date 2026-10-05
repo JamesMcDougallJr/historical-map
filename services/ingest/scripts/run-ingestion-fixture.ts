@@ -252,7 +252,11 @@ async function main(): Promise<void> {
     ]) {
       console.log(`Waiting for ${stage} to go idle...`);
       const queue = queues.find((q) => q.name === stage)!;
-      await waitForQueueIdle(queue, { timeoutMs: 60_000 });
+      // detect always carries one permanently-delayed placeholder job for its
+      // next scheduled tick (DetectionSchedulerService's upsertJobScheduler) —
+      // see waitForQueueIdle's own doc comment.
+      const expectedDelayed = stage === QUEUE_NAMES.DETECT ? 1 : 0;
+      await waitForQueueIdle(queue, { timeoutMs: 60_000, expectedDelayed });
     }
 
     console.log("Asserting results...");
