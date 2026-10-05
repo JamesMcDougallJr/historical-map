@@ -1,4 +1,4 @@
-import { Controller, Get, ServiceUnavailableException } from "@nestjs/common";
+import { Controller, Get, Inject, ServiceUnavailableException } from "@nestjs/common";
 import { DatabaseHealthService } from "@app/database";
 
 /**
@@ -11,7 +11,18 @@ import { DatabaseHealthService } from "@app/database";
  */
 @Controller("health")
 export class HealthController {
-  constructor(private readonly databaseHealth: DatabaseHealthService) {}
+  // Explicit @Inject, not bare constructor-param-type inference: every other
+  // runtime that's ever run this app used `nest build`'s webpack+ts-loader,
+  // which emits real `design:paramtypes` metadata. run-ingestion-fixture.ts
+  // runs these apps directly via `tsx` instead (so the fixture test doesn't
+  // need a build step first) — tsx transpiles through esbuild, whose
+  // `emitDecoratorMetadata` support doesn't reliably emit that metadata for
+  // a cross-file class type, so Nest resolved `databaseHealth` to `undefined`
+  // with no boot-time error, only surfacing a few health polls later as
+  // "Cannot read properties of undefined (reading 'isHealthy')".
+  constructor(
+    @Inject(DatabaseHealthService) private readonly databaseHealth: DatabaseHealthService,
+  ) {}
 
   @Get()
   async check(): Promise<{ status: string; database: string }> {

@@ -1,0 +1,104 @@
+name: E2E
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+env:
+  POSTGRES_URL: postgres://postgres:password@localhost:5433/db
+  NEXT_PUBLIC_MARTIN_URL: http://localhost:3001
+  MAP_API_KEY: test-api-key
+  NEXT_PUBLIC_MAP_API_KEY: test-api-key
+  REDIS_HOST: localhost
+  REDIS_PORT: 6379
+  S3_ENDPOINT: http://localhost:9000
+  S3_ACCESS_KEY_ID: minioadmin
+  S3_SECRET_ACCESS_KEY: minioadmin
+  S3_BUCKET: ingest
+  ALLOW_TEST_DB_RESET: "1"
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      # `minio-ci` (docker-compose.ci.yml), not `minio`/`minio-init` — the real
+      # MinIO images now require an authenticated pull on both Docker Hub and
+      # quay.io (confirmed directly against each registry's v2 API), which
+      # fails outright on a GitHub-hosted runner's anonymous pull. See
+      # docker-compose.ci.yml's comment for what's substituted and why it's
+      # safe for this repo's narrow S3 usage.
+      # Not `martin` yet — it must start *after* db/martin-functions.sql
+      # exists (see "Ensure web app schema exists" below for why).
+      - name: Start docker services
+        run: docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d db redis minio-ci
+
+      - name: Wait for Postgres, Redis, and the S3 mock
+        env:
+          AWS_ACCESS_KEY_ID: minioadmin
+          AWS_SECRET_ACCESS_KEY: minioadmin
+          AWS_DEFAULT_REGION: us-east-1
+        run: |
+          timeout 60 bash -c 'until docker compose exec -T db pg_isready -U postgres -d db; do sleep 2; done'
+          timeout 60 bash -c 'until docker compose exec -T redis redis-cli ping; do sleep 2; done'
+          timeout 60 bash -c 'until aws --endpoint-url http://localhost:9000 s3 ls; do sleep 2; done'
+
+      # Must run before `martin` starts, not just before ingest migrations:
+      # Martin discovers SQL functions from the Postgres catalog once at
+      # boot and never picks up ones created later, so starting it ahead of
+      # this serves empty vector tiles for its entire process lifetime —
+      # every page.goto("/map") test then hangs waiting for features that
+      # can never arrive. Also must run before ingest migrations on a fresh
+      # database: that migration's `ALTER TABLE events ADD COLUMN IF NOT
+      # EXISTS ...` requires the table to already exist (see
+      # scripts/ensure-schema.ts).
+      - name: Ensure web app schema exists
+        run: npm run db:ensure-schema
+
+      - name: Start Martin
+        run: docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d martin
+
+      - name: Wait for Martin
+        run: timeout 60 bash -c 'until curl -sf http://localhost:3001/catalog; do sleep 2; done'
+
+      - name: Run ingest migrations
+        run: npm run migrate --workspace=services/ingest
+
+      - name: Build the MCP App bundle
+        run: npm run build:mcp
+
+      - name: Run the mocked E2E suite
+        run: npm run test:e2e
+
+      - name: Run the real-backend E2E suite
+        run: npm run test:e2e:real
+
+      - name: Run the ingestion fixture test
+        env:
+          EXTRACTION_ENGINE: fake
+        run: npm run test:ingestion-fixture --workspace=services/ingest
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
+
+      - name: Tear down docker services
+        if: always()
+        run: docker compose -f docker-compose.yml -f docker-compose.ci.yml down -v

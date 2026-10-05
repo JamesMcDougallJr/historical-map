@@ -1,0 +1,7 @@
+TITLE: The Centennial Parade
+DATE: 1876-07-04
+PLACE: Fixture Town
+
+TITLE: The New Railway Line
+DATE: 1890-03-15
+PLACE: Fixture Valley

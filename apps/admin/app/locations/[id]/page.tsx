@@ -131,7 +131,11 @@ export default function LocationDetailPage({
         <div className="row">
           <div className="field">
             <label>Name</label>
-            <input value={name} onChange={(e) => setName(e.target.value)} />
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              data-testid="location-name-input"
+            />
           </div>
         </div>
         <div className="row">
@@ -139,10 +143,15 @@ export default function LocationDetailPage({
             className="primary"
             onClick={handleNameSave}
             disabled={savingName || name === location.name}
+            data-testid="location-save-name-button"
           >
             {savingName ? "Saving…" : "Save name"}
           </button>
-          <button className="danger" onClick={handleDeleteLocation}>
+          <button
+            className="danger"
+            onClick={handleDeleteLocation}
+            data-testid="location-delete-button"
+          >
             Delete location
           </button>
         </div>
@@ -170,7 +179,7 @@ export default function LocationDetailPage({
             onSubmit={(input) => handleUpdateEvent(event.id, input)}
           />
         ) : (
-          <div key={event.id} className="card">
+          <div key={event.id} className="card" data-testid={`event-row-${event.id}`}>
             <strong>{event.title}</strong>{" "}
             <span className="muted">
               — {event.dateText ?? event.date}
@@ -178,8 +187,17 @@ export default function LocationDetailPage({
             </span>
             <p>{event.description}</p>
             <div className="row">
-              <button onClick={() => setEditingEventId(event.id)}>Edit</button>
-              <button className="danger" onClick={() => handleDeleteEvent(event.id)}>
+              <button
+                onClick={() => setEditingEventId(event.id)}
+                data-testid={`event-edit-button-${event.id}`}
+              >
+                Edit
+              </button>
+              <button
+                className="danger"
+                onClick={() => handleDeleteEvent(event.id)}
+                data-testid={`event-delete-button-${event.id}`}
+              >
                 Delete
               </button>
             </div>
@@ -196,7 +214,11 @@ export default function LocationDetailPage({
           onSubmit={handleAddEvent}
         />
       ) : (
-        <button className="primary" onClick={() => setAdding(true)}>
+        <button
+          className="primary"
+          onClick={() => setAdding(true)}
+          data-testid="add-event-button"
+        >
           Add event
         </button>
       )}

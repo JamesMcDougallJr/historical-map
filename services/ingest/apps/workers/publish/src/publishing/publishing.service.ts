@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Inject, Injectable } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import type { ExtractedEvent } from "@historical-map/domain";
 import { JobLogger } from "@app/common";
@@ -34,8 +34,10 @@ export class PublishingService {
     private readonly candidateRepo: Repository<IngestEventCandidate>,
     @InjectRepository(IngestSource)
     private readonly sourceRepo: Repository<IngestSource>,
-    private readonly geocoding: GeocodingService,
-    private readonly mapWriter: MapWriterService,
+    // Explicit @Inject — see HealthController for why bare constructor-param-type
+    // injection of a cross-file class silently resolves to undefined under tsx.
+    @Inject(GeocodingService) private readonly geocoding: GeocodingService,
+    @Inject(MapWriterService) private readonly mapWriter: MapWriterService,
   ) {}
 
   async publish(job: Job<PublishJobData>): Promise<void> {

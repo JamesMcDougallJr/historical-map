@@ -55,6 +55,14 @@ services:
       retries: 10
 
   # Object storage for document originals and extracted text.
+  #
+  # Both minio/minio and minio/mc now require an authenticated pull on
+  # Docker Hub *and* quay.io/minio/* — confirmed directly against each
+  # registry's v2 API, not just inferred from a CI error. If a fresh pull
+  # here starts failing with "unauthorized"/"pull access denied", that's
+  # this, not a local misconfiguration; `docker login` to an account with
+  # access is the only fix for local dev today. CI sidesteps it entirely —
+  # see docker-compose.ci.yml.
   minio:
     image: minio/minio
     restart: unless-stopped

@@ -1,0 +1,27 @@
+# CI-only additional compose file, merged on top of docker-compose.yml by
+# .github/workflows/e2e.yml (`docker compose -f docker-compose.yml -f docker-compose.ci.yml ...`).
+#
+# Defines a standalone `minio-ci` service rather than overriding the base
+# file's `minio` — Compose's override merge semantics append list-type
+# fields like `ports` instead of replacing them, which would otherwise
+# collide with the base service's own port mappings. The workflow starts
+# `minio-ci` in place of `minio`, never both.
+#
+# `minio-ci` is adobe/s3mock, not real MinIO — confirmed free and
+# anonymously pullable (see docker-compose.yml's comment on the `minio`
+# service for why the real MinIO images can't be used here). s3mock
+# implements the plain PutObject/GetObject/HeadObject surface this repo
+# actually uses (services/ingest/libs/storage/src/s3-storage.service.ts),
+# so it's a safe substitute for CI; local dev keeps the real MinIO image,
+# console and all.
+#
+# No `minio-init` equivalent needed: s3mock creates its bucket itself via
+# COM_ADOBE_TESTING_S3MOCK_STORE_INITIAL_BUCKETS, so the workflow simply
+# omits that service rather than needing an `mc`-free replacement for it.
+services:
+  minio-ci:
+    image: adobe/s3mock:5.2.3
+    environment:
+      - COM_ADOBE_TESTING_S3MOCK_STORE_INITIAL_BUCKETS=ingest
+    ports:
+      - "9000:9090"

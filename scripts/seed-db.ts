@@ -4,24 +4,17 @@
 //
 // Idempotent: locations upsert, events are ON CONFLICT DO NOTHING, so re-running
 // picks up newly added entries without duplicating or clobbering existing ones.
+//
+// A pure CLI entry point, deliberately with no exports: this `main()` call
+// is unconditional, so anything that imported from this file would also
+// trigger a full demo-data seed as a side effect of the import — see
+// scripts/apply-martin-functions.ts, split out for exactly that reason.
 
 import fs from "node:fs";
 import path from "node:path";
 import type { HistoricalEventsData } from "../app/map/types";
-import {
-  ensureSchema,
-  execSql,
-  upsertLocation,
-  upsertSource,
-} from "../lib/postgres-storage";
-
-/** Installs the Martin tile function source (db/martin-functions.sql). */
-async function applyMartinFunctions(): Promise<void> {
-  const file = path.resolve("db/martin-functions.sql");
-  if (!fs.existsSync(file)) return;
-  await execSql(fs.readFileSync(file, "utf-8"));
-  console.log("Applied db/martin-functions.sql");
-}
+import { ensureSchema, upsertLocation, upsertSource } from "../lib/postgres-storage";
+import { applyMartinFunctions } from "./apply-martin-functions";
 
 async function main() {
   if (!process.env["POSTGRES_URL"]) {
