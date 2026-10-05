@@ -72,6 +72,20 @@ GitHub-hosted runners, and it starts Martin only after the web app schema exists
 discovers SQL functions from the Postgres catalog once at boot, so starting it earlier serves
 empty vector tiles for the job's entire lifetime.
 
+### After opening a PR: watch CI and fix e2e failures until green
+
+Once a PR is opened, don't consider the task done at "opened" — poll the `E2E` workflow run
+for that PR (`gh pr checks <number>` or `gh run watch <run-id>`) and treat a red run as more
+work, not a handoff. Diagnose from the uploaded `playwright-report` artifact and the job log,
+fix the failure, push a new commit to the same branch, and re-watch the next run. Repeat until
+the suite is green or the failure is clearly outside the PR's scope (flakiness pre-existing on
+`main`, an infra outage) — in which case say so explicitly rather than looping indefinitely.
+
+Known sharp edges worth checking first, since they look like app bugs but aren't:
+`e2e-real` tests against the real local stack, so a failure there is as likely to be a Martin
+startup race, a stale `ingest_*` migration, or the `test:e2e` / `test:e2e:real` port-3000
+collision (see above) as an actual regression. Rule those out before changing app code.
+
 ### Debugging note — stale chunks
 
 `next dev` (Turbopack) reuses **the same chunk filename across recompiles**, for both CSS and
