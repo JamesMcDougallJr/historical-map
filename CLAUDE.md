@@ -15,13 +15,76 @@ npm run seed:db      # Seed Postgres from data/map-data.json (needs POSTGRES_URL
 npm run type-check:all  # Nx fan-out: type-check every workspace
 npm run build:all       # Nx fan-out: build every workspace
 npm run graph           # Nx dependency graph
+npm run test:e2e        # Mocked Playwright suite (e2e/) — no backend needed
+npm run test:e2e:real   # Real-backend Playwright suite (e2e-real/) — see below
 ```
 
-No test suite is configured. **`npm run lint` is broken** — it calls `next lint`, which
+**`npm run lint` is broken** — it calls `next lint`, which
 Next 16 removed, and there is no `eslint.config.js`. Use `npm run type-check` instead.
 
 `npm run build:mcp` must be re-run after changing anything the MCP App renders
 (`MapView` and its imports); the bundle is a build artifact, not live code.
+
+### E2E tests — two separate suites, don't run them together
+
+`e2e/` (root `playwright.config.ts`) is **mocked** — `hover.spec.ts` stubs every data fetch
+(see `e2e/fixtures.ts`), so it just needs a dev server up; `popup-placement.spec.ts` tests a
+pure function and needs no server at all. Reuses an already-running `npm run dev` outside CI.
+
+`e2e-real/` (`e2e-real/playwright.config.ts`, run via `npm run test:e2e:real`) is **real** —
+Postgres, Martin-served MVT tiles, the actual `/map` and `apps/admin` apps. Before running it
+locally:
+
+```bash
+npm run db:backup                          # it truncates and reseeds your dev DB — there is
+                                            # no separate test DB; Martin's DATABASE_URL in
+                                            # docker-compose.yml points at the same `db` npm run dev uses
+docker compose up -d db martin
+ALLOW_TEST_DB_RESET=1 npm run test:e2e:real
+```
+
+`ALLOW_TEST_DB_RESET=1` is deliberate friction — `e2e-real/global-setup.ts` resets the
+database before every run, so this guards against pointing the suite at a database you didn't
+mean to wipe. `apps/admin`'s own dev/start default to port 3001, which collides with Martin's
+host port, so `e2e-real/playwright.config.ts` overrides it to `-p 3011` at invocation time
+rather than changing admin's own default (every developer running it standalone still expects
+3001).
+
+**Both configs bind port 3000 for the web app.** Run `test:e2e` and `test:e2e:real`
+sequentially, never in parallel.
+
+There's also a third, non-Playwright check:
+`services/ingest/scripts/run-ingestion-fixture.ts` runs the full
+detect → publish pipeline against a fake `ExtractionEngine` and a tiny fixture corpus. It only
+resets the `ingest_*` tables (not `sources`/`locations`/`events`), so it's safe before or after
+the suite above:
+
+```bash
+docker compose up -d db redis minio minio-init
+npm run migrate --workspace=services/ingest
+ALLOW_TEST_DB_RESET=1 EXTRACTION_ENGINE=fake npm run test:ingestion-fixture --workspace=services/ingest
+```
+
+CI (`.github/workflows/e2e.yml`) runs all three — mocked, real, ingestion fixture — in that
+order, every PR and every push to `main`. It swaps `minio-ci` (docker-compose.ci.yml) in for
+`minio`/`minio-init`, since the real MinIO images now require an authenticated pull on
+GitHub-hosted runners, and it starts Martin only after the web app schema exists — Martin
+discovers SQL functions from the Postgres catalog once at boot, so starting it earlier serves
+empty vector tiles for the job's entire lifetime.
+
+### After opening a PR: watch CI and fix e2e failures until green
+
+Once a PR is opened, don't consider the task done at "opened" — poll the `E2E` workflow run
+for that PR (`gh pr checks <number>` or `gh run watch <run-id>`) and treat a red run as more
+work, not a handoff. Diagnose from the uploaded `playwright-report` artifact and the job log,
+fix the failure, push a new commit to the same branch, and re-watch the next run. Repeat until
+the suite is green or the failure is clearly outside the PR's scope (flakiness pre-existing on
+`main`, an infra outage) — in which case say so explicitly rather than looping indefinitely.
+
+Known sharp edges worth checking first, since they look like app bugs but aren't:
+`e2e-real` tests against the real local stack, so a failure there is as likely to be a Martin
+startup race, a stale `ingest_*` migration, or the `test:e2e` / `test:e2e:real` port-3000
+collision (see above) as an actual regression. Rule those out before changing app code.
 
 ### Debugging note — stale chunks
 
