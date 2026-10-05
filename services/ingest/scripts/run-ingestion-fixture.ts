@@ -150,6 +150,17 @@ function startWorker(spec: WorkerSpec): ChildProcess {
       cwd: REPO_ROOT,
       env: { ...process.env, PORT: String(spec.port) },
       stdio: ["ignore", "pipe", "pipe"],
+      // `npx tsx <file>` is not one process: tsx runs esbuild as a separate
+      // service process, so the tree is npx -> tsx -> esbuild (confirmed by
+      // CI's own "Terminate orphan process" cleanup log naming stray node
+      // *and* esbuild PIDs). Signalling just the npx PID only ever killed
+      // the top of that tree — the esbuild/tsx descendants lived on, still
+      // holding this process's stdout/stderr pipes open, which kept this
+      // script's own event loop alive for the full 5-minute hard timeout
+      // even after the pipeline had already finished successfully.
+      // `detached: true` puts the whole tree in its own process group, so
+      // killWorker below can signal all of it at once via the negative pid.
+      detached: true,
     },
   );
   const prefix = `[${spec.name}]`;
@@ -171,6 +182,21 @@ function startWorker(spec: WorkerSpec): ChildProcess {
     }
   });
   return child;
+}
+
+/**
+ * Signals a worker's whole process group (negative pid), not just the
+ * `npx` pid `spawn` returned — see `startWorker`'s `detached: true` comment
+ * for why signalling only the top process left tsx/esbuild descendants
+ * running as orphans.
+ */
+function killWorker(child: ChildProcess, signal: NodeJS.Signals): void {
+  if (child.pid === undefined) return;
+  try {
+    process.kill(-child.pid, signal);
+  } catch {
+    // Group already gone (e.g. every process in it already exited).
+  }
 }
 
 async function waitForHealth(port: number, timeoutMs: number): Promise<void> {
@@ -264,7 +290,7 @@ async function main(): Promise<void> {
     console.log("OK — ingestion fixture pipeline produced the expected rows.");
   } finally {
     await Promise.all(queues.map((q) => q.close()));
-    for (const child of children) child.kill("SIGTERM");
+    for (const child of children) killWorker(child, "SIGTERM");
   }
 }
 
@@ -337,7 +363,7 @@ function armHardTimeout(ms: number): void {
       `run-ingestion-fixture.ts exceeded its ${ms}ms hard timeout — force-killing ` +
         `${activeChildren.length} worker process(es) and closing ${activeQueues.length} queue(s), then exiting.`,
     );
-    for (const child of activeChildren) child.kill("SIGKILL");
+    for (const child of activeChildren) killWorker(child, "SIGKILL");
     // Queue.close() is itself async, but this path exists for exactly the
     // case where awaiting things doesn't work — fire-and-forget, then exit
     // on a short fixed delay so a slow close() can't reintroduce the hang.
@@ -348,11 +374,23 @@ function armHardTimeout(ms: number): void {
 
 armHardTimeout(HARD_TIMEOUT_MS);
 
+// Explicit process.exit(), not a return and a drain: main()'s own finally
+// block already killed every worker's process group and closed every Queue,
+// but `npx tsx <file>` runs as npx -> tsx -> esbuild, and the npx-level
+// ChildProcess's stdout/stderr pipes stay open — and keep this process's
+// event loop alive — for as long as ANY process in that tree still holds
+// the pipe's write end, which SIGTERM doesn't reliably guarantee even once
+// delivered to the whole group. Observed directly: a run that printed "OK"
+// and killed every child still sat alive for the full 5-minute hard timeout,
+// and GitHub Actions' own post-job cleanup had to reap 5 stray node processes
+// and 4 stray esbuild processes afterward. Exiting explicitly here sidesteps
+// relying on that drain ever completing, the same lesson armHardTimeout above
+// already encodes for the timeout path.
 main()
   .then(() => {
-    process.exitCode = 0;
+    process.exit(0);
   })
   .catch((error: unknown) => {
     console.error(error);
-    process.exitCode = 1;
+    process.exit(1);
   });
