@@ -1,3 +1,4 @@
+import { Inject } from "@nestjs/common";
 import { OnWorkerEvent, Processor, WorkerHost } from "@nestjs/bullmq";
 import { InjectRepository } from "@nestjs/typeorm";
 import { JobLogger } from "@app/common";
@@ -19,6 +20,9 @@ export class PublishingProcessor extends WorkerHost {
   private readonly jobLogger = new JobLogger(PublishingProcessor.name);
 
   constructor(
+    // Explicit @Inject — see HealthController for why bare constructor-param-type
+    // injection of a cross-file class silently resolves to undefined under tsx.
+    @Inject(PublishingService)
     private readonly publishingService: PublishingService,
     @InjectRepository(IngestDocument)
     private readonly documentRepo: Repository<IngestDocument>,

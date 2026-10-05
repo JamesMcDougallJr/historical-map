@@ -4,7 +4,7 @@ import {
   PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
-import { Injectable } from "@nestjs/common";
+import { Inject, Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import type { StorageService } from "./storage-service.interface";
 
@@ -20,7 +20,9 @@ export class S3StorageService implements StorageService {
   private readonly client: S3Client;
   private readonly bucket: string;
 
-  constructor(config: ConfigService) {
+  // Explicit @Inject — see HealthController for why bare constructor-param-type
+  // injection of a cross-file class silently resolves to undefined under tsx.
+  constructor(@Inject(ConfigService) config: ConfigService) {
     this.bucket = config.getOrThrow<string>("S3_BUCKET");
     this.client = new S3Client({
       endpoint: config.get<string>("S3_ENDPOINT"),

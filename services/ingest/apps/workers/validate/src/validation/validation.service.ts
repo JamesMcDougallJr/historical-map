@@ -63,7 +63,9 @@ export class ValidationService {
     @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
     @InjectQueue(QUEUE_NAMES.PUBLISH)
     private readonly publishQueue: Queue<PublishJobData>,
-    private readonly config: ConfigService,
+    // Explicit @Inject — see HealthController for why bare constructor-param-type
+    // injection of a cross-file class silently resolves to undefined under tsx.
+    @Inject(ConfigService) private readonly config: ConfigService,
   ) {}
 
   async validate(job: Job<ValidateJobData>): Promise<void> {
