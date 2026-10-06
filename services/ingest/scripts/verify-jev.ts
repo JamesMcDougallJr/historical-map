@@ -20,10 +20,22 @@ import type { ConfigService } from "@nestjs/config";
 import type { ExtractedEvent } from "../../../packages/domain/src/ingestion";
 import { JevClient, type JevFeatureFlag, choice, isJevFeatureEnabled, noul } from "../libs/jev/src";
 import {
-  rescoreConfidenceWithJev,
+  type GroundingInput,
+  judgeEventWithJev,
   scoreDuplicateWithJev,
-  scoreGroundingWithJev,
 } from "../apps/workers/validate/src/validation/jev-checks";
+
+// Grounding and confidence are one combined request in production; these
+// adapters let each be exercised on its own.
+const scoreGroundingWithJev = async (
+  c: JevClient,
+  cfg: ConfigService,
+  event: ExtractedEvent,
+  input: GroundingInput,
+) => (await judgeEventWithJev(c, cfg, event, input)).grounding;
+
+const rescoreConfidenceWithJev = async (c: JevClient, cfg: ConfigService, event: ExtractedEvent) =>
+  (await judgeEventWithJev(c, cfg, event, { documentText: "", substringGrounded: true })).confidence;
 
 const checks: Array<[string, boolean, string?]> = [];
 function check(name: string, ok: boolean, detail?: string): void {
@@ -480,13 +492,32 @@ async function main(): Promise<void> {
   // ── rescoreConfidenceWithJev ──────────────────────────────────────────
   const CONF_ON = fakeConfig({ JEV_CONFIDENCE_RESCORE_ENABLED: true });
   {
-    // score 4 of 0-4 => 1.0, vs self-reported 0.9 — inside the agreement band.
     const mock = installFetchMock([ok({ confidence: scoreAnswer(4, 0.85) })]);
     const result = await rescoreConfidenceWithJev(client(), CONF_ON, SAMPLE_EVENT);
     check(
-      "confidence agrees when Jev's score and the self-reported value are close",
+      "confidence at level 4 substantiates the event; recorded, non-gating",
       result?.name === "confidence-jev" && result.passed === true && result.gating === false,
       JSON.stringify(result),
+    );
+    check(
+      "confidence detail records the score, Jev's confidence and the self-reported value",
+      /jev score=4\.0\/4 \(confidence 0\.85\) vs self-reported 0\.9/.test(result?.detail ?? ""),
+      result?.detail,
+    );
+
+    const sent = bodyOf(mock.calls[0]);
+    check(
+      "the self-reported confidence is NOT in the state sent to Jev (independence)",
+      !JSON.stringify(sent.state).includes("0.9") && !("extraction_self_reported_confidence" in sent.state),
+      JSON.stringify(sent.state),
+    );
+    const levels = sent.questions?.confidence?.criteria ?? [];
+    check(
+      "the rubric is five concrete situations, not adjectives",
+      sent.questions?.confidence?.type === "score" &&
+        levels.length === 5 &&
+        levels.every((l: string) => l.length > 30),
+      JSON.stringify(levels).slice(0, 120),
     );
     mock.restore();
   }
@@ -494,7 +525,7 @@ async function main(): Promise<void> {
     const mock = installFetchMock([ok({ confidence: scoreAnswer(0, 0.6) })]);
     const result = await rescoreConfidenceWithJev(client(), CONF_ON, SAMPLE_EVENT);
     check(
-      "confidence disagrees (but stays non-gating) on a wide gap",
+      "confidence at level 0 does not substantiate the event, still non-gating",
       result?.passed === false && result.gating === false,
       JSON.stringify(result),
     );
@@ -504,6 +535,50 @@ async function main(): Promise<void> {
     "confidence returns null when the flag is off",
     (await rescoreConfidenceWithJev(client(), fakeConfig({}), SAMPLE_EVENT)) === null,
   );
+
+  // ── judgeEventWithJev: one request per event ──────────────────────────
+  const BOTH_ON = fakeConfig({ JEV_GROUNDING_ENABLED: true, JEV_CONFIDENCE_RESCORE_ENABLED: true });
+  {
+    const mock = installFetchMock([ok({ ...relation(0.9, 0.05, 0.05), confidence: scoreAnswer(3, 0.8) })]);
+    const { grounding, confidence } = await judgeEventWithJev(client(), BOTH_ON, SAMPLE_EVENT, MISS);
+    const asked = Object.keys(bodyOf(mock.calls[0]).questions ?? {}).join(",");
+    check(
+      "grounding and confidence share a single request carrying both questions",
+      mock.calls.length === 1 && asked === "relation,confidence" && grounding !== null && confidence !== null,
+      `calls=${mock.calls.length} asked=${asked}`,
+    );
+    mock.restore();
+  }
+  {
+    const mock = installFetchMock([ok({ confidence: scoreAnswer(3, 0.8) })]);
+    const { grounding, confidence } = await judgeEventWithJev(client(), BOTH_ON, SAMPLE_EVENT, {
+      ...MISS,
+      substringGrounded: true,
+    });
+    const asked = Object.keys(bodyOf(mock.calls[0]).questions ?? {}).join(",");
+    check(
+      "an exact-match quote drops only the grounding question; confidence still goes",
+      asked === "confidence" && grounding === null && confidence !== null,
+      `asked=${asked}`,
+    );
+    mock.restore();
+  }
+  {
+    const mock = installFetchMock([]);
+    const out = await judgeEventWithJev(client(), fakeConfig({}), SAMPLE_EVENT, MISS);
+    check(
+      "with both flags off no request is made and both results are null",
+      out.grounding === null && out.confidence === null && mock.calls.length === 0,
+      `calls=${mock.calls.length}`,
+    );
+    mock.restore();
+  }
+  {
+    const mock = installFetchMock([{ status: 500, body: {} }]);
+    const out = await judgeEventWithJev(client(), BOTH_ON, SAMPLE_EVENT, MISS);
+    check("a failed combined request nulls both results (nothing appended)", out.grounding === null && out.confidence === null);
+    mock.restore();
+  }
 
   // ── Optional live call ────────────────────────────────────────────────
   // The mocks above encode OUR reading of the contract; this is the only

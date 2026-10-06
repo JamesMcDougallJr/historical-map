@@ -186,6 +186,16 @@ export const envSchema = z.object({
    */
   JEV_GROUNDING_MIN_SUPPORT: z.coerce.number().min(0).max(1).default(0),
   JEV_GEOCODE_RERANK_ENABLED: boolFlag(),
+
+  /**
+   * Minimum Jev `confidence` (0–1) to trust its geocode pick over Nominatim's
+   * own top result; below it, or when Jev says none of the results fit, the
+   * unmodified top result is used. Note the direction: HIGHER is more
+   * conservative here (0 always takes Jev's pick), unlike
+   * `JEV_GROUNDING_MIN_SUPPORT` where 0 means "never gate". Has no effect
+   * unless `JEV_GEOCODE_RERANK_ENABLED` is on.
+   */
+  JEV_GEOCODE_MIN_CONFIDENCE: z.coerce.number().min(0).max(1).default(0.8),
   JEV_DEDUP_SCORING_ENABLED: boolFlag(),
   JEV_CONFIDENCE_RESCORE_ENABLED: boolFlag(),
 });

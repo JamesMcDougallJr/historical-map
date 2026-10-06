@@ -28,11 +28,7 @@ import { JevClient } from "@app/jev";
 import type { Job, Queue } from "bullmq";
 import { Repository } from "typeorm";
 import { eventKeyFor } from "./event-key";
-import {
-  rescoreConfidenceWithJev,
-  scoreDuplicateWithJev,
-  scoreGroundingWithJev,
-} from "./jev-checks";
+import { judgeEventWithJev, scoreDuplicateWithJev } from "./jev-checks";
 import {
   type ValidationContext,
   checkConfidence,
@@ -208,14 +204,15 @@ export class ValidationService {
     // are simply not appended, reproducing pre-Jev behaviour exactly. Only
     // `grounding-jev` can gate, and only once JEV_GROUNDING_MIN_SUPPORT is
     // raised above 0.
-    const [grounding, duplicate, confidence] = await Promise.all([
-      scoreGroundingWithJev(this.jev, this.config, event, {
+    // Grounding and confidence share one request (`judgeEventWithJev`);
+    // duplicate detection has different state and is its own.
+    const [{ grounding, confidence }, duplicate] = await Promise.all([
+      judgeEventWithJev(this.jev, this.config, event, {
         documentText: context.documentText,
         segments,
         substringGrounded: substring.passed,
       }),
       scoreDuplicateWithJev(this.jev, this.config, event, seenEvents),
-      rescoreConfidenceWithJev(this.jev, this.config, event),
     ]);
     if (grounding) checks.push(grounding);
     if (duplicate) checks.push(duplicate);

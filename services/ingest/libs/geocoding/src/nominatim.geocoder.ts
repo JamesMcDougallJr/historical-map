@@ -190,6 +190,9 @@ export class NominatimGeocoder implements Geocoder {
       criteria[`result_${i}`] =
         `${c.display_name ?? "(no label)"} [${c.category ?? "unknown category"}]`;
     });
+    // Without this the model is forced to pick one even when every result is a
+    // modern namesake of the wrong place — the exact failure being guarded.
+    criteria["none"] = "None of these results plausibly refers to the historical place.";
 
     const answers = await this.jev.tryAsk(
       {
@@ -208,7 +211,14 @@ export class NominatimGeocoder implements Geocoder {
       },
     );
     const answer = answers?.best;
-    if (!answer) return null;
+    if (!answer || answer.choice === "none") return null;
+
+    // A pick Jev is unsure of is no better than Nominatim's own ranking, so
+    // below the bar keep `usable[0]` (TypeSafe's guidance: low confidence →
+    // "fall back to a different system"). Higher = trust Jev less; set it to
+    // 0 to always take Jev's pick, or turn JEV_GEOCODE_RERANK_ENABLED off.
+    const minConfidence = this.config.get<number>("JEV_GEOCODE_MIN_CONFIDENCE") ?? 0.8;
+    if (answer.confidence < minConfidence) return null;
 
     return candidates[Number(answer.choice.replace("result_", ""))] ?? null;
   }

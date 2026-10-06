@@ -1,7 +1,15 @@
 import type { ConfigService } from "@nestjs/config";
 import type { ExtractedEvent, ValidationCheck } from "@historical-map/domain";
 import type { TextSegment } from "@app/parsers";
-import { JevClient, choice, isJevFeatureEnabled, score } from "@app/jev";
+import {
+  JevClient,
+  choice,
+  isJevFeatureEnabled,
+  score,
+  type ChoiceResponse,
+  type Questions,
+  type ScoreResponse,
+} from "@app/jev";
 
 /**
  * Jev-backed enhancements to the deterministic checks in `validators.ts`.
@@ -35,57 +43,121 @@ export interface GroundingInput {
   substringGrounded: boolean;
 }
 
+export interface EventJudgments {
+  grounding: ValidationCheck | null;
+  confidence: ValidationCheck | null;
+}
+
 /**
- * Asks Jev whether the section of the document the event came from supports
- * its quoted `sourceText` — for the quotes `checkGrounding` could **not**
- * find verbatim.
- *
- * Only substring misses are sent: an exact match is already the strongest
- * grounding evidence there is, so asking Jev about it would spend a call to
- * re-confirm a certainty. On the first real run that was 90 of 131 quotes —
- * roughly 70% of the calls this skips.
- *
- * The question is a three-way Choice (`supports` / `contradicts` /
- * `says_nothing`) rather than a yes/no, per TypeSafe's citation-check
- * cookbook: a quote the document never mentions and one it flatly contradicts
- * are different failures, and a yes/no cannot tell them apart.
- *
- * **Gating.** `JEV_GROUNDING_MIN_SUPPORT` (0–1, default `0`) is the minimum
- * `P(supports)` for the event to stay publishable. At `0` the check can never
- * fail the gate — it records and reports at the natural 0.5 bar but never holds
- * anything — which is the bypass. Raising it holds substring-missed events whose
- * support falls below it for review. It can only hold events, never rescue
- * one: an exact-match quote is never sent here at all.
+ * Concrete situations, not adjectives: TypeSafe's Score guidance is that each
+ * level must describe something that can be recognised on its own ("very low"
+ * ... "very high" gives the model nothing to anchor on).
  */
-export async function scoreGroundingWithJev(
+const CONFIDENCE_LEVELS = [
+  "The quoted text is unrelated to the event, or contradicts it.",
+  "The quoted text is about the same subject but does not say the event happened as described.",
+  "The quoted text says the event happened, but confirms neither its date nor its place.",
+  "The quoted text says the event happened and confirms either its date or its place.",
+  "The quoted text says the event happened and confirms both its date and its place.",
+] as const;
+
+/** Level at which the quote is taken to substantiate the event at all. */
+const CONFIDENCE_PASS_LEVEL = 2;
+
+/**
+ * Both per-event Jev judgments in **one request**.
+ *
+ * Grounding and confidence judge the same event and quote, and independent
+ * questions over shared state run in parallel server-side, so asking them
+ * together costs one round-trip instead of two on a worker hot path. Each is
+ * independently flagged: whichever is disabled is simply left out of the
+ * request, and if neither is wanted no request is made at all. A failed call
+ * (or an answer the service did not deliver) resolves both to `null`, so
+ * callers append nothing and behave exactly as they did before Jev.
+ *
+ * **Grounding** asks Jev whether the section of the document the event came
+ * from supports its quoted `sourceText` — for the quotes `checkGrounding`
+ * could **not** find verbatim. An exact match is already the strongest
+ * grounding evidence there is, so asking about it would spend a call to
+ * re-confirm a certainty (90 of 131 quotes on the first real run). The
+ * question is a three-way Choice (`supports` / `contradicts` / `says_nothing`)
+ * rather than a yes/no, per TypeSafe's citation-check cookbook: a quote the
+ * document never mentions and one it flatly contradicts are different
+ * failures.
+ *
+ * `JEV_GROUNDING_MIN_SUPPORT` (0–1, default `0`) is the minimum `P(supports)`
+ * for the event to stay publishable. At `0` the check can never fail the gate —
+ * it records and reports at the natural 0.5 bar but never holds anything — which
+ * is the bypass. Raising it holds low-support events for review. It can only
+ * hold events, never rescue one: an exact-match quote is never sent at all.
+ *
+ * **Confidence** is an independent re-score of the extractor's self-reported
+ * `confidence`. The self-reported number is deliberately *not* in the state —
+ * showing it would contaminate a judgment meant to be independent — and appears
+ * only in the recorded detail, for comparison. Non-gating.
+ */
+export async function judgeEventWithJev(
   client: JevClient,
   config: ConfigService,
   event: ExtractedEvent,
   input: GroundingInput,
-): Promise<ValidationCheck | null> {
-  if (!isJevFeatureEnabled(config, client, "JEV_GROUNDING_ENABLED")) return null;
-  if (input.substringGrounded) return null;
-  if (!event.sourceText || event.sourceText.trim().length < 20) return null;
-  if (!input.documentText) return null;
+): Promise<EventJudgments> {
+  const none: EventJudgments = { grounding: null, confidence: null };
 
-  const section = sectionFor(event, input);
+  const wantGrounding =
+    isJevFeatureEnabled(config, client, "JEV_GROUNDING_ENABLED") &&
+    !input.substringGrounded &&
+    event.sourceText.trim().length >= 20 &&
+    input.documentText.length > 0;
+  const wantConfidence = isJevFeatureEnabled(config, client, "JEV_CONFIDENCE_RESCORE_ENABLED");
+  if (!wantGrounding && !wantConfidence) return none;
 
-  const answers = await client.tryAsk(
-    { section, claim: event.sourceText },
-    {
-      relation: choice("How does the section relate to the claim?", {
-        supports: "The section states the claim, or directly implies it is true — even in different words.",
-        contradicts: "The section states something that conflicts with the claim.",
-        says_nothing: "The section neither supports nor contradicts the claim; it is unrelated or silent on it.",
-      }),
+  const state: Record<string, string | Record<string, string>> = {
+    event: {
+      title: event.title,
+      date: event.dateText,
+      place: event.placeName ?? "(none given)",
+      description: event.description,
     },
-  );
-  const relation = answers?.relation;
-  if (!relation) return null;
+    claim: event.sourceText,
+  };
+  const questions: Questions = {};
 
-  const minSupport = config.get<number>("JEV_GROUNDING_MIN_SUPPORT") ?? 0;
+  if (wantGrounding) {
+    state["section"] = sectionFor(event, input);
+    questions["relation"] = choice("How does the section relate to the claim?", {
+      supports: "The section states the claim, or directly implies it is true — even in different words.",
+      contradicts: "The section states something that conflicts with the claim.",
+      says_nothing: "The section neither supports nor contradicts the claim; it is unrelated or silent on it.",
+    });
+  }
+  if (wantConfidence) {
+    questions["confidence"] = score(
+      "How well does the claim, a quote from the source document, substantiate the event?",
+      CONFIDENCE_LEVELS,
+    );
+  }
+
+  const answers = await client.tryAsk(state, questions);
+  if (!answers) return none;
+
+  const relation = answers["relation"];
+  const level = answers["confidence"];
+  return {
+    grounding:
+      wantGrounding && relation?.type === "choice"
+        ? groundingCheck(relation, config.get<number>("JEV_GROUNDING_MIN_SUPPORT") ?? 0)
+        : null,
+    confidence:
+      wantConfidence && level?.type === "score" ? confidenceCheck(level, event) : null,
+  };
+}
+
+function groundingCheck(relation: ChoiceResponse, minSupport: number): ValidationCheck {
   const gating = minSupport > 0;
-  const { supports, contradicts, says_nothing } = relation.probabilities;
+  const supports = relation.probabilities["supports"] ?? 0;
+  const contradicts = relation.probabilities["contradicts"] ?? 0;
+  const saysNothing = relation.probabilities["says_nothing"] ?? 0;
   const bar = gating ? minSupport : 0.5;
 
   return {
@@ -94,8 +166,19 @@ export async function scoreGroundingWithJev(
     gating,
     detail:
       `jev supports=${supports.toFixed(2)} contradicts=${contradicts.toFixed(2)} ` +
-      `says_nothing=${says_nothing.toFixed(2)} (confidence ${relation.confidence.toFixed(2)})` +
+      `says_nothing=${saysNothing.toFixed(2)} (confidence ${relation.confidence.toFixed(2)})` +
       (gating ? ` — min support ${minSupport}` : ""),
+  };
+}
+
+function confidenceCheck(level: ScoreResponse, event: ExtractedEvent): ValidationCheck {
+  return {
+    name: "confidence-jev",
+    passed: level.score >= CONFIDENCE_PASS_LEVEL,
+    gating: false,
+    detail:
+      `jev score=${level.score.toFixed(1)}/${CONFIDENCE_LEVELS.length - 1} ` +
+      `(confidence ${level.confidence.toFixed(2)}) vs self-reported ${event.confidence}`,
   };
 }
 
@@ -160,53 +243,6 @@ export async function scoreDuplicateWithJev(
     detail: matchedNone
       ? undefined
       : `possible duplicate of "${pool[matchedIndex]?.title}" (confidence ${answer.confidence.toFixed(2)}) — flagged for review, not auto-merged`,
-  };
-}
-
-/**
- * Independent re-scoring of the extraction model's self-reported `confidence`
- * — which `checkConfidence` only thresholds, never verifies. Recorded
- * alongside, not blended into, the existing gating check: the point is to
- * accumulate evidence on how well the two agree before trusting either to
- * override the other.
- */
-export async function rescoreConfidenceWithJev(
-  client: JevClient,
-  config: ConfigService,
-  event: ExtractedEvent,
-): Promise<ValidationCheck | null> {
-  if (!isJevFeatureEnabled(config, client, "JEV_CONFIDENCE_RESCORE_ENABLED"))
-    return null;
-
-  const tiers = ["very low", "low", "medium", "high", "very high"] as const;
-  const answers = await client.tryAsk(
-    {
-      event: {
-        title: event.title,
-        date: event.dateText,
-        place: event.placeName ?? "(none given)",
-        description: event.description,
-        quoted_source_text: event.sourceText.slice(0, 400),
-      },
-      extraction_self_reported_confidence: event.confidence,
-    },
-    {
-      confidence: score(
-        "Independent of the self-reported confidence, how well does the quoted source text substantiate this event being real, and dated and placed as claimed?",
-        tiers,
-      ),
-    },
-  );
-  const answer = answers?.confidence;
-  if (!answer) return null;
-
-  const jevConfidence = answer.score / (tiers.length - 1);
-  const agrees = Math.abs(jevConfidence - event.confidence) <= 0.34;
-  return {
-    name: "confidence-jev",
-    passed: agrees,
-    gating: false,
-    detail: `jev=${jevConfidence.toFixed(2)} (confidence ${answer.confidence.toFixed(2)}) vs self-reported ${event.confidence}`,
   };
 }
 

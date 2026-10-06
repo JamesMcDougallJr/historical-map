@@ -87,22 +87,23 @@ function fakeRateLimiter(): RateLimiterService {
  * simulate an enabled client answering a rerank question instead.
  */
 function fakeJevClient(
-  options: { enabled?: boolean; pick?: number | null } = {},
+  options: { enabled?: boolean; pick?: number | "none" | null; confidence?: number } = {},
 ): JevClient {
   return {
     enabled: options.enabled ?? false,
     ask: async () => {
       throw new Error("fakeJevClient.ask should not be called directly in these fixtures");
     },
-    // `pick` is the candidate index Jev "chooses"; null simulates a failed call.
+    // `pick` is the candidate index Jev "chooses" (or "none"); null simulates a
+    // failed call. `confidence` defaults high enough to clear the 0.8 default bar.
     tryAsk: async () =>
       options.pick === null || options.pick === undefined
         ? null
         : {
             best: {
               type: "choice",
-              choice: `result_${options.pick}`,
-              confidence: 0.9,
+              choice: options.pick === "none" ? "none" : `result_${options.pick}`,
+              confidence: options.confidence ?? 0.9,
               probabilities: {},
             },
           },
@@ -673,6 +674,57 @@ async function main(): Promise<void> {
       hit?.displayName === "Old Fort Hamlet" && !askCalled,
       `askCalled=${askCalled}`,
     );
+    mock.restore();
+  }
+
+  // The confidence bar and the "none of these" outcome. All four runs have the
+  // flag and credentials on and an otherwise-valid pick of index 1.
+  const rerankCases: Array<{
+    name: string;
+    config: Record<string, string | number | boolean>;
+    jev: Parameters<typeof fakeJevClient>[0];
+    expect: string;
+  }> = [
+    {
+      name: "Jev saying none of the results fit keeps Nominatim's top result",
+      config: {},
+      jev: { enabled: true, pick: "none" },
+      expect: "Old Fort Hamlet",
+    },
+    {
+      name: "a pick below the default 0.8 confidence bar keeps Nominatim's top result",
+      config: {},
+      jev: { enabled: true, pick: 1, confidence: 0.5 },
+      expect: "Old Fort Hamlet",
+    },
+    {
+      name: "a pick exactly at the confidence bar is trusted (inclusive)",
+      config: {},
+      jev: { enabled: true, pick: 1, confidence: 0.8 },
+      expect: "Fort Hamlet (historic site)",
+    },
+    {
+      name: "lowering JEV_GEOCODE_MIN_CONFIDENCE to 0.4 trusts the same 0.5 pick",
+      config: { JEV_GEOCODE_MIN_CONFIDENCE: 0.4 },
+      jev: { enabled: true, pick: 1, confidence: 0.5 },
+      expect: "Fort Hamlet (historic site)",
+    },
+    {
+      name: "JEV_GEOCODE_MIN_CONFIDENCE=0 always takes Jev's pick, however unsure",
+      config: { JEV_GEOCODE_MIN_CONFIDENCE: 0 },
+      jev: { enabled: true, pick: 1, confidence: 0.01 },
+      expect: "Fort Hamlet (historic site)",
+    },
+  ];
+  for (const c of rerankCases) {
+    const mock = installFetchMock([{ status: 200, body: RERANK_CANDIDATES_BODY }]);
+    const geocoder = new NominatimGeocoder(
+      fakeConfig({ GEOCODER_MIN_INTERVAL_MS: 0, JEV_GEOCODE_RERANK_ENABLED: true, ...c.config }),
+      fakeRateLimiter(),
+      fakeJevClient(c.jev),
+    );
+    const hit = await safeGeocode(geocoder, "Fort Hamlet", `${c.name} (resolves)`);
+    check(c.name, hit?.displayName === c.expect, hit?.displayName);
     mock.restore();
   }
 
