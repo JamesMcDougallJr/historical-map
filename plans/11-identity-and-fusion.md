@@ -139,6 +139,17 @@ dateBucket)` at minimum, with the document recorded as provenance rather than
 6. **Place entity resolution**, including historical aliases — the hardest part,
    and the one most likely to need a curated gazetteer rather than Nominatim.
 
+## What has been built since (the review-queue slice)
+
+Gap 2's candidate-pair model exists in a deliberately narrow form, behind
+`JEV_PUBLISH_DEDUP_ENABLED`: at publish time, block on place (5 km) and date
+(precision-aware), then ask Jev a per-pair "same event?" and **hold probable
+duplicates for review** — nothing is merged. It needs no schema change and
+touches no identity: ids are still document-scoped (gap 1), `events` still has a
+single `source_id` (gap 6), and place identity is still proximity (gap 5). It is
+best-effort and records `P(same)` so item 5's confidence policy can be set from
+data. See the "Cross-document duplicates at publish time" section of `CLAUDE.md`.
+
 ## Why not now
 
 Fusing requires knowing what two sources disagreeing actually looks like, and

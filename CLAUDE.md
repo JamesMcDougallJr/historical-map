@@ -374,6 +374,7 @@ each behind its own env flag, all defaulting off:
 | `JEV_DEDUP_SCORING_ENABLED`        | `validate` → `duplicate-jev` check                             | same-year near-duplicate flag beyond `checkDuplicate`'s exact title match (non-gating) |
 | `JEV_CONFIDENCE_RESCORE_ENABLED`   | `validate` → `confidence-jev` check                            | independent re-score of the extractor's confidence on a 5-level concrete rubric (non-gating) |
 | `JEV_GEOCODE_RERANK_ENABLED`       | `NominatimGeocoder.geocode`                                    | Jev picks among the top 5 results (or "none") instead of always taking `usable[0]` |
+| `JEV_PUBLISH_DEDUP_ENABLED`        | `publish` → `duplicate-published` check                        | is this the same event a **different document** already put on the map?; can hold |
 
 Put `JEV_API_KEY` in `services/ingest/.env.local` — `AppConfigModule` loads
 `.env.local` then `.env` (real process env beats both), and only `.env*.local` is
@@ -396,6 +397,38 @@ and both are documented on the env var in `env-validation.schema.ts`:
 - `JEV_GEOCODE_MIN_CONFIDENCE` (default `0.8`) — the minimum Jev `confidence` to
   trust its geocode pick over Nominatim's top result. Here **higher is more
   conservative** and `0` always takes Jev's pick; bypass is the flag, not the knob.
+
+#### Cross-document duplicates at publish time
+
+Two documents describing one event produce two pins (the event id hashes the document's
+`externalId`; see `plans/11-identity-and-fusion.md`). With `JEV_PUBLISH_DEDUP_ENABLED`,
+`publish` — after geocoding, before anything is written — looks up already-published events
+within 5 km and about a year of the new one (`MapWriterService.findNearbyEvents`, any source,
+excluding its own document), narrows by date using the **coarser** of the two precisions
+(`datesCompatible`: a year-only date is stored as `YYYY-01-01`), and sends the nearest 8 to Jev
+as **one request with one yes/no question per candidate** (existing event's quote included).
+The best match is recorded on the candidate as a `duplicate-published` check naming the matched
+event id.
+
+`JEV_PUBLISH_DEDUP_HOLD_AT` (0–1, default **`0`**) holds the event for review when `P(same)` is at
+or above it; **`0` never holds** (record-only — the event publishes and the evidence stays on the
+row), same convention as `JEV_GROUNDING_MIN_SUPPORT`. On the real API a same-event pair scored
+0.93–0.97 and related-but-distinct events 0.02–0.17, but tune it from recorded probabilities on
+your own corpus before raising it: a false positive withholds a real event.
+
+Held events are resolved with `npm run duplicate:review --workspace=services/ingest` (lists them with
+Jev's reasoning), `-- --approve=<eventKey>` ("a different event; publish it", re-queues the
+document's publish job) or `-- --dismiss=<eventKey>` ("a duplicate; leave it out"). There is no admin
+UI. `resolved_at` carries the decision, and `validate`'s candidate upsert is `WHERE resolved_at IS
+NULL` so re-validating cannot overwrite it — without that, a **dismissed** event is re-derived to
+`publish` and then published, because publish skips resolved candidates (the fixture fails if the
+guard is removed).
+
+Known limits: it is best-effort. Two documents publishing **concurrently** can each miss the
+other's insert (the fixture sets `PUBLISH_CONCURRENCY=1` to make it deterministic); place identity
+is only the 5 km radius, so name variants geocoding further apart are never compared; and it flags,
+it does not merge — fusion still needs the identity/provenance schema in plan 11. Any lookup or Jev
+failure publishes as before.
 
 `duplicate-jev` and `confidence-jev` stay **non-gating** — recorded the way
 `checkGrounding` always was: let evidence accumulate before anything new gates
