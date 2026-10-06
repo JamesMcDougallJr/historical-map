@@ -6,7 +6,7 @@ import type {
   Geocoder,
 } from "./geocoder.interface";
 import { RateLimiterService } from "@app/common/ratelimit/rate-limiter.service";
-import { JevClient, isJevFeatureEnabled } from "@app/jev";
+import { JevClient, choice, isJevFeatureEnabled } from "@app/jev";
 
 const NOMINATIM_URL = "https://nominatim.openstreetmap.org/search";
 const REQUEST_TIMEOUT_MS = 15_000;
@@ -185,33 +185,32 @@ export class NominatimGeocoder implements Geocoder {
       return null;
 
     const candidates = usable.slice(0, MAX_RERANK_CANDIDATES);
-    const options = candidates.map(
-      (c) => `${c.display_name ?? "(no label)"} [${c.category ?? "unknown category"}]`,
-    );
+    const criteria: Record<string, string> = {};
+    candidates.forEach((c, i) => {
+      criteria[`result_${i}`] =
+        `${c.display_name ?? "(no label)"} [${c.category ?? "unknown category"}]`;
+    });
 
-    const answers = await this.jev.tryAsk({
-      context: [
-        `Historical place name as written in a source document: "${placeName}"`,
-        "",
-        "These are modern OpenStreetMap results for that name. A modern gazetteer " +
+    const answers = await this.jev.tryAsk(
+      {
+        historical_place_name: placeName,
+        note:
+          "These are modern OpenStreetMap results for that name. A modern gazetteer " +
           "can confidently match the wrong modern place that happens to share a " +
           "historical name (e.g. a historical \"Sutter's Mill\" resolving to an " +
           "unrelated modern town also named Sutter).",
-      ].join("\n"),
-      questions: [
-        {
-          id: "best",
-          kind: "choice",
-          prompt:
-            "Which result most plausibly refers to the historical place named above?",
-          options,
-        },
-      ],
-    });
-    const answer = answers?.[0];
+      },
+      {
+        best: choice(
+          "Which result most plausibly refers to the historical place named above?",
+          criteria,
+        ),
+      },
+    );
+    const answer = answers?.best;
     if (!answer) return null;
 
-    return candidates[answer.value] ?? null;
+    return candidates[Number(answer.choice.replace("result_", ""))] ?? null;
   }
 
   private async respectRateLimit(): Promise<void> {

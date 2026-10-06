@@ -146,43 +146,77 @@ interface FakeJevServer {
  * CI, and this script doesn't spend real API quota any more than it spends
  * real Groq quota — see `EXTRACTION_ENGINE=fake` above).
  *
- * Answers every question the same way: `{ value: 1, probability: 0.77 }`.
- * That single canned answer is deliberately uniform across question kinds
- * rather than parsed per-kind, and it's safe for all three because `index 1`
- * is always in range — `JevClient`'s own `clampValue` guarantees that even
- * if it weren't:
- *   - noul (`grounding-jev`): 1 = "yes, grounded"
- *   - choice (`duplicate-jev`): 1 is a valid option index whenever the pool
- *     has at least one same-year prior event (the only time this check runs)
- *   - score (`confidence-jev`): 1 is a valid tier index into the 5-tier scale
+ * Speaks TypeSafe's real `POST /v1/systemone` contract, and is deliberately
+ * strict about the request: a missing bearer token, a wrong path/method, or a
+ * body that isn't `{ model, state, questions }` gets a 401/404/422 — which
+ * `JevClient.tryAsk` swallows, so a request-shape regression shows up as the
+ * missing `*-jev` checks `assertJevChecksRecorded` looks for, rather than
+ * passing quietly against a lenient fake.
  *
- * The one thing this *must* get right is the wire shape `JevClient.ask`
- * actually sends: it reads the question ids back out of
- * `response_format.json_schema.schema.required` rather than hardcoding them,
- * so a change to that request shape breaks this fixture the same way it
- * would break the real integration — which is the point.
+ * Answers by question `type`, with uniform canned values:
+ *   - noul: 0.77 (leans "yes")
+ *   - choice: the `none` label when offered, else the first label
+ *   - score: 3 on whatever rubric was sent
  */
 function startFakeJevServer(): Promise<FakeJevServer> {
   return new Promise((resolve, reject) => {
     const server = http.createServer((req, res) => {
+      const reply = (status: number, payload: unknown) => {
+        res.writeHead(status, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(payload));
+      };
       const chunks: Buffer[] = [];
       req.on("data", (chunk: Buffer) => chunks.push(chunk));
       req.on("end", () => {
-        try {
-          const body = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
-          const required: string[] =
-            body?.response_format?.json_schema?.schema?.required ?? [];
-          const answers: Record<string, { value: number; probability: number }> = {};
-          for (const id of required) answers[id] = { value: 1, probability: 0.77 };
-          const payload = JSON.stringify({
-            choices: [{ message: { content: JSON.stringify(answers) } }],
-          });
-          res.writeHead(200, { "Content-Type": "application/json" });
-          res.end(payload);
-        } catch (error) {
-          res.writeHead(500, { "Content-Type": "text/plain" });
-          res.end(error instanceof Error ? error.message : String(error));
+        if (req.method !== "POST" || req.url !== "/v1/systemone") {
+          return reply(404, { error: "not found" });
         }
+        if (!String(req.headers["authorization"] ?? "").startsWith("Bearer ")) {
+          return reply(401, { error: "missing bearer token" });
+        }
+        let body: any;
+        try {
+          body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+        } catch {
+          return reply(422, { error: "body is not JSON" });
+        }
+        const questions = body?.questions;
+        if (
+          typeof body?.model !== "string" ||
+          body?.state === undefined ||
+          typeof questions !== "object" ||
+          questions === null ||
+          Object.keys(questions).length === 0
+        ) {
+          return reply(422, { error: "expected { model, state, questions }" });
+        }
+
+        const answers: Record<string, unknown> = {};
+        for (const [name, q] of Object.entries<any>(questions)) {
+          if (q?.type === "noul") {
+            answers[name] = { type: "noul", noul: 0.77 };
+          } else if (q?.type === "choice" && q.criteria) {
+            const labels = Object.keys(q.criteria);
+            const pick = labels.includes("none") ? "none" : labels[0]!;
+            answers[name] = {
+              type: "choice",
+              choice: pick,
+              confidence: 0.9,
+              probabilities: Object.fromEntries(labels.map((l) => [l, l === pick ? 0.9 : 0.1 / Math.max(1, labels.length - 1)])),
+            };
+          } else if (q?.type === "score" && Array.isArray(q.criteria)) {
+            answers[name] = {
+              type: "score",
+              score: 3,
+              confidence: 0.8,
+              legend: Object.fromEntries(q.criteria.map((c: unknown, i: number) => [String(i), c])),
+              probabilities: Object.fromEntries(q.criteria.map((_: unknown, i: number) => [String(i), i === 3 ? 1 : 0])),
+            };
+          } else {
+            return reply(422, { error: `unsupported question "${name}"` });
+          }
+        }
+        reply(200, { model: body.model, answers, usage: { input_tokens: 1, output_tokens: 1 } });
       });
     });
     server.on("error", reject);

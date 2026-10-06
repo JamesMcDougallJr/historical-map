@@ -1,20 +1,24 @@
 /**
  * Exercises `JevClient` and the Jev-backed validation checks against a
- * mocked `fetch`. No network, no database, no Redis — same spirit as
- * `verify-geocoding.ts` and `verify-extraction.ts`.
+ * mocked `fetch` that speaks TypeSafe's real `/v1/systemone` contract
+ * (`answers` keyed by question name; `noul` / `choice`+`probabilities`+
+ * `confidence` / `score`+`legend`+`confidence`). No network, no database, no
+ * Redis — same spirit as `verify-geocoding.ts` and `verify-extraction.ts`.
  *
  *   npm run jev:verify --workspace=services/ingest
  *
- * This is the fast, every-commit layer. The real wiring — does the actual
- * worker process, booted via `tsx`, resolve `JevClient` through Nest's DI
- * container and persist the resulting checks — is covered separately by
- * `run-ingestion-fixture.ts`'s `JEV_FIXTURE=1` mode, because a mocked unit
- * test like this one cannot catch a DI wiring bug (see that file, and
- * `HealthController`, for why that failure mode is real here).
+ * This is the fast, every-commit layer. It cannot prove the mock matches the
+ * real service — only a real call can — so `--live` makes one (needs
+ * `JEV_API_KEY`):
+ *
+ *   JEV_API_KEY=... npm run jev:verify --workspace=services/ingest -- --live
+ *
+ * Nor can it catch a Nest DI wiring bug; that is `run-ingestion-fixture.ts`'s
+ * `JEV_FIXTURE=1` mode (see `HealthController` for why that failure is real).
  */
 import type { ConfigService } from "@nestjs/config";
 import type { ExtractedEvent } from "../../../packages/domain/src/ingestion";
-import { JevClient, type JevFeatureFlag, isJevFeatureEnabled } from "../libs/jev/src";
+import { JevClient, type JevFeatureFlag, choice, isJevFeatureEnabled, noul } from "../libs/jev/src";
 import {
   rescoreConfidenceWithJev,
   scoreDuplicateWithJev,
@@ -40,16 +44,21 @@ async function expectRejects(
   }
 }
 
-function fakeConfig(flags: Partial<Record<string, boolean>>): ConfigService {
-  return {
-    get: (key: string) => flags[key],
-  } as unknown as ConfigService;
+type Env = Partial<Record<string, string | number | boolean>>;
+
+function fakeConfig(env: Env): ConfigService {
+  return { get: (key: string) => env[key] } as unknown as ConfigService;
 }
 
-// ── Mocked fetch harness, same shape as verify-geocoding.ts's ──────────────
-type MockResponse = { status: number; body: unknown } | { status: number; rawBody: string };
+/** A client with credentials and no retries, so failures resolve instantly. */
+function client(env: Env = {}): JevClient {
+  return new JevClient(fakeConfig({ JEV_API_KEY: "test-key", JEV_MAX_RETRIES: 0, ...env }));
+}
 
-function installFetchMock(responses: MockResponse[]): {
+// ── Mocked fetch speaking the real /v1/systemone contract ──────────────────
+type Mocked = { status: number; body?: unknown; rawBody?: string };
+
+function installFetchMock(responses: Mocked[]): {
   calls: Array<{ url: string; init?: RequestInit }>;
   restore: () => void;
 } {
@@ -62,27 +71,39 @@ function installFetchMock(responses: MockResponse[]): {
     calls.push({ url, init });
     const next = queue.shift();
     if (!next) throw new Error(`unexpected fetch call to ${url}`);
-    return {
-      ok: next.status >= 200 && next.status < 300,
+    return new Response(next.rawBody ?? JSON.stringify(next.body ?? {}), {
       status: next.status,
-      text: async () => ("rawBody" in next ? next.rawBody : JSON.stringify(next.body)),
-      json: async () => ("rawBody" in next ? JSON.parse(next.rawBody) : next.body),
-    } as Response;
+      headers: { "content-type": "application/json" },
+    });
   }) as typeof fetch;
 
   return { calls, restore: () => { globalThis.fetch = original; } };
 }
 
-/** Wraps a `{questions} -> {id: {value, probability}}` answer map as the
- * chat-completions-shaped body `JevClient.ask` expects. */
-function chatBody(answers: Record<string, { value: number; probability: number }>) {
-  return { choices: [{ message: { content: JSON.stringify(answers) } }] };
+const USAGE = { input_tokens: 10, output_tokens: 2 };
+
+/** A 200 response wrapping the given `answers` map. */
+function ok(answers: Record<string, unknown>): Mocked {
+  return { status: 200, body: { model: "jev-latest", answers, usage: USAGE } };
 }
 
-function client(apiKey?: string): JevClient {
-  return new JevClient({
-    get: (key: string) => (key === "JEV_API_KEY" ? apiKey : undefined),
-  } as unknown as ConfigService);
+const noulAnswer = (p: number) => ({ type: "noul", noul: p });
+const choiceAnswer = (label: string, confidence: number, probabilities: Record<string, number>) => ({
+  type: "choice",
+  choice: label,
+  confidence,
+  probabilities,
+});
+const scoreAnswer = (value: number, confidence: number) => ({
+  type: "score",
+  score: value,
+  confidence,
+  legend: { "0": "a", "1": "b", "2": "c", "3": "d", "4": "e" },
+  probabilities: { "0": 0, "1": 0, "2": 0, "3": 0, "4": 1 },
+});
+
+function bodyOf(call: { init?: RequestInit } | undefined): any {
+  return JSON.parse(String(call?.init?.body ?? "{}"));
 }
 
 const SAMPLE_EVENT: ExtractedEvent = {
@@ -101,327 +122,314 @@ const SAMPLE_EVENT: ExtractedEvent = {
 };
 
 async function main(): Promise<void> {
-  // ── JevClient.ask / tryAsk ────────────────────────────────────────────
+  // ── JevClient ─────────────────────────────────────────────────────────
   {
-    const disabled = client(undefined);
-    check("disabled client reports enabled=false", disabled.enabled === false);
-    const result = await expectRejects(() =>
-      disabled.ask({ context: "x", questions: [{ id: "q", kind: "noul", prompt: "p" }] }),
-    );
+    const disabled = new JevClient(fakeConfig({}));
+    check("a client with no JEV_API_KEY reports enabled=false", disabled.enabled === false);
+    const q = { q: noul("p") };
+    const result = await expectRejects(() => disabled.ask("x", q));
     check(
       "ask() on a disabled client throws JevDisabledError",
       result.threw && result.message.includes("not configured"),
       result.message,
     );
-    check(
-      "tryAsk() on a disabled client returns null, does not throw",
-      (await disabled.tryAsk({ context: "x", questions: [{ id: "q", kind: "noul", prompt: "p" }] })) === null,
-    );
+    check("tryAsk() on a disabled client returns null", (await disabled.tryAsk("x", q)) === null);
   }
 
   {
-    const mock = installFetchMock([
-      { status: 200, body: chatBody({ q1: { value: 1, probability: 0.9 } }) },
-    ]);
-    const c = client("test-key");
-    const answers = await c.ask({
-      context: "ctx",
-      questions: [{ id: "q1", kind: "noul", prompt: "is it true?" }],
+    const mock = installFetchMock([ok({ q1: noulAnswer(0.9) })]);
+    const answers = await client().ask("some state", {
+      q1: noul("is it true?", { true: "yes", false: "no" }),
     });
     check(
-      "ask() parses a valid response into a JevAnswer",
-      answers.length === 1 && answers[0]?.id === "q1" && answers[0]?.value === 1 && answers[0]?.probability === 0.9,
+      "ask() returns the typed noul answer",
+      answers.q1.noul === 0.9 && answers.q1.type === "noul",
       JSON.stringify(answers),
     );
 
     const [call] = mock.calls;
-    const sentBody = JSON.parse(String(call?.init?.body));
+    const body = bodyOf(call);
+    check(
+      "request goes to POST /v1/systemone",
+      call?.url.endsWith("/v1/systemone") === true && call.init?.method === "POST",
+      call?.url,
+    );
     check(
       "request carries a Bearer token",
-      call?.init?.headers !== undefined &&
-        (call.init.headers as Record<string, string>)["Authorization"] === "Bearer test-key",
+      new Headers(call?.init?.headers).get("authorization") === "Bearer test-key",
     );
     check(
-      "request's response_format schema requires exactly the given question ids",
-      JSON.stringify(sentBody.response_format?.json_schema?.schema?.required) === JSON.stringify(["q1"]),
-      JSON.stringify(sentBody.response_format),
+      "request body is {model, state, questions} with the real question shape",
+      body.model === "jev-latest" &&
+        body.state === "some state" &&
+        body.questions?.q1?.type === "noul" &&
+        body.questions.q1.instructions === "is it true?" &&
+        body.questions.q1.criteria?.true === "yes",
+      JSON.stringify(body),
     );
     mock.restore();
   }
 
   {
-    // Choice question, max index 2 (3 options) — model answers out of range.
     const mock = installFetchMock([
-      { status: 200, body: chatBody({ pick: { value: 99, probability: 1.4 } }) },
+      ok({
+        pick: choiceAnswer("b", 0.8, { a: 0.1, b: 0.85, c: 0.05 }),
+        rate: scoreAnswer(3.6, 0.7),
+      }),
     ]);
-    const c = client("test-key");
-    const answers = await c.ask({
-      context: "ctx",
-      questions: [{ id: "pick", kind: "choice", prompt: "which?", options: ["a", "b", "c"] }],
-    });
-    check(
-      "an out-of-range choice value is clamped to the last option",
-      answers[0]?.value === 2,
-      JSON.stringify(answers),
+    const answers = await client().ask(
+      { s: 1 },
+      {
+        pick: choice("which?", { a: "first", b: "second", c: "third" }),
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        rate: { type: "score", instructions: "how good?", criteria: ["x", "y", "z", "w", "v"] } as const,
+      },
     );
     check(
-      "an out-of-range probability is clamped to 1",
-      answers[0]?.probability === 1,
-      JSON.stringify(answers),
-    );
-    mock.restore();
-  }
-
-  {
-    const mock = installFetchMock([{ status: 500, rawBody: "internal error" }]);
-    const c = client("test-key");
-    const result = await expectRejects(() =>
-      c.ask({ context: "ctx", questions: [{ id: "q", kind: "noul", prompt: "p" }] }),
-    );
-    check("a non-2xx response makes ask() throw", result.threw, result.message);
-    mock.restore();
-  }
-
-  {
-    const mock = installFetchMock([{ status: 200, rawBody: "not json" }]);
-    const c = client("test-key");
-    const result = await expectRejects(() =>
-      c.ask({ context: "ctx", questions: [{ id: "q", kind: "noul", prompt: "p" }] }),
+      "choice answers expose the label, confidence and probabilities",
+      answers.pick.choice === "b" && answers.pick.confidence === 0.8 && answers.pick.probabilities.b === 0.85,
+      JSON.stringify(answers.pick),
     );
     check(
-      "non-JSON content under strict decoding throws rather than silently returning empty",
-      result.threw,
-      result.message,
+      "score answers expose the expected score and confidence",
+      answers.rate.score === 3.6 && answers.rate.confidence === 0.7,
+      JSON.stringify(answers.rate),
     );
     mock.restore();
   }
 
   {
-    // Response is valid JSON but missing the question id entirely.
-    const mock = installFetchMock([
-      { status: 200, body: chatBody({ wrongId: { value: 1, probability: 0.5 } }) },
-    ]);
-    const c = client("test-key");
-    const result = await expectRejects(() =>
-      c.ask({ context: "ctx", questions: [{ id: "q", kind: "noul", prompt: "p" }] }),
-    );
-    check(
-      "a response missing a requested question id throws (schema validation)",
-      result.threw,
-      result.message,
-    );
-    mock.restore();
-  }
-
-  {
-    const mock = installFetchMock([{ status: 500, rawBody: "boom" }]);
-    const c = client("test-key");
-    const answers = await c.tryAsk({
-      context: "ctx",
-      questions: [{ id: "q", kind: "noul", prompt: "p" }],
-    });
-    check("tryAsk() swallows a failure and returns null rather than throwing", answers === null);
-    mock.restore();
-  }
-
-  {
+    const mock = installFetchMock([]);
+    const answers = await client().ask("state", {});
     check(
       "ask() with zero questions short-circuits without calling fetch",
-      JSON.stringify(await client("test-key").ask({ context: "ctx", questions: [] })) === "[]",
+      Object.keys(answers).length === 0 && mock.calls.length === 0,
     );
+    mock.restore();
+  }
+
+  for (const status of [401, 422, 429, 500, 529]) {
+    const mock = installFetchMock([{ status, body: { error: "nope" } }]);
+    const answers = await client().tryAsk("x", { q: noul("p") });
+    check(`tryAsk() swallows an HTTP ${status} and returns null`, answers === null);
+    mock.restore();
+  }
+
+  {
+    const mock = installFetchMock([{ status: 200, rawBody: "not json at all" }]);
+    const answers = await client().tryAsk("x", { q: noul("p") });
+    check("tryAsk() swallows a non-JSON 200 and returns null", answers === null);
+    mock.restore();
+  }
+
+  {
+    const mock = installFetchMock([ok({ someOtherName: noulAnswer(0.5) })]);
+    const answers = await client().tryAsk("x", { q: noul("p") });
+    check("tryAsk() returns null when a requested answer is missing from the response", answers === null);
+    mock.restore();
+  }
+
+  {
+    const mock = installFetchMock([ok({ q: choiceAnswer("a", 0.9, { a: 1 }) })]);
+    const answers = await client().tryAsk("x", { q: noul("p") });
+    check("tryAsk() returns null when an answer has the wrong type", answers === null);
+    mock.restore();
+  }
+
+  {
+    // JEV_MAX_RETRIES=1: a 500 then a 200 should succeed on the retry.
+    const mock = installFetchMock([{ status: 500, body: {} }, ok({ q: noulAnswer(0.4) })]);
+    const answers = await client({ JEV_MAX_RETRIES: 1 }).tryAsk("x", { q: noul("p") });
+    check(
+      "a retryable failure is retried once when JEV_MAX_RETRIES=1",
+      answers?.q.noul === 0.4 && mock.calls.length === 2,
+      `calls=${mock.calls.length}`,
+    );
+    mock.restore();
   }
 
   // ── isJevFeatureEnabled ───────────────────────────────────────────────
   {
-    const enabledClient = client("test-key");
-    const disabledClient = client(undefined);
     const flag: JevFeatureFlag = "JEV_GROUNDING_ENABLED";
-
+    const enabled = client();
+    const noKey = new JevClient(fakeConfig({}));
     check(
       "feature is enabled only when both the flag and credentials are present",
-      isJevFeatureEnabled(fakeConfig({ [flag]: true }), enabledClient, flag) === true,
+      isJevFeatureEnabled(fakeConfig({ [flag]: true }), enabled, flag) === true,
     );
     check(
       "feature stays disabled with the flag on but no credentials",
-      isJevFeatureEnabled(fakeConfig({ [flag]: true }), disabledClient, flag) === false,
+      isJevFeatureEnabled(fakeConfig({ [flag]: true }), noKey, flag) === false,
     );
     check(
       "feature stays disabled with credentials but the flag off",
-      isJevFeatureEnabled(fakeConfig({ [flag]: false }), enabledClient, flag) === false,
+      isJevFeatureEnabled(fakeConfig({ [flag]: false }), enabled, flag) === false,
     );
     check(
       "feature stays disabled with the flag entirely unset",
-      isJevFeatureEnabled(fakeConfig({}), enabledClient, flag) === false,
+      isJevFeatureEnabled(fakeConfig({}), enabled, flag) === false,
     );
   }
 
   // ── scoreGroundingWithJev ─────────────────────────────────────────────
+  const GROUNDING_ON = fakeConfig({ JEV_GROUNDING_ENABLED: true });
   {
-    const mock = installFetchMock([
-      { status: 200, body: chatBody({ grounded: { value: 1, probability: 0.8 } }) },
-    ]);
+    const mock = installFetchMock([ok({ grounded: noulAnswer(0.8) })]);
     const result = await scoreGroundingWithJev(
-      client("test-key"),
-      fakeConfig({ JEV_GROUNDING_ENABLED: true }),
+      client(),
+      GROUNDING_ON,
       SAMPLE_EVENT,
       `Some preamble text. ${SAMPLE_EVENT.sourceText} Some trailing text.`,
     );
     check(
-      "grounding check (flag on, Jev says yes) is passed, non-gating",
+      "grounding (Jev says yes) is passed and non-gating",
       result?.name === "grounding-jev" && result.passed === true && result.gating === false,
       JSON.stringify(result),
+    );
+    const body = bodyOf(mock.calls[0]);
+    check(
+      "grounding sends the quote and an excerpt as state, as a noul question",
+      body.questions?.grounded?.type === "noul" &&
+        body.state?.claimed_quote === SAMPLE_EVENT.sourceText &&
+        String(body.state?.document_excerpt).includes("Some preamble"),
+      JSON.stringify(body.state)?.slice(0, 200),
     );
     mock.restore();
   }
 
   check(
-    "grounding check returns null when the flag is off",
-    (await scoreGroundingWithJev(
-      client("test-key"),
-      fakeConfig({ JEV_GROUNDING_ENABLED: false }),
-      SAMPLE_EVENT,
-      "some document text",
-    )) === null,
+    "grounding returns null when the flag is off",
+    (await scoreGroundingWithJev(client(), fakeConfig({}), SAMPLE_EVENT, "doc")) === null,
   );
-
   check(
-    "grounding check returns null for a too-short sourceText, even with the flag on",
-    (await scoreGroundingWithJev(
-      client("test-key"),
-      fakeConfig({ JEV_GROUNDING_ENABLED: true }),
-      { ...SAMPLE_EVENT, sourceText: "too short" },
-      "some document text",
-    )) === null,
+    "grounding returns null for a too-short sourceText, even with the flag on",
+    (await scoreGroundingWithJev(client(), GROUNDING_ON, { ...SAMPLE_EVENT, sourceText: "short" }, "doc")) === null,
   );
 
   {
-    const mock = installFetchMock([
-      { status: 200, body: chatBody({ grounded: { value: 0, probability: 0.95 } }) },
-    ]);
-    const result = await scoreGroundingWithJev(
-      client("test-key"),
-      fakeConfig({ JEV_GROUNDING_ENABLED: true }),
-      SAMPLE_EVENT,
-      "a wholly unrelated document with no connection to the quote at all",
-    );
+    const mock = installFetchMock([ok({ grounded: noulAnswer(0.1) })]);
+    const result = await scoreGroundingWithJev(client(), GROUNDING_ON, SAMPLE_EVENT, "unrelated document text");
     check(
-      "grounding check (Jev says no) is unpassed but still non-gating, with detail",
+      "grounding (Jev says no) is unpassed but still non-gating, with detail",
       result?.passed === false && result.gating === false && Boolean(result.detail),
       JSON.stringify(result),
     );
     mock.restore();
   }
 
-  // ── scoreDuplicateWithJev ─────────────────────────────────────────────
+  {
+    const mock = installFetchMock([ok({ grounded: noulAnswer(0.5) })]);
+    const result = await scoreGroundingWithJev(client(), GROUNDING_ON, SAMPLE_EVENT, "doc text here");
+    check("grounding treats exactly 0.5 as supported (>= 0.5)", result?.passed === true, JSON.stringify(result));
+    mock.restore();
+  }
+
   check(
-    "duplicate check returns null with no same-year events seen yet",
-    (await scoreDuplicateWithJev(
-      client("test-key"),
-      fakeConfig({ JEV_DEDUP_SCORING_ENABLED: true }),
-      SAMPLE_EVENT,
-      [],
-    )) === null,
+    "grounding fails open (null) on a Jev outage",
+    await (async () => {
+      const mock = installFetchMock([{ status: 500, body: {} }]);
+      const result = await scoreGroundingWithJev(client(), GROUNDING_ON, SAMPLE_EVENT, "doc text here");
+      mock.restore();
+      return result === null;
+    })(),
+  );
+
+  // ── scoreDuplicateWithJev ─────────────────────────────────────────────
+  const DEDUP_ON = fakeConfig({ JEV_DEDUP_SCORING_ENABLED: true });
+  check(
+    "duplicate returns null with no same-year events seen yet",
+    (await scoreDuplicateWithJev(client(), DEDUP_ON, SAMPLE_EVENT, [])) === null,
   );
 
   {
-    const priorEvent: ExtractedEvent = {
+    const prior: ExtractedEvent = {
       ...SAMPLE_EVENT,
       id: "0-1",
       title: "Founding Day Ceremony",
       description: "A ceremony marking the founding of the village.",
     };
-    // Jev picks index 0 — the one prior same-year event — not the "none" option.
     const mock = installFetchMock([
-      { status: 200, body: chatBody({ match: { value: 0, probability: 0.7 } }) },
+      ok({ match: choiceAnswer("event_0", 0.7, { event_0: 0.8, none: 0.2 }) }),
     ]);
-    const result = await scoreDuplicateWithJev(
-      client("test-key"),
-      fakeConfig({ JEV_DEDUP_SCORING_ENABLED: true }),
-      SAMPLE_EVENT,
-      [priorEvent],
-    );
+    const result = await scoreDuplicateWithJev(client(), DEDUP_ON, SAMPLE_EVENT, [prior]);
     check(
-      'duplicate check flags a match by name, not just "failed"',
+      "duplicate flags a match by title, non-gating, not merged",
       result?.name === "duplicate-jev" &&
         result.passed === false &&
         result.gating === false &&
         result.detail?.includes("Founding Day Ceremony") === true,
       JSON.stringify(result),
     );
+    const criteria = bodyOf(mock.calls[0]).questions?.match?.criteria ?? {};
+    check(
+      "duplicate offers each prior event plus a 'none' outcome as choice criteria",
+      Object.keys(criteria).join(",") === "event_0,none",
+      Object.keys(criteria).join(","),
+    );
     mock.restore();
   }
 
   {
-    const priorEvent: ExtractedEvent = { ...SAMPLE_EVENT, id: "0-1", title: "A Wholly Different Event" };
-    // Jev picks the "none of the above" option — index equal to pool.length.
-    const mock = installFetchMock([
-      { status: 200, body: chatBody({ match: { value: 1, probability: 0.9 } }) },
-    ]);
-    const result = await scoreDuplicateWithJev(
-      client("test-key"),
-      fakeConfig({ JEV_DEDUP_SCORING_ENABLED: true }),
-      SAMPLE_EVENT,
-      [priorEvent],
-    );
-    check(
-      '"none of the above" passes, with no detail',
-      result?.passed === true && result.detail === undefined,
-      JSON.stringify(result),
-    );
+    const prior: ExtractedEvent = { ...SAMPLE_EVENT, id: "0-1", title: "A Wholly Different Event" };
+    const mock = installFetchMock([ok({ match: choiceAnswer("none", 0.9, { event_0: 0.05, none: 0.95 }) })]);
+    const result = await scoreDuplicateWithJev(client(), DEDUP_ON, SAMPLE_EVENT, [prior]);
+    check("'none' passes, with no detail", result?.passed === true && result.detail === undefined, JSON.stringify(result));
     mock.restore();
   }
 
   // ── rescoreConfidenceWithJev ──────────────────────────────────────────
+  const CONF_ON = fakeConfig({ JEV_CONFIDENCE_RESCORE_ENABLED: true });
   {
-    // tiers = 5 (indices 0-4); index 4 ("very high") => jevConfidence 1.0,
-    // matching SAMPLE_EVENT.confidence = 0.9 within the 0.34 agreement band.
-    const mock = installFetchMock([
-      { status: 200, body: chatBody({ confidence: { value: 4, probability: 0.85 } }) },
-    ]);
-    const result = await rescoreConfidenceWithJev(
-      client("test-key"),
-      fakeConfig({ JEV_CONFIDENCE_RESCORE_ENABLED: true }),
-      SAMPLE_EVENT,
-    );
+    // score 4 of 0-4 => 1.0, vs self-reported 0.9 — inside the agreement band.
+    const mock = installFetchMock([ok({ confidence: scoreAnswer(4, 0.85) })]);
+    const result = await rescoreConfidenceWithJev(client(), CONF_ON, SAMPLE_EVENT);
     check(
-      "confidence check agrees when Jev's tier and the self-reported score are close",
+      "confidence agrees when Jev's score and the self-reported value are close",
       result?.name === "confidence-jev" && result.passed === true && result.gating === false,
       JSON.stringify(result),
     );
     mock.restore();
   }
-
   {
-    // index 0 ("very low") => jevConfidence 0.0, vs self-reported 0.9 — disagrees.
-    const mock = installFetchMock([
-      { status: 200, body: chatBody({ confidence: { value: 0, probability: 0.6 } }) },
-    ]);
-    const result = await rescoreConfidenceWithJev(
-      client("test-key"),
-      fakeConfig({ JEV_CONFIDENCE_RESCORE_ENABLED: true }),
-      SAMPLE_EVENT,
-    );
+    const mock = installFetchMock([ok({ confidence: scoreAnswer(0, 0.6) })]);
+    const result = await rescoreConfidenceWithJev(client(), CONF_ON, SAMPLE_EVENT);
     check(
-      "confidence check disagrees (but stays non-gating) on a wide gap",
+      "confidence disagrees (but stays non-gating) on a wide gap",
       result?.passed === false && result.gating === false,
       JSON.stringify(result),
     );
     mock.restore();
   }
-
   check(
-    "confidence check returns null when the flag is off",
-    (await rescoreConfidenceWithJev(
-      client("test-key"),
-      fakeConfig({ JEV_CONFIDENCE_RESCORE_ENABLED: false }),
-      SAMPLE_EVENT,
-    )) === null,
+    "confidence returns null when the flag is off",
+    (await rescoreConfidenceWithJev(client(), fakeConfig({}), SAMPLE_EVENT)) === null,
   );
 
+  // ── Optional live call ────────────────────────────────────────────────
+  // The mocks above encode OUR reading of the contract; this is the only
+  // check that proves the real service agrees with it.
+  if (process.argv.includes("--live")) {
+    const key = process.env["JEV_API_KEY"];
+    if (!key) {
+      check("live: JEV_API_KEY is set", false, "set JEV_API_KEY to run --live");
+    } else {
+      const live = new JevClient(fakeConfig({ JEV_API_KEY: key }));
+      const answers = await live.tryAsk(
+        { quote: "The settlers founded the village in 1850.", excerpt: "In 1850 settlers founded the village." },
+        {
+          grounded: noul("Does the excerpt support the quote?"),
+          kind: choice("Is this about a founding or a battle?", { founding: null, battle: null }),
+        },
+      );
+      check("live: a real noul answer is a probability in [0,1]", answers !== null && answers.grounded.noul >= 0 && answers.grounded.noul <= 1, JSON.stringify(answers));
+      check("live: a real choice answer is one of the offered labels", answers?.kind.choice === "founding" || answers?.kind.choice === "battle", JSON.stringify(answers?.kind));
+    }
+  }
+
   let failed = 0;
-  for (const [name, ok, detail] of checks) {
-    console.log(`${ok ? "PASS" : "FAIL"}  ${name}${detail && !ok ? `  (${detail})` : ""}`);
-    if (!ok) failed++;
+  for (const [name, passed, detail] of checks) {
+    console.log(`${passed ? "PASS" : "FAIL"}  ${name}${detail && (!passed || process.argv.includes("--live")) ? `  (${detail})` : ""}`);
+    if (!passed) failed++;
   }
   console.log(`\n${checks.length - failed}/${checks.length} checks passed`);
   if (failed > 0) process.exitCode = 1;

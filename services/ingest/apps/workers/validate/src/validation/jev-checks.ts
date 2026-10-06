@@ -1,6 +1,6 @@
 import type { ConfigService } from "@nestjs/config";
 import type { ExtractedEvent, ValidationCheck } from "@historical-map/domain";
-import { JevClient, isJevFeatureEnabled } from "@app/jev";
+import { JevClient, choice, isJevFeatureEnabled, noul, score } from "@app/jev";
 
 /**
  * Jev-backed enhancements to the deterministic checks in `validators.ts`.
@@ -40,26 +40,27 @@ export async function scoreGroundingWithJev(
 
   const snippet = excerptAround(documentText, event.sourceText, MAX_CONTEXT_CHARS / 2);
 
-  const answers = await client.tryAsk({
-    context: `Document excerpt:\n${snippet}\n\nClaimed quote from this document:\n"${event.sourceText}"`,
-    questions: [
-      {
-        id: "grounded",
-        kind: "noul",
-        prompt:
-          "Does the document excerpt actually support the claimed quote, allowing for paraphrase, reflow, or minor wording differences — as opposed to the quote being fabricated or unrelated to this excerpt?",
-      },
-    ],
-  });
-  const answer = answers?.[0];
-  if (!answer) return null;
+  const answers = await client.tryAsk(
+    { document_excerpt: snippet, claimed_quote: event.sourceText },
+    {
+      grounded: noul(
+        "Does the document excerpt support the claimed quote, allowing for paraphrase, reflow, or minor wording differences?",
+        {
+          true: "The excerpt says the same thing as the quote, even in different words.",
+          false: "The quote is fabricated, contradicts the excerpt, or is unrelated to it.",
+        },
+      ),
+    },
+  );
+  const probability = answers?.grounded.noul;
+  if (probability === undefined) return null;
 
-  const grounded = answer.value === 1;
+  const grounded = probability >= 0.5;
   return {
     name: "grounding-jev",
     passed: grounded,
     gating: false,
-    detail: `jev p=${answer.probability.toFixed(2)}${grounded ? "" : " — not supported"}`,
+    detail: `jev p(grounded)=${probability.toFixed(2)}${grounded ? "" : " — not supported"}`,
   };
 }
 
@@ -90,41 +91,40 @@ export async function scoreDuplicateWithJev(
   );
   if (pool.length === 0) return null;
 
-  const noneOptionIndex = pool.length;
-  const options = [
-    ...pool.map((c) => `${c.title} — ${c.description}`.slice(0, 160)),
-    "none of the above describe the same event",
-  ];
-
-  const answers = await client.tryAsk({
-    context: [
-      "New candidate event:",
-      `Title: ${event.title}`,
-      `Date: ${event.dateText}`,
-      `Description: ${event.description}`,
-      `Quote: ${event.sourceText.slice(0, 300)}`,
-    ].join("\n"),
-    questions: [
-      {
-        id: "match",
-        kind: "choice",
-        prompt:
-          "Which of these previously-seen events, if any, describes the same real-world historical event as the new candidate above? Sharing a year or place is not by itself enough to call two events the same.",
-        options,
-      },
-    ],
+  const criteria: Record<string, string> = {};
+  pool.forEach((c, i) => {
+    criteria[`event_${i}`] = `${c.title} — ${c.description}`.slice(0, 160);
   });
-  const answer = answers?.[0];
+  criteria["none"] = "None of the above describe the same event.";
+
+  const answers = await client.tryAsk(
+    {
+      new_event: {
+        title: event.title,
+        date: event.dateText,
+        description: event.description,
+        quote: event.sourceText.slice(0, 300),
+      },
+    },
+    {
+      match: choice(
+        "Which of these previously-seen events, if any, describes the same real-world historical event as the new event? Sharing a year or place is not by itself enough to call two events the same.",
+        criteria,
+      ),
+    },
+  );
+  const answer = answers?.match;
   if (!answer) return null;
 
-  const matchedNone = answer.value === noneOptionIndex;
+  const matchedNone = answer.choice === "none";
+  const matchedIndex = Number(answer.choice.replace("event_", ""));
   return {
     name: "duplicate-jev",
     passed: matchedNone,
     gating: false,
     detail: matchedNone
       ? undefined
-      : `possible duplicate of "${pool[answer.value]?.title}" (p=${answer.probability.toFixed(2)}) — flagged for review, not auto-merged`,
+      : `possible duplicate of "${pool[matchedIndex]?.title}" (confidence ${answer.confidence.toFixed(2)}) — flagged for review, not auto-merged`,
   };
 }
 
@@ -143,37 +143,35 @@ export async function rescoreConfidenceWithJev(
   if (!isJevFeatureEnabled(config, client, "JEV_CONFIDENCE_RESCORE_ENABLED"))
     return null;
 
-  const tiers = ["very low", "low", "medium", "high", "very high"];
-  const answers = await client.tryAsk({
-    context: [
-      "Extracted historical event:",
-      `Title: ${event.title}`,
-      `Date: ${event.dateText}`,
-      `Place: ${event.placeName ?? "(none given)"}`,
-      `Description: ${event.description}`,
-      `Quoted source text: ${event.sourceText.slice(0, 400)}`,
-      `Extraction model's self-reported confidence: ${event.confidence}`,
-    ].join("\n"),
-    questions: [
-      {
-        id: "confidence",
-        kind: "score",
-        prompt:
-          "Independent of the self-reported confidence above, how well does the quoted source text substantiate this event being real, and dated and placed as claimed?",
-        tiers,
+  const tiers = ["very low", "low", "medium", "high", "very high"] as const;
+  const answers = await client.tryAsk(
+    {
+      event: {
+        title: event.title,
+        date: event.dateText,
+        place: event.placeName ?? "(none given)",
+        description: event.description,
+        quoted_source_text: event.sourceText.slice(0, 400),
       },
-    ],
-  });
-  const answer = answers?.[0];
+      extraction_self_reported_confidence: event.confidence,
+    },
+    {
+      confidence: score(
+        "Independent of the self-reported confidence, how well does the quoted source text substantiate this event being real, and dated and placed as claimed?",
+        tiers,
+      ),
+    },
+  );
+  const answer = answers?.confidence;
   if (!answer) return null;
 
-  const jevConfidence = answer.value / (tiers.length - 1);
+  const jevConfidence = answer.score / (tiers.length - 1);
   const agrees = Math.abs(jevConfidence - event.confidence) <= 0.34;
   return {
     name: "confidence-jev",
     passed: agrees,
     gating: false,
-    detail: `jev=${tiers[answer.value]} (${jevConfidence.toFixed(2)}) vs self-reported ${event.confidence}`,
+    detail: `jev=${jevConfidence.toFixed(2)} (confidence ${answer.confidence.toFixed(2)}) vs self-reported ${event.confidence}`,
   };
 }
 

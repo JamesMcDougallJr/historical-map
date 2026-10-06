@@ -158,14 +158,16 @@ export const envSchema = z.object({
    * deterministic checks, never in place of them. Unset means every
    * `JevClient` call site falls back to its pre-Jev behaviour untouched.
    *
-   * Wire format targeted is OpenRouter's chat-completions endpoint — see
-   * `libs/jev/src/jev.client.ts` for why, and what to change if TypeSafe's
-   * actual `/v1/systemone` contract differs.
+   * Talks to `https://api.typesafe.ai/v1/systemone` through the official
+   * `@typesafe-ai/sdk`. `JEV_BASE_URL` overrides the API root (the ingestion
+   * fixture points it at a fake local server). Timeout is per attempt, so the
+   * worst-case stall per call is `JEV_TIMEOUT_MS * (JEV_MAX_RETRIES + 1)`.
    */
   JEV_API_KEY: optionalNonEmpty(),
-  JEV_MODEL: z.string().min(1).default("typesafe/jev-latest"),
+  JEV_MODEL: z.string().min(1).default("jev-latest"),
   JEV_BASE_URL: optionalNonEmpty(),
   JEV_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
+  JEV_MAX_RETRIES: z.coerce.number().int().min(0).default(1),
 
   /**
    * Each Jev-backed enhancement is its own flag, independently opt-in and

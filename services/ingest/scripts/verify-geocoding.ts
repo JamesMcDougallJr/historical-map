@@ -83,18 +83,29 @@ function fakeRateLimiter(): RateLimiterService {
  * `enabled: false` by default, so `NominatimGeocoder.rerank` short-circuits
  * before ever calling `tryAsk` — every fixture that exercises the pre-Jev
  * reranking path uses the no-args form, and keeps doing so regardless of
- * what a real `JevClient` would otherwise do. Pass `tryAskResult` to
+ * what a real `JevClient` would otherwise do. Pass `pick` to
  * simulate an enabled client answering a rerank question instead.
  */
 function fakeJevClient(
-  options: { enabled?: boolean; tryAskResult?: { value: number; probability: number } | null } = {},
+  options: { enabled?: boolean; pick?: number | null } = {},
 ): JevClient {
   return {
     enabled: options.enabled ?? false,
     ask: async () => {
       throw new Error("fakeJevClient.ask should not be called directly in these fixtures");
     },
-    tryAsk: async () => (options.tryAskResult ? [{ id: "best", ...options.tryAskResult }] : null),
+    // `pick` is the candidate index Jev "chooses"; null simulates a failed call.
+    tryAsk: async () =>
+      options.pick === null || options.pick === undefined
+        ? null
+        : {
+            best: {
+              type: "choice",
+              choice: `result_${options.pick}`,
+              confidence: 0.9,
+              probabilities: {},
+            },
+          },
   } as unknown as JevClient;
 }
 
@@ -568,7 +579,7 @@ async function main(): Promise<void> {
     const geocoder = new NominatimGeocoder(
       fakeConfig({ GEOCODER_MIN_INTERVAL_MS: 0, JEV_GEOCODE_RERANK_ENABLED: true }),
       fakeRateLimiter(),
-      fakeJevClient({ enabled: true, tryAskResult: { value: 1, probability: 0.82 } }),
+      fakeJevClient({ enabled: true, pick: 1 }),
     );
     const hit = await safeGeocode(
       geocoder,
@@ -589,7 +600,7 @@ async function main(): Promise<void> {
     const geocoder = new NominatimGeocoder(
       fakeConfig({ GEOCODER_MIN_INTERVAL_MS: 0, JEV_GEOCODE_RERANK_ENABLED: false }),
       fakeRateLimiter(),
-      fakeJevClient({ enabled: true, tryAskResult: { value: 1, probability: 0.82 } }),
+      fakeJevClient({ enabled: true, pick: 1 }),
     );
     const hit = await safeGeocode(geocoder, "Fort Hamlet", "flag off resolves without throwing");
     check(
@@ -606,7 +617,7 @@ async function main(): Promise<void> {
     const geocoder = new NominatimGeocoder(
       fakeConfig({ GEOCODER_MIN_INTERVAL_MS: 0, JEV_GEOCODE_RERANK_ENABLED: true }),
       fakeRateLimiter(),
-      fakeJevClient({ enabled: false, tryAskResult: { value: 1, probability: 0.82 } }),
+      fakeJevClient({ enabled: false, pick: 1 }),
     );
     const hit = await safeGeocode(geocoder, "Fort Hamlet", "no credentials resolves without throwing");
     check(
@@ -624,7 +635,7 @@ async function main(): Promise<void> {
     const geocoder = new NominatimGeocoder(
       fakeConfig({ GEOCODER_MIN_INTERVAL_MS: 0, JEV_GEOCODE_RERANK_ENABLED: true }),
       fakeRateLimiter(),
-      fakeJevClient({ enabled: true, tryAskResult: null }),
+      fakeJevClient({ enabled: true, pick: null }),
     );
     const hit = await safeGeocode(geocoder, "Fort Hamlet", "a failed Jev call resolves without throwing");
     check(
