@@ -11,6 +11,10 @@ import { validateEnv } from "./env-validation.schema";
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
+      // `.env.local` first (first file wins, and real process env beats both):
+      // it is gitignored, so it is where a personal secret like JEV_API_KEY
+      // belongs — plain `.env` is not ignored in this repo.
+      envFilePath: [".env.local", ".env"],
       validate: validateEnv,
     }),
   ],

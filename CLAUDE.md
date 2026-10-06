@@ -375,6 +375,10 @@ each behind its own env flag, all defaulting off:
 | `JEV_CONFIDENCE_RESCORE_ENABLED`   | `validate` → `confidence-jev` check                            | independent re-score of the extractor's confidence on a 5-level concrete rubric (non-gating) |
 | `JEV_GEOCODE_RERANK_ENABLED`       | `NominatimGeocoder.geocode`                                    | Jev picks among the top 5 results (or "none") instead of always taking `usable[0]` |
 
+Put `JEV_API_KEY` in `services/ingest/.env.local` — `AppConfigModule` loads
+`.env.local` then `.env` (real process env beats both), and only `.env*.local` is
+gitignored in this repo, so never put a key in plain `.env`.
+
 `libs/jev` is a thin fail-open wrapper over the official `@typesafe-ai/sdk`
 (`POST https://api.typesafe.ai/v1/systemone`; the SDK owns the wire contract,
 `Retry-After` handling and typed answers). Questions are built with the SDK's
