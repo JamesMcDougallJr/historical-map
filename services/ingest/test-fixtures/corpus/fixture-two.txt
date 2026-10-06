@@ -11,3 +11,7 @@ TITLE: The Disputed Treaty
 DATE: 1852-09-09
 PLACE: Fixture Village
 PARAPHRASE: contradicted
+
+TITLE: The Autumn Harvest Fair
+DATE: 1880-09-01
+PLACE: Fixture Town

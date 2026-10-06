@@ -12,10 +12,10 @@
  * - no arguments: lists held candidates with Jev's reasoning (`P(same)`, and the
  *   existing event it matched).
  * - `--approve`: "this is a different event — publish it." Marks the candidate
- *   resolved and publishable and re-queues its document's publish job. `validate`
- *   will not overwrite a resolved candidate, so re-validating cannot undo this.
+ *   resolved and publishable and re-queues its document's publish job.
  * - `--dismiss`: "this is a duplicate — leave it out." Marks it resolved but keeps it
- *   in review, so it stops being listed and is never published.
+ *   in review, so it stops being listed. `validate` will not overwrite a resolved
+ *   candidate, so re-validating the document cannot push it back to `publish`.
  */
 import { Queue } from "bullmq";
 import { createDataSource } from "../libs/database/src/data-source";

@@ -305,11 +305,13 @@ export class ValidationService {
         checks: jsonb(checks),
         event: jsonb(event),
       })
-      // `WHERE resolved_at IS NULL`: a reviewer who approved or dismissed a
-      // candidate (see `scripts/duplicate-review.ts`) has made a decision this
-      // must not overwrite — without it, re-validating a document would reset
-      // an approved candidate's verdict and the duplicate check would hold it
-      // again. Unresolved rows update exactly as before.
+      // `WHERE resolved_at IS NULL`: a reviewer's decision (see
+      // `scripts/duplicate-review.ts`) must survive re-validation. The case it
+      // protects is **dismiss**: a dismissed duplicate is `verdict='review'`
+      // with `resolved_at` set, and this upsert would re-derive
+      // `verdict='publish'` from the deterministic checks — after which
+      // publish, which skips resolved candidates, puts the duplicate on the
+      // map. (Approve survives either way.) Unresolved rows update as before.
       .orUpdate(["verdict", "checks", "event", "model_run"], ["event_key"], {
         overwriteCondition: {
           where: '"ingest_event_candidates"."resolved_at" IS NULL',
