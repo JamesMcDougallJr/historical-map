@@ -175,6 +175,16 @@ export const envSchema = z.object({
    * rollout needs to turn features on one at a time, not all-or-nothing.
    */
   JEV_GROUNDING_ENABLED: boolFlag(),
+
+  /**
+   * Minimum `P(supports)` from Jev for an event whose quote the exact-match
+   * grounding check missed to stay publishable. `0` (default) never holds
+   * anything — `grounding-jev` is recorded, non-gating — which is also how to
+   * bypass Jev's say over publication while keeping its data. Raise it (try
+   * 0.5, then tune on recorded probabilities) to hold low-support events for
+   * review. Has no effect unless `JEV_GROUNDING_ENABLED` is on.
+   */
+  JEV_GROUNDING_MIN_SUPPORT: z.coerce.number().min(0).max(1).default(0),
   JEV_GEOCODE_RERANK_ENABLED: boolFlag(),
   JEV_DEDUP_SCORING_ENABLED: boolFlag(),
   JEV_CONFIDENCE_RESCORE_ENABLED: boolFlag(),

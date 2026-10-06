@@ -1,6 +1,7 @@
 import type { ConfigService } from "@nestjs/config";
 import type { ExtractedEvent, ValidationCheck } from "@historical-map/domain";
-import { JevClient, choice, isJevFeatureEnabled, noul, score } from "@app/jev";
+import type { TextSegment } from "@app/parsers";
+import { JevClient, choice, isJevFeatureEnabled, score } from "@app/jev";
 
 /**
  * Jev-backed enhancements to the deterministic checks in `validators.ts`.
@@ -13,54 +14,88 @@ import { JevClient, choice, isJevFeatureEnabled, noul, score } from "@app/jev";
  * (or Jev being down) reproduces pre-Jev behaviour exactly, not a degraded
  * version of it.
  *
- * All three are **non-gating**, matching `checkGrounding`'s own precedent:
- * record a new, unproven signal until there's evidence for where to set a
- * threshold, rather than let an unvalidated classifier silently start
- * rejecting events.
+ * `duplicate-jev` and `confidence-jev` are **non-gating**, matching
+ * `checkGrounding`'s own precedent: record a new, unproven signal until
+ * there's evidence for where to set a threshold, rather than let an
+ * unvalidated classifier silently start rejecting events. `grounding-jev` is
+ * the one that *can* gate, and only when `JEV_GROUNDING_MIN_SUPPORT` is
+ * raised above its default of `0`.
  */
 
 const MAX_CONTEXT_CHARS = 8_000;
 const MAX_DEDUP_CANDIDATES = 15;
+/** Segments of context after the anchor segment when the quote can't be located. */
+const ANCHOR_FOLLOWING_SEGMENTS = 2;
+
+export interface GroundingInput {
+  documentText: string;
+  /** The parsed text artifact's segments; absent for artifacts without them. */
+  segments?: TextSegment[];
+  /** Whether the deterministic `checkGrounding` already found the exact quote. */
+  substringGrounded: boolean;
+}
 
 /**
- * Independent yes/no check on whether the document excerpt actually supports
- * the quoted `sourceText` — the same question `checkGrounding` asks via exact
- * substring match, but tolerant of paraphrase and reflow, which substring
- * match is not.
+ * Asks Jev whether the section of the document the event came from supports
+ * its quoted `sourceText` — for the quotes `checkGrounding` could **not**
+ * find verbatim.
+ *
+ * Only substring misses are sent: an exact match is already the strongest
+ * grounding evidence there is, so asking Jev about it would spend a call to
+ * re-confirm a certainty. On the first real run that was 90 of 131 quotes —
+ * roughly 70% of the calls this skips.
+ *
+ * The question is a three-way Choice (`supports` / `contradicts` /
+ * `says_nothing`) rather than a yes/no, per TypeSafe's citation-check
+ * cookbook: a quote the document never mentions and one it flatly contradicts
+ * are different failures, and a yes/no cannot tell them apart.
+ *
+ * **Gating.** `JEV_GROUNDING_MIN_SUPPORT` (0–1, default `0`) is the minimum
+ * `P(supports)` for the event to stay publishable. At `0` the check can never
+ * fail the gate — it records and reports at the natural 0.5 bar but never holds
+ * anything — which is the bypass. Raising it holds substring-missed events whose
+ * support falls below it for review. It can only hold events, never rescue
+ * one: an exact-match quote is never sent here at all.
  */
 export async function scoreGroundingWithJev(
   client: JevClient,
   config: ConfigService,
   event: ExtractedEvent,
-  documentText: string,
+  input: GroundingInput,
 ): Promise<ValidationCheck | null> {
   if (!isJevFeatureEnabled(config, client, "JEV_GROUNDING_ENABLED")) return null;
+  if (input.substringGrounded) return null;
   if (!event.sourceText || event.sourceText.trim().length < 20) return null;
-  if (!documentText) return null;
+  if (!input.documentText) return null;
 
-  const snippet = excerptAround(documentText, event.sourceText, MAX_CONTEXT_CHARS / 2);
+  const section = sectionFor(event, input);
 
   const answers = await client.tryAsk(
-    { document_excerpt: snippet, claimed_quote: event.sourceText },
+    { section, claim: event.sourceText },
     {
-      grounded: noul(
-        "Does the document excerpt support the claimed quote, allowing for paraphrase, reflow, or minor wording differences?",
-        {
-          true: "The excerpt says the same thing as the quote, even in different words.",
-          false: "The quote is fabricated, contradicts the excerpt, or is unrelated to it.",
-        },
-      ),
+      relation: choice("How does the section relate to the claim?", {
+        supports: "The section states the claim, or directly implies it is true — even in different words.",
+        contradicts: "The section states something that conflicts with the claim.",
+        says_nothing: "The section neither supports nor contradicts the claim; it is unrelated or silent on it.",
+      }),
     },
   );
-  const probability = answers?.grounded.noul;
-  if (probability === undefined) return null;
+  const relation = answers?.relation;
+  if (!relation) return null;
 
-  const grounded = probability >= 0.5;
+  const minSupport = config.get<number>("JEV_GROUNDING_MIN_SUPPORT") ?? 0;
+  const gating = minSupport > 0;
+  const { supports, contradicts, says_nothing } = relation.probabilities;
+  const bar = gating ? minSupport : 0.5;
+
   return {
     name: "grounding-jev",
-    passed: grounded,
-    gating: false,
-    detail: `jev p(grounded)=${probability.toFixed(2)}${grounded ? "" : " — not supported"}`,
+    passed: supports >= bar,
+    gating,
+    detail:
+      `jev supports=${supports.toFixed(2)} contradicts=${contradicts.toFixed(2)} ` +
+      `says_nothing=${says_nothing.toFixed(2)} (confidence ${relation.confidence.toFixed(2)})` +
+      (gating ? ` — min support ${minSupport}` : ""),
   };
 }
 
@@ -181,17 +216,42 @@ function yearOf(event: ExtractedEvent): number | null {
 }
 
 /**
- * A window of `documentText` around the quote, rather than the whole
- * (potentially large) document — bounds the context sent to Jev. Located by
- * the quote's first ~40 characters rather than the whole string, since the
- * whole point of this check is tolerating a quote that doesn't match
- * verbatim; the probe only needs to land in the right neighbourhood.
+ * The part of the document to show Jev: a section, not the whole (potentially
+ * enormous) text. Located three ways, most to least precise:
+ *
+ * 1. **By the quote's opening words.** The whole point of this check is
+ *    tolerating a quote that doesn't match verbatim, so the full string can't
+ *    be the probe — but its first ~40 characters often still land in the right
+ *    segment. That segment and its neighbours are sent.
+ * 2. **By `event.anchor`.** That is the *first segment of the extraction
+ *    chunk*, not necessarily the one holding the quote (a chunk spans several
+ *    segments), so it takes the anchor segment plus the next few.
+ * 3. **The old prefix window**, for artifacts without segments.
  */
-function excerptAround(documentText: string, quote: string, radius: number): string {
-  const probe = quote.trim().slice(0, 40).toLowerCase();
-  const idx = documentText.toLowerCase().indexOf(probe);
-  if (idx === -1) return documentText.slice(0, radius * 2);
-  const start = Math.max(0, idx - radius);
-  const end = Math.min(documentText.length, idx + probe.length + radius);
-  return documentText.slice(start, end);
+function sectionFor(event: ExtractedEvent, input: GroundingInput): string {
+  const { segments, documentText } = input;
+  if (segments && segments.length > 0) {
+    const probe = squash(event.sourceText).slice(0, 40);
+    const hit = probe ? segments.findIndex((s) => squash(s.text).includes(probe)) : -1;
+    if (hit >= 0) {
+      return joinCapped(segments.slice(Math.max(0, hit - 1), hit + 2));
+    }
+    const anchored = event.anchor ? segments.findIndex((s) => s.anchor === event.anchor) : -1;
+    if (anchored >= 0) {
+      return joinCapped(segments.slice(anchored, anchored + 1 + ANCHOR_FOLLOWING_SEGMENTS));
+    }
+  }
+  return documentText.slice(0, MAX_CONTEXT_CHARS);
+}
+
+function joinCapped(segments: TextSegment[]): string {
+  return segments
+    .map((s) => s.text.trim())
+    .filter(Boolean)
+    .join("\n\n")
+    .slice(0, MAX_CONTEXT_CHARS);
+}
+
+function squash(text: string): string {
+  return text.replace(/\s+/g, " ").trim().toLowerCase();
 }

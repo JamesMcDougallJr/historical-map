@@ -23,8 +23,9 @@
  * of in-process state at all.
  *
  * Resets only the ingest-owned tables (ingest_documents, ingest_sources,
- * ingest_extractions, ingest_event_candidates, geocode_cache) — never
- * sources/locations/events, which the real-backend Playwright suite
+ * ingest_extractions, ingest_event_candidates, geocode_cache) plus its own
+ * `local-directory` events — never anything else in sources/locations/events,
+ * which the real-backend Playwright suite
  * (e2e-real/) owns. The two can share the same database safely: this
  * script's fixture ids (local-directory source, "Fixture Town" et al.) never
  * collide with e2e-real's (fx-source-*, fx-loc-*).
@@ -75,6 +76,13 @@ async function resetIngestTables(): Promise<void> {
       "TRUNCATE ingest_event_candidates, ingest_extractions, ingest_documents, " +
         "ingest_sources, geocode_cache RESTART IDENTITY CASCADE",
     );
+    // The fixture's own published events too. `publish` is idempotent
+    // (`ON CONFLICT DO NOTHING` on a deterministic id), so rows left by a
+    // previous run make a later run report `already-present` and — worse —
+    // make "was this event kept off the map" unanswerable, since an earlier
+    // run (e.g. the baseline, with Jev off) may have published it. Scoped to
+    // the fixture's source id; never touches e2e-real's `fx-source-*` rows.
+    await dataSource.query("DELETE FROM events WHERE source_id = 'local-directory'");
   } finally {
     await dataSource.destroy();
   }
@@ -197,7 +205,17 @@ function startFakeJevServer(): Promise<FakeJevServer> {
             answers[name] = { type: "noul", noul: 0.77 };
           } else if (q?.type === "choice" && q.criteria) {
             const labels = Object.keys(q.criteria);
-            const pick = labels.includes("none") ? "none" : labels[0]!;
+            // The grounding relation question: the fixture's `[contradicted]`
+            // quote (see FakeExtractionEngine) is the one Jev disputes; every
+            // other claim it supports. Other choices: `none` when offered.
+            const disputed =
+              labels.includes("contradicts") &&
+              String(body.state?.claim ?? "").includes("[contradicted]");
+            const pick = disputed
+              ? "contradicts"
+              : labels.includes("none")
+                ? "none"
+                : labels[0]!;
             answers[name] = {
               type: "choice",
               choice: pick,
@@ -247,13 +265,18 @@ interface WorkerSpec {
   port: number;
 }
 
+// Health-check ports are PORT_BASE+1..+6. Overridable so the fixture can run
+// beside another stack's long-lived workers (set REDIS_PORT/POSTGRES_URL to an
+// isolated stack too — the queue prefix is shared, so a shared Redis races jobs).
+const PORT_BASE = Number(process.env["FIXTURE_PORT_BASE"] ?? 3100);
+
 const WORKERS: WorkerSpec[] = [
-  { name: "detect", mainPath: "apps/workers/detect/src/main.ts", port: 3101 },
-  { name: "fetch", mainPath: "apps/workers/fetch/src/main.ts", port: 3102 },
-  { name: "extract-text", mainPath: "apps/workers/extract-text/src/main.ts", port: 3105 },
-  { name: "extract-events", mainPath: "apps/workers/extract-events/src/main.ts", port: 3103 },
-  { name: "validate", mainPath: "apps/workers/validate/src/main.ts", port: 3106 },
-  { name: "publish", mainPath: "apps/workers/publish/src/main.ts", port: 3104 },
+  { name: "detect", mainPath: "apps/workers/detect/src/main.ts", port: PORT_BASE + 1 },
+  { name: "fetch", mainPath: "apps/workers/fetch/src/main.ts", port: PORT_BASE + 2 },
+  { name: "extract-text", mainPath: "apps/workers/extract-text/src/main.ts", port: PORT_BASE + 5 },
+  { name: "extract-events", mainPath: "apps/workers/extract-events/src/main.ts", port: PORT_BASE + 3 },
+  { name: "validate", mainPath: "apps/workers/validate/src/main.ts", port: PORT_BASE + 6 },
+  { name: "publish", mainPath: "apps/workers/publish/src/main.ts", port: PORT_BASE + 4 },
 ];
 
 const REPO_ROOT = path.resolve(__dirname, "..");
@@ -365,6 +388,8 @@ async function main(): Promise<void> {
     process.env["JEV_API_KEY"] = "fixture-test-key";
     process.env["JEV_BASE_URL"] = `http://127.0.0.1:${fakeJevServer.port}`;
     process.env["JEV_GROUNDING_ENABLED"] = "true";
+    // Gate on, so the run proves a contradicted quote is actually held.
+    process.env["JEV_GROUNDING_MIN_SUPPORT"] = "0.5";
     process.env["JEV_DEDUP_SCORING_ENABLED"] = "true";
     process.env["JEV_CONFIDENCE_RESCORE_ENABLED"] = "true";
     console.log(
@@ -467,12 +492,16 @@ async function assertResults(jevMode: boolean): Promise<void> {
       }
     }
 
-    // Events still publish with every Jev check enabled — none of them are
-    // gating, and a wiring mistake (wrong DI token, wrong env var name, the
-    // fake server unreachable) must not be able to silently prevent
-    // publication; it must show up as a missing check below instead.
+    // Only `grounding-jev` can gate (JEV_GROUNDING_MIN_SUPPORT), and only on
+    // a quote the exact-match check missed. A wiring mistake (wrong DI token,
+    // wrong env var name, fake server unreachable) fails open, so it shows up
+    // as a missing check or an unheld event below, never as a crash.
     if (jevMode) {
-      await assertJevChecksRecorded(dataSource);
+      await assertJevChecksRecorded(dataSource, titles);
+    } else if (!titles.includes("The Disputed Treaty")) {
+      // Without Jev nothing may hold the contradicted event: the baseline
+      // run proves the paraphrase fixtures don't change pre-Jev behaviour.
+      throw new Error('baseline run should publish "The Disputed Treaty" (Jev is off)');
     }
   } finally {
     await dataSource.destroy();
@@ -487,14 +516,21 @@ async function assertResults(jevMode: boolean): Promise<void> {
  * container — exactly the path a wiring mistake would break silently.
  *
  * Does not assert on `duplicate-jev`: it only fires when a same-year event
- * was already seen earlier in the same run, which this three-event fixture
- * corpus may or may not produce depending on fixture dates, so asserting on
+ * was already seen earlier in the same run, which this fixture corpus may
+ * or may not produce depending on fixture dates, so asserting on
  * it would make the test depend on corpus details unrelated to what this is
  * actually checking.
  */
-async function assertJevChecksRecorded(dataSource: DataSource): Promise<void> {
-  const rows: Array<{ checks: Array<{ name: string }> }> = await dataSource.query(
-    `SELECT checks FROM ingest_event_candidates`,
+async function assertJevChecksRecorded(
+  dataSource: DataSource,
+  publishedTitles: string[],
+): Promise<void> {
+  const rows: Array<{
+    verdict: string;
+    event: { title: string };
+    checks: Array<{ name: string; passed: boolean; gating: boolean }>;
+  }> = await dataSource.query(
+    `SELECT verdict, event, checks FROM ingest_event_candidates`,
   );
   const names = new Set(rows.flatMap((r) => r.checks.map((c) => c.name)));
 
@@ -507,6 +543,37 @@ async function assertJevChecksRecorded(dataSource: DataSource): Promise<void> {
           `Recorded check names: ${[...names].join(", ") || "(none)"}`,
       );
     }
+  }
+
+  const byTitle = (title: string) => rows.find((r) => r.event.title === title);
+
+  // Supported paraphrase: Jev was consulted, the gate is active, it passed.
+  const supported = byTitle("The Surveyors Arrival");
+  const supportedCheck = supported?.checks.find((c) => c.name === "grounding-jev");
+  if (!supportedCheck?.gating || !supportedCheck.passed || supported?.verdict !== "publish") {
+    throw new Error(
+      `"The Surveyors Arrival" (paraphrased, Jev supports) should carry a ` +
+        `passing gating grounding-jev check and publish; got ${JSON.stringify(supported)}`,
+    );
+  }
+
+  // Contradicted paraphrase: held for review by the gate, never published.
+  const disputed = byTitle("The Disputed Treaty");
+  const disputedCheck = disputed?.checks.find((c) => c.name === "grounding-jev");
+  if (!disputedCheck?.gating || disputedCheck.passed || disputed?.verdict !== "review") {
+    throw new Error(
+      `"The Disputed Treaty" (paraphrased, Jev contradicts) should be held ` +
+        `for review by a failed gating grounding-jev check; got ${JSON.stringify(disputed)}`,
+    );
+  }
+  if (publishedTitles.includes("The Disputed Treaty")) {
+    throw new Error('"The Disputed Treaty" was held for review but still reached the map');
+  }
+
+  // Exact-match quotes never go to Jev, so they carry no grounding-jev check.
+  const verbatim = byTitle("The Centennial Parade");
+  if (verbatim?.checks.some((c) => c.name === "grounding-jev")) {
+    throw new Error('"The Centennial Parade" quotes the document verbatim and must not be sent to Jev');
   }
 }
 

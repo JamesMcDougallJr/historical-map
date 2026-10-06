@@ -273,66 +273,166 @@ async function main(): Promise<void> {
 
   // ── scoreGroundingWithJev ─────────────────────────────────────────────
   const GROUNDING_ON = fakeConfig({ JEV_GROUNDING_ENABLED: true });
+  const gated = (min: number) => fakeConfig({ JEV_GROUNDING_ENABLED: true, JEV_GROUNDING_MIN_SUPPORT: min });
+  const MISS = { documentText: "some document text", substringGrounded: false };
+
+  /** A relation answer whose label is the argmax of the given probabilities. */
+  const relation = (supports: number, contradicts: number, says_nothing: number) => {
+    const probabilities = { supports, contradicts, says_nothing };
+    const label = (Object.entries(probabilities).sort((a, b) => b[1] - a[1])[0] ?? ["supports"])[0];
+    return { relation: choiceAnswer(label, 0.8, probabilities) };
+  };
+
   {
-    const mock = installFetchMock([ok({ grounded: noulAnswer(0.8) })]);
-    const result = await scoreGroundingWithJev(
-      client(),
-      GROUNDING_ON,
-      SAMPLE_EVENT,
-      `Some preamble text. ${SAMPLE_EVENT.sourceText} Some trailing text.`,
-    );
+    const mock = installFetchMock([]);
+    const result = await scoreGroundingWithJev(client(), gated(0.8), SAMPLE_EVENT, {
+      ...MISS,
+      substringGrounded: true,
+    });
     check(
-      "grounding (Jev says yes) is passed and non-gating",
-      result?.name === "grounding-jev" && result.passed === true && result.gating === false,
-      JSON.stringify(result),
-    );
-    const body = bodyOf(mock.calls[0]);
-    check(
-      "grounding sends the quote and an excerpt as state, as a noul question",
-      body.questions?.grounded?.type === "noul" &&
-        body.state?.claimed_quote === SAMPLE_EVENT.sourceText &&
-        String(body.state?.document_excerpt).includes("Some preamble"),
-      JSON.stringify(body.state)?.slice(0, 200),
+      "an exact-match quote is never sent to Jev (no check, zero calls)",
+      result === null && mock.calls.length === 0,
+      `calls=${mock.calls.length}`,
     );
     mock.restore();
   }
 
   check(
     "grounding returns null when the flag is off",
-    (await scoreGroundingWithJev(client(), fakeConfig({}), SAMPLE_EVENT, "doc")) === null,
+    (await scoreGroundingWithJev(client(), fakeConfig({}), SAMPLE_EVENT, MISS)) === null,
   );
   check(
     "grounding returns null for a too-short sourceText, even with the flag on",
-    (await scoreGroundingWithJev(client(), GROUNDING_ON, { ...SAMPLE_EVENT, sourceText: "short" }, "doc")) === null,
+    (await scoreGroundingWithJev(client(), GROUNDING_ON, { ...SAMPLE_EVENT, sourceText: "short" }, MISS)) === null,
+  );
+  check(
+    "grounding returns null with no document text",
+    (await scoreGroundingWithJev(client(), GROUNDING_ON, SAMPLE_EVENT, { ...MISS, documentText: "" })) === null,
   );
 
   {
-    const mock = installFetchMock([ok({ grounded: noulAnswer(0.1) })]);
-    const result = await scoreGroundingWithJev(client(), GROUNDING_ON, SAMPLE_EVENT, "unrelated document text");
+    const mock = installFetchMock([ok(relation(0.8, 0.05, 0.15))]);
+    const result = await scoreGroundingWithJev(client(), GROUNDING_ON, SAMPLE_EVENT, MISS);
     check(
-      "grounding (Jev says no) is unpassed but still non-gating, with detail",
-      result?.passed === false && result.gating === false && Boolean(result.detail),
+      "a substring miss Jev supports passes, recorded and non-gating at the default knob",
+      result?.name === "grounding-jev" && result.passed === true && result.gating === false,
+      JSON.stringify(result),
+    );
+    const body = bodyOf(mock.calls[0]);
+    check(
+      "grounding asks a three-way choice with the quote as the claim",
+      body.questions?.relation?.type === "choice" &&
+        Object.keys(body.questions.relation.criteria).join(",") === "supports,contradicts,says_nothing" &&
+        body.state?.claim === SAMPLE_EVENT.sourceText,
+      JSON.stringify(body.questions?.relation?.criteria && Object.keys(body.questions.relation.criteria)),
+    );
+    check(
+      "the recorded detail carries all three probabilities and the confidence",
+      /supports=0\.80 contradicts=0\.05 says_nothing=0\.15 \(confidence 0\.80\)/.test(result?.detail ?? ""),
+      result?.detail,
+    );
+    mock.restore();
+  }
+
+  {
+    // Default knob (0): a clear "contradicts" is reported failed, but cannot gate.
+    const mock = installFetchMock([ok(relation(0.05, 0.9, 0.05))]);
+    const result = await scoreGroundingWithJev(client(), GROUNDING_ON, SAMPLE_EVENT, MISS);
+    check(
+      "at the default knob 0 a contradicted quote is reported failed but never gates",
+      result?.passed === false && result.gating === false,
       JSON.stringify(result),
     );
     mock.restore();
   }
 
   {
-    const mock = installFetchMock([ok({ grounded: noulAnswer(0.5) })]);
-    const result = await scoreGroundingWithJev(client(), GROUNDING_ON, SAMPLE_EVENT, "doc text here");
-    check("grounding treats exactly 0.5 as supported (>= 0.5)", result?.passed === true, JSON.stringify(result));
+    const mock = installFetchMock([ok(relation(0.6, 0.2, 0.2))]);
+    const result = await scoreGroundingWithJev(client(), gated(0.8), SAMPLE_EVENT, MISS);
+    check(
+      "with the knob at 0.8, P(supports)=0.6 fails the gate",
+      result?.passed === false && result.gating === true,
+      JSON.stringify(result),
+    );
     mock.restore();
   }
 
-  check(
-    "grounding fails open (null) on a Jev outage",
-    await (async () => {
-      const mock = installFetchMock([{ status: 500, body: {} }]);
-      const result = await scoreGroundingWithJev(client(), GROUNDING_ON, SAMPLE_EVENT, "doc text here");
-      mock.restore();
-      return result === null;
-    })(),
-  );
+  {
+    const mock = installFetchMock([ok(relation(0.9, 0.05, 0.05))]);
+    const result = await scoreGroundingWithJev(client(), gated(0.8), SAMPLE_EVENT, MISS);
+    check(
+      "with the knob at 0.8, P(supports)=0.9 passes the (active) gate",
+      result?.passed === true && result.gating === true,
+      JSON.stringify(result),
+    );
+    mock.restore();
+  }
+
+  {
+    const mock = installFetchMock([ok(relation(0.5, 0.25, 0.25))]);
+    const result = await scoreGroundingWithJev(client(), gated(0.5), SAMPLE_EVENT, MISS);
+    check("the knob is inclusive: P(supports) exactly at the knob passes", result?.passed === true, JSON.stringify(result));
+    mock.restore();
+  }
+
+  {
+    const mock = installFetchMock([{ status: 500, body: {} }]);
+    const result = await scoreGroundingWithJev(client(), gated(0.8), SAMPLE_EVENT, MISS);
+    check("a Jev outage returns null even with the gate active (fails open, never holds)", result === null);
+    mock.restore();
+  }
+
+  {
+    // Segment selection. The quote's opening words land in segment 2, so it and
+    // its neighbours (1, 3) are sent — not the distant 0 or 4.
+    const segments = [
+      "alpha zero",
+      "beta one",
+      `${SAMPLE_EVENT.sourceText.slice(0, 60)} and more`,
+      "delta three",
+      "epsilon four",
+    ].map((text, i) => ({ text, anchor: `p.${i}` }));
+    const mock = installFetchMock([ok(relation(0.8, 0.1, 0.1))]);
+    await scoreGroundingWithJev(client(), GROUNDING_ON, SAMPLE_EVENT, { ...MISS, segments });
+    const section = String(bodyOf(mock.calls[0]).state?.section);
+    check(
+      "the section is the segment holding the quote's opening words plus its neighbours",
+      section.includes("beta one") &&
+        section.includes("and more") &&
+        section.includes("delta three") &&
+        !section.includes("alpha zero") &&
+        !section.includes("epsilon four"),
+      section,
+    );
+    mock.restore();
+  }
+
+  {
+    // A paraphrased quote matches nothing, so fall back to the anchor segment
+    // plus the next two.
+    const segments = ["alpha zero", "beta one", "gamma two", "delta three", "epsilon four"].map((text, i) => ({
+      text,
+      anchor: `p.${i}`,
+    }));
+    const mock = installFetchMock([ok(relation(0.8, 0.1, 0.1))]);
+    await scoreGroundingWithJev(
+      client(),
+      GROUNDING_ON,
+      { ...SAMPLE_EVENT, sourceText: "A paraphrase that appears nowhere in the document text.", anchor: "p.1" },
+      { ...MISS, segments },
+    );
+    const section = String(bodyOf(mock.calls[0]).state?.section);
+    check(
+      "an unlocatable quote falls back to the anchor segment plus the next two",
+      section.includes("beta one") &&
+        section.includes("gamma two") &&
+        section.includes("delta three") &&
+        !section.includes("alpha zero") &&
+        !section.includes("epsilon four"),
+      section,
+    );
+    mock.restore();
+  }
 
   // ── scoreDuplicateWithJev ─────────────────────────────────────────────
   const DEDUP_ON = fakeConfig({ JEV_DEDUP_SCORING_ENABLED: true });

@@ -15,7 +15,7 @@ import {
   IngestSource,
   jsonb,
 } from "@app/database";
-import { artifactText, parseArtifact } from "@app/parsers";
+import { artifactText, parseArtifact, type TextSegment } from "@app/parsers";
 import {
   PUBLISH_JOB_OPTIONS,
   QUEUE_NAMES,
@@ -105,12 +105,13 @@ export class ValidationService {
         return;
       }
 
+      // Parsed once; `segments` also feed the Jev grounding check, which
+      // shows Jev the section a quote came from rather than the whole text.
+      const artifact = document.textKey
+        ? parseArtifact(await this.storage.getObject(document.textKey))
+        : undefined;
       const context: ValidationContext = {
-        documentText: document.textKey
-          ? artifactText(
-              parseArtifact(await this.storage.getObject(document.textKey)),
-            )
-          : "",
+        documentText: artifact ? artifactText(artifact) : "",
         confidenceMin: this.config.get<number>("PUBLISH_CONFIDENCE_MIN") ?? 0.6,
         seen: new Set(),
       };
@@ -123,7 +124,12 @@ export class ValidationService {
       const seenEvents: ExtractedEvent[] = [];
 
       for (const raw of events) {
-        const { event, checks } = await this.runChecks(raw, context, seenEvents);
+        const { event, checks } = await this.runChecks(
+          raw,
+          context,
+          seenEvents,
+          artifact?.segments,
+        );
         seenEvents.push(event);
 
         const failedGate = checks.find((c) => c.gating && !c.passed);
@@ -181,12 +187,14 @@ export class ValidationService {
     raw: ExtractedEvent,
     context: ValidationContext,
     seenEvents: ExtractedEvent[],
+    segments: TextSegment[] | undefined,
   ): Promise<{ event: ExtractedEvent; checks: ValidationCheck[] }> {
     const precision = checkPrecision(raw);
     const event = precision.corrected ?? raw;
 
+    const substring = checkGrounding(event, context);
     const checks: ValidationCheck[] = [
-      checkGrounding(event, context),
+      substring,
       checkConfidence(event, context),
       checkDatePresent(event),
       checkDatePlausible(event),
@@ -195,12 +203,17 @@ export class ValidationService {
       checkDuplicate(event, context),
     ];
 
-    // Each of these is independently flagged and non-gating (see
-    // `jev-checks.ts`): disabled, uncredentialed, or a failed call all
-    // resolve to `null` and are simply not appended, reproducing pre-Jev
-    // behaviour exactly.
+    // Each of these is independently flagged (see `jev-checks.ts`):
+    // disabled, uncredentialed, or a failed call all resolve to `null` and
+    // are simply not appended, reproducing pre-Jev behaviour exactly. Only
+    // `grounding-jev` can gate, and only once JEV_GROUNDING_MIN_SUPPORT is
+    // raised above 0.
     const [grounding, duplicate, confidence] = await Promise.all([
-      scoreGroundingWithJev(this.jev, this.config, event, context.documentText),
+      scoreGroundingWithJev(this.jev, this.config, event, {
+        documentText: context.documentText,
+        segments,
+        substringGrounded: substring.passed,
+      }),
       scoreDuplicateWithJev(this.jev, this.config, event, seenEvents),
       rescoreConfidenceWithJev(this.jev, this.config, event),
     ]);
