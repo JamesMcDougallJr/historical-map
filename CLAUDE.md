@@ -65,32 +65,41 @@ npm run migrate --workspace=services/ingest
 ALLOW_TEST_DB_RESET=1 EXTRACTION_ENGINE=fake npm run test:ingestion-fixture --workspace=services/ingest
 ```
 
-**A fourth check, `JEV_FIXTURE=1`, runs the same script a second way**: with
-`JEV_GROUNDING_ENABLED`/`JEV_DEDUP_SCORING_ENABLED`/`JEV_CONFIDENCE_RESCORE_ENABLED` turned on
-and `JEV_API_KEY`/`JEV_BASE_URL` pointed at a fake local Jev HTTP server the script starts
-itself, then asserts the resulting `grounding-jev`/`confidence-jev` checks actually landed in
-`ingest_event_candidates.checks`. It's the one test in the whole suite that boots the real
-`validate` worker process (via `tsx`) with Jev wired in — `jev:verify`'s mocked-fetch tests
-(below) prove the client and check functions are correct in isolation, but can't catch a Nest
-DI wiring mistake, which silently resolves to `undefined` under `tsx` rather than failing to
-boot (see `HealthController`'s comment on why that's a real failure mode here):
+**A fourth check, `JEV_FIXTURE=1`, runs the same script a second way**: with the Jev flags on,
+`JEV_GROUNDING_MIN_SUPPORT=0.5`, and `JEV_API_KEY`/`JEV_BASE_URL` pointed at a fake local Jev
+server the script starts itself (it speaks the real `/v1/systemone` contract and is strict, so a
+bad request shape fails the test rather than passing against a lenient fake). The corpus carries
+two non-verbatim quotes (`PARAPHRASE:` in the fixture text): the run asserts the one Jev supports
+publishes, the one it contradicts is **held for review and kept off the map**, and a verbatim
+quote is never sent to Jev. It's the one test in the whole suite that boots the real `validate`
+worker (via `tsx`) with the real SDK in it — `jev:verify`'s mocked-fetch tests (below) can't
+catch a Nest DI wiring mistake, which silently resolves to `undefined` under `tsx` rather than
+failing to boot (see `HealthController`'s comment on why that's a real failure mode here):
 
 ```bash
 JEV_FIXTURE=1 ALLOW_TEST_DB_RESET=1 EXTRACTION_ENGINE=fake \
   npm run test:ingestion-fixture:jev --workspace=services/ingest
 ```
 
-Both share the hardcoded worker ports (3101–3106) and the `bullmq` queue prefix — running either
+The fixture also deletes its own `local-directory` rows from `events` before each run — `publish`
+is idempotent on a deterministic id, so a row left by an earlier run (e.g. the baseline, with Jev
+off) would make "was this event kept off the map" unanswerable.
+
+Both share the `bullmq` queue prefix, and by default worker ports 3101–3106 — running either
 one against a Redis another ingestion pipeline is actively using (e.g. a second worktree's
 long-lived dev workers) races jobs between the two and produces confusing cross-contaminated
-results, not a code bug. Use a database/Redis nothing else is actively polling.
+results, not a code bug. Use a database/Redis nothing else is polling. To run beside such a
+stack, give the fixture its own: start Postgres/Redis/S3 on spare ports, run
+`db:ensure-schema` and `migrate` against that Postgres, and set `POSTGRES_URL`, `REDIS_PORT`,
+`S3_ENDPOINT` and `FIXTURE_PORT_BASE` (health ports become `BASE+1..+6`) to match.
 
 `services/ingest/scripts/verify-jev.ts` (`npm run jev:verify --workspace=services/ingest`) is
-the fast, every-commit layer for the Jev integration itself: `JevClient`'s request/response
-shape, value/probability clamping, every error path, and the `grounding`/`duplicate`/
-`confidence` check functions — all against a mocked `fetch`, no database, no Redis, same spirit
-as `extract:verify`/`geocoding:verify`. `geocoding:verify` itself also covers
-`JEV_GEOCODE_RERANK_ENABLED` the same way, with a fake `JevClient` instead of a fake `fetch`.
+the fast, every-commit layer for the Jev integration itself: `JevClient` against a mocked
+`fetch` speaking the real contract (request shape, every error path including a 200 with a
+missing answer), and the `judgeEventWithJev`/`scoreDuplicateWithJev` checks — all with no
+database or Redis, same spirit as `extract:verify`/`geocoding:verify`. A mock only proves *our
+reading* of the contract, so `jev:verify -- --live` (needs `JEV_API_KEY`) makes one real call.
+`geocoding:verify` covers `JEV_GEOCODE_RERANK_ENABLED` the same way, with a fake `JevClient`.
 
 CI (`.github/workflows/e2e.yml`) runs all of these — mocked, real, ingestion fixture, Jev
 unit-style, Jev fixture — in that order, every PR and every push to `main`. It swaps `minio-ci`
@@ -361,34 +370,51 @@ each behind its own env flag, all defaulting off:
 
 | Flag                              | Where                                                          | What it adds                                                      |
 | ---------------------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------- |
-| `JEV_GROUNDING_ENABLED`            | `validate` → `grounding-jev` check                             | paraphrase-tolerant yes/no on `checkGrounding`'s exact-substring match |
-| `JEV_DEDUP_SCORING_ENABLED`        | `validate` → `duplicate-jev` check                             | same-year near-duplicate flag beyond `checkDuplicate`'s exact title match |
-| `JEV_CONFIDENCE_RESCORE_ENABLED`   | `validate` → `confidence-jev` check                            | independent re-score of the extraction model's self-reported confidence |
-| `JEV_GEOCODE_RERANK_ENABLED`       | `NominatimGeocoder.geocode`                                    | Jev picks among the top 5 results instead of always taking `usable[0]` |
+| `JEV_GROUNDING_ENABLED`            | `validate` → `grounding-jev` check                             | a supports/contradicts/says_nothing judgment, **only** for quotes `checkGrounding` missed verbatim; can gate |
+| `JEV_DEDUP_SCORING_ENABLED`        | `validate` → `duplicate-jev` check                             | same-year near-duplicate flag beyond `checkDuplicate`'s exact title match (non-gating) |
+| `JEV_CONFIDENCE_RESCORE_ENABLED`   | `validate` → `confidence-jev` check                            | independent re-score of the extractor's confidence on a 5-level concrete rubric (non-gating) |
+| `JEV_GEOCODE_RERANK_ENABLED`       | `NominatimGeocoder.geocode`                                    | Jev picks among the top 5 results (or "none") instead of always taking `usable[0]` |
 
-All three `validate` additions are **non-gating** — recorded the same way
-`checkGrounding` itself already is, per that check's own stated policy: let
-evidence accumulate before anything new gates publication. The geocode flag
-is the one place Jev actually changes the chosen output, since there is no
-safe "record only" version of picking a coordinate.
+`libs/jev` is a thin fail-open wrapper over the official `@typesafe-ai/sdk`
+(`POST https://api.typesafe.ai/v1/systemone`; the SDK owns the wire contract,
+`Retry-After` handling and typed answers). Questions are built with the SDK's
+`noul`/`choice`/`score`, re-exported from `@app/jev`.
 
-Every call site requires both its flag **and** `JEV_API_KEY` to be set
-(`isJevFeatureEnabled` checks both), and every call goes through
-`JevClient.tryAsk`, which swallows any failure and returns `null` — a Jev
-outage, timeout, or malformed response always falls back to the pre-Jev
-behavior, never breaks the pipeline. Flipping all four flags off (or leaving
-`JEV_API_KEY` unset) reproduces the pipeline's behavior before this layer
-existed, byte for byte.
+**Two confidence knobs, deliberately opposite in direction.** Both are 0–1
+and both are documented on the env var in `env-validation.schema.ts`:
 
-**The wire format in `jev.client.ts` is inferred, not taken from verified
-docs.** Jev's described interface is a dedicated `/v1/systemone` endpoint;
-this client instead targets OpenRouter's standard chat-completions endpoint
-with JSON-schema structured output (the same pattern `groq.engine.ts` already
-uses), because that contract is well-documented and Jev is sold as reachable
-through any OpenRouter key. Confirm against TypeSafe's actual docs before
-depending on this in production — if the real contract differs, only
-`buildRequestBody`/`parseResponse` need to change, since every call site
-talks to `JevClient.ask`/`tryAsk`, never to the wire format directly.
+- `JEV_GROUNDING_MIN_SUPPORT` (default `0`) — the minimum `P(supports)` for a
+  substring-missed event to stay publishable. **`0` never gates**: the check is
+  still recorded (at a 0.5 bar) but cannot hold anything, which is how to bypass
+  Jev's say over publication while keeping its data. Raise it (try 0.5, then tune
+  from the recorded probabilities) to hold low-support events for review. It can
+  only hold events, never rescue one — exact-match quotes are never sent to Jev.
+- `JEV_GEOCODE_MIN_CONFIDENCE` (default `0.8`) — the minimum Jev `confidence` to
+  trust its geocode pick over Nominatim's top result. Here **higher is more
+  conservative** and `0` always takes Jev's pick; bypass is the flag, not the knob.
+
+`duplicate-jev` and `confidence-jev` stay **non-gating** — recorded the way
+`checkGrounding` always was: let evidence accumulate before anything new gates
+publication. The geocode flag is the one place Jev changes a chosen output.
+
+Every call site requires both its flag **and** `JEV_API_KEY` (`isJevFeatureEnabled`
+checks both) and goes through `JevClient.tryAsk`, which swallows any failure and
+returns `null`, so a Jev outage, timeout or malformed response falls back to the
+pre-Jev behaviour and can never break — or *newly hold* — the pipeline. `ask`
+also verifies each requested answer is present with the right type: the SDK
+types answers from the questions but does not check the server sent them, and a
+`200` with a missing answer would otherwise throw a `TypeError` inside a check
+and fail the whole `validate` job. Grounding and confidence share **one request
+per event**. With every flag off (or `JEV_API_KEY` unset) behaviour is the
+pre-Jev pipeline's, byte for byte.
+
+History worth knowing: the client was first written against a *guessed* wire
+format (OpenRouter chat-completions) and would have failed every real call —
+silently, because `tryAsk` fails open. A mock only proves our reading of a
+contract, which is why `jev:verify -- --live` exists. Question design follows
+TypeSafe's published guidance: a "none" outcome when nothing may fit, concrete
+rubric levels, one narrow judgment per question, and probabilities rather than
+the argmax.
 
 #### One TypeScript, pinned by path
 
