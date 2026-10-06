@@ -198,6 +198,25 @@ export const envSchema = z.object({
   JEV_GEOCODE_MIN_CONFIDENCE: z.coerce.number().min(0).max(1).default(0.8),
   JEV_DEDUP_SCORING_ENABLED: boolFlag(),
   JEV_CONFIDENCE_RESCORE_ENABLED: boolFlag(),
+
+  /**
+   * At publish time, compare each event against already-published events
+   * nearby in place and date (any source, other documents) and ask Jev whether
+   * it is the same real-world event.
+   */
+  JEV_PUBLISH_DEDUP_ENABLED: boolFlag(),
+
+  /**
+   * Hold an event for review when Jev's `P(same event)` with an existing one
+   * is at least this. `0` (default) **never holds** — the match and its
+   * probability are still recorded on the candidate, and the event publishes,
+   * so this is also the bypass. Direction: HIGHER holds fewer events. Tune it
+   * from the recorded probabilities before raising it; a false positive
+   * withholds a real event. Held events are released with
+   * `npm run duplicate:review -- --approve=<eventKey>`. No effect unless
+   * `JEV_PUBLISH_DEDUP_ENABLED` is on.
+   */
+  JEV_PUBLISH_DEDUP_HOLD_AT: z.coerce.number().min(0).max(1).default(0),
 });
 
 export type Env = z.infer<typeof envSchema>;

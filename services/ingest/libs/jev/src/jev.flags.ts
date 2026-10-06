@@ -11,7 +11,8 @@ export type JevFeatureFlag =
   | "JEV_GROUNDING_ENABLED"
   | "JEV_GEOCODE_RERANK_ENABLED"
   | "JEV_DEDUP_SCORING_ENABLED"
-  | "JEV_CONFIDENCE_RESCORE_ENABLED";
+  | "JEV_CONFIDENCE_RESCORE_ENABLED"
+  | "JEV_PUBLISH_DEDUP_ENABLED";
 
 /**
  * A feature is only live when both its own flag is on AND the client has
