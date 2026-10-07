@@ -168,9 +168,8 @@ function resolveLocation(
   // popup is complete immediately. MVT pins can't, and come back with none —
   // those get filled in by loadLocationDetail.
   //
-  // Checked before `byId`, which is seeded from localStorage and can be stale:
-  // the feature came from the same request that drew the pin, so when it has
-  // events they are the ones that belong to it.
+  // Checked before `byId`: the feature came from the same request that drew the
+  // pin, so when it has events they are the ones that belong to it.
   let events: HistoricalEvent[] = [];
   const encoded = feature.get("events") as string | undefined;
   if (encoded) {
@@ -181,7 +180,12 @@ function resolveLocation(
     }
   }
 
-  const known = byId.get(id);
+  // `byId` is only trusted for inline pins, which exist *because* of that list.
+  // For tile and geojson pins it comes from localStorage, which can be weeks
+  // out of date (it is never refreshed without an API key) — a pin sharing an
+  // id with a stale entry showed the old events, so those pins fetch detail
+  // from the server instead.
+  const known = feature.get("inline") ? byId.get(id) : undefined;
   if (events.length === 0 && known) return known;
 
   const coords = featureLonLat(feature);
@@ -231,6 +235,9 @@ function buildEventLayer(
         min_year: years.length ? Math.min(...years) : 0,
         max_year: years.length ? Math.max(...years) : 0,
         event_count: location.events.length,
+        // Marks "the events are in the `locations` prop" — the only kind of pin
+        // allowed to take its card from that list; see resolveLocation.
+        inline: true,
       });
     });
     const inlineLayer = new VectorLayer({
