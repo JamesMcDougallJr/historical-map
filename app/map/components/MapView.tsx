@@ -531,15 +531,26 @@ export function MapView({
 
     // Recount whenever a source finishes loading — vector sources fetch lazily
     // on first render, so the counts are zero until then. Tiled (MVT) sources
-    // are fetched per tile and have no total to read, so they sit this out.
+    // are fetched per tile and have no feature list to count, so their totals
+    // come from the server instead (`EventLayer.locationCount/eventCount`);
+    // without that the chip and the score badge's denominator read 0 for them.
     const countableSources = pinLayers
       .filter((l): l is VectorLayer => l instanceof VectorLayer)
       .map((l) => l.getSource())
       .filter((s): s is VectorSource => s !== null);
+    const serverTotals = eventLayers
+      .filter((l) => l.enabled && l.kind === "mvt")
+      .reduce(
+        (sum, l) => ({
+          locations: sum.locations + (l.locationCount ?? 0),
+          events: sum.events + (l.eventCount ?? 0),
+        }),
+        { locations: 0, events: 0 },
+      );
 
     const recountPins = () => {
-      let locationCount = 0;
-      let eventCount = 0;
+      let locationCount = serverTotals.locations;
+      let eventCount = serverTotals.events;
       for (const source of countableSources) {
         for (const feature of source.getFeatures()) {
           locationCount += 1;
@@ -1247,7 +1258,10 @@ export function MapView({
       {/* Stats, score and fullscreen — one row, so they can't overlap. Both used
           to position themselves absolutely in the same corner and collide. */}
       <div className="absolute top-4 right-4 z-10 flex items-center gap-2">
-        <div className="bg-black/60 backdrop-blur-sm px-3 py-2 rounded-lg text-sm text-white shadow-lg whitespace-nowrap">
+        <div
+          data-testid="pin-stats"
+          className="bg-black/60 backdrop-blur-sm px-3 py-2 rounded-lg text-sm text-white shadow-lg whitespace-nowrap"
+        >
           {pinStats.locations} location{pinStats.locations !== 1 ? "s" : ""},{" "}
           {pinStats.events} event{pinStats.events !== 1 ? "s" : ""}
         </div>
