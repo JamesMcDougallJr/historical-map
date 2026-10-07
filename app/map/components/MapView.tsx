@@ -68,12 +68,27 @@ import "ol/ol.css";
 // Same-origin (no auth check on this route today — see loadLocationDetail).
 const mapClient = createMapClient();
 
-// Pin icon SVG as data URL for historical events (module scope - created once)
-const EVENT_PIN_SVG = `data:image/svg+xml,${encodeURIComponent(`
+/**
+ * Map-pin icon as a data URL.
+ *
+ * The centre dot is a **filled white circle** drawn over a solid head — not a hole
+ * cut out of the path. OpenLayers hit-detects on the icon's own pixels, and a
+ * transparent hole is "empty", so with the hole version the exact centre of every
+ * pin head (where a user aims) hit nothing: no hover card, no click, while the rim
+ * of the same pin worked. It looked random, and the e2e suites missed it because
+ * they locate a pin by scanning for any pixel that hits.
+ */
+function pinSvg(color: string): string {
+  return `data:image/svg+xml,${encodeURIComponent(`
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="32" height="32">
-  <path fill="#3b82f6" d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
+  <path fill="${color}" d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/>
+  <circle cx="12" cy="9" r="2.5" fill="#ffffff"/>
 </svg>
 `)}`;
+}
+
+// Pin icon SVG as data URL for historical events (module scope - created once)
+const EVENT_PIN_SVG = pinSvg("#3b82f6");
 
 // Reusable pin style (module scope)
 const PIN_STYLE = new Style({
@@ -183,13 +198,8 @@ function resolveLocation(
 /** Pin style in a layer's own colour, so sources are distinguishable. */
 function pinStyleFor(color: string | undefined): Style {
   if (!color) return PIN_STYLE;
-  const svg = `data:image/svg+xml,${encodeURIComponent(`
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="32" height="32">
-  <path fill="${color}" d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
-</svg>
-`)}`;
   return new Style({
-    image: new Icon({ anchor: [0.5, 1], src: svg, scale: 1 }),
+    image: new Icon({ anchor: [0.5, 1], src: pinSvg(color), scale: 1 }),
   });
 }
 

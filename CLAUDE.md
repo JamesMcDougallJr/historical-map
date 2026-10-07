@@ -167,6 +167,48 @@ browser has to fetch new URLs. A hard reload (`Cmd+Shift+R`) cleared the JS case
 the CSS one, which needed the stylesheet re-requested under a cache-busting query. Don't
 assume a plain refresh picked up your change.
 
+### Debugging note — "some pins show no card on hover"
+
+Two independent causes, both found by testing the live map rather than reading code. Rule these
+out before changing hover logic.
+
+**1. Ghost pins from Martin's tile cache.** Martin's tile cache is LRU-only — no TTL by default and
+no invalidation — so after any change to `events` (deleting, re-ingesting, a fixture or
+`TRUNCATE ... CASCADE`) every tile requested earlier keeps being served as it was. Pins for events that
+no longer exist stay drawn; hovering one calls `GET /api/data/locations/:id`, which correctly returns
+`0` events, and the card has nothing to show. It is zoom-dependent (a tile vanishes at one zoom and not
+another, depending on which tiles were requested before the change), which makes it look random.
+`docker-compose.yml` now runs Martin with `--cache-size 0` (reproduced: with the default cache a tile still
+held its pins after every event was deleted; with the flag it came back empty). To confirm it on a
+running stack, compare the same tile with and without a throwaway query parameter (Martin's cache is
+keyed on the exact URL) and against the function itself:
+
+```js
+// in the browser: exact URL (cached) vs same tile with a cache-busting param (fresh)
+const has = async (u) => (await (await fetch(u, { cache: 'no-store' })).text()).includes('SomePlaceName');
+await has('http://localhost:3001/event_pins/4/4/6?source_ids=local-directory');
+await has('http://localhost:3001/event_pins/4/4/6?source_ids=local-directory&x=' + Date.now());
+```
+
+```sql
+-- the truth, straight from the database
+select encode(event_pins(4,4,6,'{"source_ids":"local-directory"}'::json),'escape') like '%SomePlaceName%';
+```
+
+If they disagree, restart Martin (`docker restart <martin container>`); a deployed Martin has the same
+cache and needs the same flag or a bounded `--cache-expiry`.
+
+**2. The pin icon's dead zone.** The marker SVG once drew its centre dot as a *hole* in the path.
+OpenLayers hit-detects on the icon's own pixels, so the exact centre of every pin head — where a user
+aims — hit nothing while the rim worked. Two pins stacked on one spot made it look even more random.
+Fixed by drawing a solid head with a filled white dot (`pinSvg` in `MapView.tsx`). The older hover specs
+missed it because `findHoverPixel` / `waitForRealMapReady` *scan* for any pixel that hits a feature;
+`e2e-real/specs/map/pin-reliability.spec.ts` hovers the exact head centre (20 px above the tip).
+
+`e2e-real` resets the database it points at. Its config hardcodes the shared dev DB (port 5433) and
+Martin (3001) unless you set `E2E_POSTGRES_URL` / `E2E_MARTIN_URL` **and** `POSTGRES_URL` for the test
+process (global-setup reads that one) — do so to run it against an isolated stack.
+
 ### Dev-only map debug handles
 
 `MapView` publishes two globals behind `process.env.NODE_ENV !== "production"` (stripped from

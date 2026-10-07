@@ -55,4 +55,9 @@ BEGIN
 
   RETURN COALESCE(mvt, ''::bytea);
 END;
-$$ LANGUAGE plpgsql IMMUTABLE STRICT PARALLEL SAFE;
+-- STABLE, not IMMUTABLE: this reads `locations` and `events`, so its result changes
+-- when the data does. IMMUTABLE promises Postgres the output depends only on the
+-- arguments, which lets it be constant-folded or cached by anything that trusts the
+-- declaration. (Martin's own tile cache is the larger staleness hazard; see
+-- docker-compose.yml.)
+$$ LANGUAGE plpgsql STABLE STRICT PARALLEL SAFE;
