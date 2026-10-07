@@ -370,6 +370,12 @@ is resolved once and cached, `geocode:review` lists what each matched and
 `--set` corrects it for the whole corpus at once. Treat a new corpus's first
 `geocode:review` output as a required review step, not an optional one.
 
+`--set` also moves pins that are **already published**: `locations` keeps no link to the
+cache key, so it moves any pin sitting exactly at the cache row's *old* coordinates
+(`relocatePublishedPins`) and prints each one. It is an exact match on purpose — publish
+snaps nearby places onto one shared pin, so a radius would drag unrelated pins along. A
+cache row that had no coordinates yet moves nothing.
+
 Invariants that are easy to break and fail silently:
 
 - **`nest-cli.json` must keep `deleteOutDir: false`.** The flag is
