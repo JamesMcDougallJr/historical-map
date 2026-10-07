@@ -22,6 +22,19 @@ function optionalNonEmpty() {
 }
 
 /**
+ * A feature-flag env var: "true"/"1" is on, anything else (unset, "", any
+ * other string) is off. Not `z.coerce.boolean()` — that coerces *any*
+ * non-empty string to `true`, so `JEV_GROUNDING_ENABLED=false` would enable
+ * the feature it names.
+ */
+function boolFlag() {
+  return z.preprocess(
+    (v) => v === "true" || v === "1",
+    z.boolean(),
+  );
+}
+
+/**
  * One schema for all five apps.
  *
  * Anything only one app needs is `.optional()` or `.default()`ed, so the other
@@ -138,6 +151,72 @@ export const envSchema = z.object({
   BULL_BOARD_PASSWORD: optionalNonEmpty(),
 
   PORT: z.coerce.number().int().positive().optional(),
+
+  /**
+   * TypeSafe's Jev — a fast/cheap typed-decision model (Choice/Score/yes-no),
+   * used as an opt-in verification/reranking layer alongside the existing
+   * deterministic checks, never in place of them. Unset means every
+   * `JevClient` call site falls back to its pre-Jev behaviour untouched.
+   *
+   * Talks to `https://api.typesafe.ai/v1/systemone` through the official
+   * `@typesafe-ai/sdk`. `JEV_BASE_URL` overrides the API root (the ingestion
+   * fixture points it at a fake local server). Timeout is per attempt, so the
+   * worst-case stall per call is `JEV_TIMEOUT_MS * (JEV_MAX_RETRIES + 1)`.
+   */
+  JEV_API_KEY: optionalNonEmpty(),
+  JEV_MODEL: z.string().min(1).default("jev-latest"),
+  JEV_BASE_URL: optionalNonEmpty(),
+  JEV_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
+  JEV_MAX_RETRIES: z.coerce.number().int().min(0).default(1),
+
+  /**
+   * Each Jev-backed enhancement is its own flag, independently opt-in and
+   * defaulting off — Jev is billed usage, however cheap, and a cost-conscious
+   * rollout needs to turn features on one at a time, not all-or-nothing.
+   */
+  JEV_GROUNDING_ENABLED: boolFlag(),
+
+  /**
+   * Minimum `P(supports)` from Jev for an event whose quote the exact-match
+   * grounding check missed to stay publishable. `0` (default) never holds
+   * anything — `grounding-jev` is recorded, non-gating — which is also how to
+   * bypass Jev's say over publication while keeping its data. Raise it (try
+   * 0.5, then tune on recorded probabilities) to hold low-support events for
+   * review. Has no effect unless `JEV_GROUNDING_ENABLED` is on.
+   */
+  JEV_GROUNDING_MIN_SUPPORT: z.coerce.number().min(0).max(1).default(0),
+  JEV_GEOCODE_RERANK_ENABLED: boolFlag(),
+
+  /**
+   * Minimum Jev `confidence` (0–1) to trust its geocode pick over Nominatim's
+   * own top result; below it, or when Jev says none of the results fit, the
+   * unmodified top result is used. Note the direction: HIGHER is more
+   * conservative here (0 always takes Jev's pick), unlike
+   * `JEV_GROUNDING_MIN_SUPPORT` where 0 means "never gate". Has no effect
+   * unless `JEV_GEOCODE_RERANK_ENABLED` is on.
+   */
+  JEV_GEOCODE_MIN_CONFIDENCE: z.coerce.number().min(0).max(1).default(0.8),
+  JEV_DEDUP_SCORING_ENABLED: boolFlag(),
+  JEV_CONFIDENCE_RESCORE_ENABLED: boolFlag(),
+
+  /**
+   * At publish time, compare each event against already-published events
+   * nearby in place and date (any source, other documents) and ask Jev whether
+   * it is the same real-world event.
+   */
+  JEV_PUBLISH_DEDUP_ENABLED: boolFlag(),
+
+  /**
+   * Hold an event for review when Jev's `P(same event)` with an existing one
+   * is at least this. `0` (default) **never holds** — the match and its
+   * probability are still recorded on the candidate, and the event publishes,
+   * so this is also the bypass. Direction: HIGHER holds fewer events. Tune it
+   * from the recorded probabilities before raising it; a false positive
+   * withholds a real event. Held events are released with
+   * `npm run duplicate:review -- --approve=<eventKey>`. No effect unless
+   * `JEV_PUBLISH_DEDUP_ENABLED` is on.
+   */
+  JEV_PUBLISH_DEDUP_HOLD_AT: z.coerce.number().min(0).max(1).default(0),
 });
 
 export type Env = z.infer<typeof envSchema>;

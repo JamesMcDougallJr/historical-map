@@ -4,6 +4,7 @@ import { TypeOrmModule } from "@nestjs/typeorm";
 import { GeocodeCache } from "@app/database";
 import { RateLimiterService } from "@app/common/ratelimit/rate-limiter.service";
 import { RateLimitModule } from "@app/common/ratelimit/rate-limit.module";
+import { JevClient, JevModule } from "@app/jev";
 import { FallbackGeocoder } from "./fallback.geocoder";
 import { GEOCODER } from "./geocoder.interface";
 import { GeocodingService } from "./geocoding.service";
@@ -18,16 +19,20 @@ import { WhgGeocoder } from "./whg.geocoder";
  * `PublishingService`.
  */
 @Module({
-  imports: [TypeOrmModule.forFeature([GeocodeCache]), RateLimitModule],
+  imports: [TypeOrmModule.forFeature([GeocodeCache]), RateLimitModule, JevModule],
   providers: [
     {
       provide: GEOCODER,
-      useFactory: (config: ConfigService, rateLimiter: RateLimiterService) =>
+      useFactory: (
+        config: ConfigService,
+        rateLimiter: RateLimiterService,
+        jev: JevClient,
+      ) =>
         new FallbackGeocoder([
           new WhgGeocoder(config, rateLimiter),
-          new NominatimGeocoder(config, rateLimiter),
+          new NominatimGeocoder(config, rateLimiter, jev),
         ]),
-      inject: [ConfigService, RateLimiterService],
+      inject: [ConfigService, RateLimiterService, JevClient],
     },
     GeocodingService,
   ],

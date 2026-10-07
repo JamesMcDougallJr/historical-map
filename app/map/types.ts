@@ -48,6 +48,12 @@ export interface EventLayer {
   sourceIds?: string[];
   attribution?: string;
   color?: string;
+  /**
+   * Totals for this source, for layers that cannot count their own pins (`mvt`
+   * streams tiles and has no feature list). Copied from `EventSource`.
+   */
+  locationCount?: number;
+  eventCount?: number;
   enabled: boolean;
 }
 

@@ -1,3 +1,17 @@
 TITLE: The Founding of Fixture Village
 DATE: 1850-01-01
 PLACE: Fixture Village
+
+TITLE: The Surveyors Arrival
+DATE: 1851-05-02
+PLACE: Fixture Village
+PARAPHRASE: yes
+
+TITLE: The Disputed Treaty
+DATE: 1852-09-09
+PLACE: Fixture Village
+PARAPHRASE: contradicted
+
+TITLE: The Autumn Harvest Fair
+DATE: 1880-09-01
+PLACE: Fixture Town

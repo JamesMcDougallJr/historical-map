@@ -68,12 +68,27 @@ import "ol/ol.css";
 // Same-origin (no auth check on this route today — see loadLocationDetail).
 const mapClient = createMapClient();
 
-// Pin icon SVG as data URL for historical events (module scope - created once)
-const EVENT_PIN_SVG = `data:image/svg+xml,${encodeURIComponent(`
+/**
+ * Map-pin icon as a data URL.
+ *
+ * The centre dot is a **filled white circle** drawn over a solid head — not a hole
+ * cut out of the path. OpenLayers hit-detects on the icon's own pixels, and a
+ * transparent hole is "empty", so with the hole version the exact centre of every
+ * pin head (where a user aims) hit nothing: no hover card, no click, while the rim
+ * of the same pin worked. It looked random, and the e2e suites missed it because
+ * they locate a pin by scanning for any pixel that hits.
+ */
+function pinSvg(color: string): string {
+  return `data:image/svg+xml,${encodeURIComponent(`
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="32" height="32">
-  <path fill="#3b82f6" d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
+  <path fill="${color}" d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/>
+  <circle cx="12" cy="9" r="2.5" fill="#ffffff"/>
 </svg>
 `)}`;
+}
+
+// Pin icon SVG as data URL for historical events (module scope - created once)
+const EVENT_PIN_SVG = pinSvg("#3b82f6");
 
 // Reusable pin style (module scope)
 const PIN_STYLE = new Style({
@@ -153,9 +168,8 @@ function resolveLocation(
   // popup is complete immediately. MVT pins can't, and come back with none —
   // those get filled in by loadLocationDetail.
   //
-  // Checked before `byId`, which is seeded from localStorage and can be stale:
-  // the feature came from the same request that drew the pin, so when it has
-  // events they are the ones that belong to it.
+  // Checked before `byId`: the feature came from the same request that drew the
+  // pin, so when it has events they are the ones that belong to it.
   let events: HistoricalEvent[] = [];
   const encoded = feature.get("events") as string | undefined;
   if (encoded) {
@@ -166,7 +180,12 @@ function resolveLocation(
     }
   }
 
-  const known = byId.get(id);
+  // `byId` is only trusted for inline pins, which exist *because* of that list.
+  // For tile and geojson pins it comes from localStorage, which can be weeks
+  // out of date (it is never refreshed without an API key) — a pin sharing an
+  // id with a stale entry showed the old events, so those pins fetch detail
+  // from the server instead.
+  const known = feature.get("inline") ? byId.get(id) : undefined;
   if (events.length === 0 && known) return known;
 
   const coords = featureLonLat(feature);
@@ -183,13 +202,8 @@ function resolveLocation(
 /** Pin style in a layer's own colour, so sources are distinguishable. */
 function pinStyleFor(color: string | undefined): Style {
   if (!color) return PIN_STYLE;
-  const svg = `data:image/svg+xml,${encodeURIComponent(`
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="32" height="32">
-  <path fill="${color}" d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
-</svg>
-`)}`;
   return new Style({
-    image: new Icon({ anchor: [0.5, 1], src: svg, scale: 1 }),
+    image: new Icon({ anchor: [0.5, 1], src: pinSvg(color), scale: 1 }),
   });
 }
 
@@ -221,6 +235,9 @@ function buildEventLayer(
         min_year: years.length ? Math.min(...years) : 0,
         max_year: years.length ? Math.max(...years) : 0,
         event_count: location.events.length,
+        // Marks "the events are in the `locations` prop" — the only kind of pin
+        // allowed to take its card from that list; see resolveLocation.
+        inline: true,
       });
     });
     const inlineLayer = new VectorLayer({
@@ -521,15 +538,26 @@ export function MapView({
 
     // Recount whenever a source finishes loading — vector sources fetch lazily
     // on first render, so the counts are zero until then. Tiled (MVT) sources
-    // are fetched per tile and have no total to read, so they sit this out.
+    // are fetched per tile and have no feature list to count, so their totals
+    // come from the server instead (`EventLayer.locationCount/eventCount`);
+    // without that the chip and the score badge's denominator read 0 for them.
     const countableSources = pinLayers
       .filter((l): l is VectorLayer => l instanceof VectorLayer)
       .map((l) => l.getSource())
       .filter((s): s is VectorSource => s !== null);
+    const serverTotals = eventLayers
+      .filter((l) => l.enabled && l.kind === "mvt")
+      .reduce(
+        (sum, l) => ({
+          locations: sum.locations + (l.locationCount ?? 0),
+          events: sum.events + (l.eventCount ?? 0),
+        }),
+        { locations: 0, events: 0 },
+      );
 
     const recountPins = () => {
-      let locationCount = 0;
-      let eventCount = 0;
+      let locationCount = serverTotals.locations;
+      let eventCount = serverTotals.events;
       for (const source of countableSources) {
         for (const feature of source.getFeatures()) {
           locationCount += 1;
@@ -1237,7 +1265,10 @@ export function MapView({
       {/* Stats, score and fullscreen — one row, so they can't overlap. Both used
           to position themselves absolutely in the same corner and collide. */}
       <div className="absolute top-4 right-4 z-10 flex items-center gap-2">
-        <div className="bg-black/60 backdrop-blur-sm px-3 py-2 rounded-lg text-sm text-white shadow-lg whitespace-nowrap">
+        <div
+          data-testid="pin-stats"
+          className="bg-black/60 backdrop-blur-sm px-3 py-2 rounded-lg text-sm text-white shadow-lg whitespace-nowrap"
+        >
           {pinStats.locations} location{pinStats.locations !== 1 ? "s" : ""},{" "}
           {pinStats.events} event{pinStats.events !== 1 ? "s" : ""}
         </div>

@@ -55,22 +55,70 @@ sequentially, never in parallel.
 
 There's also a third, non-Playwright check:
 `services/ingest/scripts/run-ingestion-fixture.ts` runs the full
-detect → publish pipeline against a fake `ExtractionEngine` and a tiny fixture corpus. It only
-resets the `ingest_*` tables (not `sources`/`locations`/`events`), so it's safe before or after
-the suite above:
+detect → publish pipeline against a fake `ExtractionEngine` and a tiny fixture corpus.
+
+**It needs a database of its own — do not point it at your dev database.** It deletes every row of
+`ingest_documents` / `ingest_extractions` / `ingest_event_candidates` and the events published from
+them. This section used to say it was "safe" because it only touched `ingest_*` tables; that was
+false. It used `TRUNCATE ... CASCADE`, which follows foreign keys **whatever their `ON DELETE` action**
+— `events.document_id` references `ingest_documents` — so it also emptied `events` and, through them,
+`event_group_members` (sequence membership). Running it against a dev database did exactly that.
+
+It now uses scoped `DELETE`s and, before deleting anything, `fixture-guard.ts` checks that every
+`ingest_documents` row is one of the two fixture files and every `local-directory` event came from
+one (`local-directory` is also the source key of a real local corpus, so the source alone proves
+nothing). Otherwise it refuses, naming what it found, and deletes nothing —
+`npm run fixture-guard:verify` covers the rule without a database. To run it beside a real stack, give it
+its own Postgres/Redis/S3 on spare ports plus `FIXTURE_PORT_BASE`:
 
 ```bash
-docker compose up -d db redis minio minio-init
+# CI's compose (db, redis, minio-ci) already is its own; locally use an isolated stack, not `db`
 npm run migrate --workspace=services/ingest
 ALLOW_TEST_DB_RESET=1 EXTRACTION_ENGINE=fake npm run test:ingestion-fixture --workspace=services/ingest
 ```
 
-CI (`.github/workflows/e2e.yml`) runs all three — mocked, real, ingestion fixture — in that
-order, every PR and every push to `main`. It swaps `minio-ci` (docker-compose.ci.yml) in for
-`minio`/`minio-init`, since the real MinIO images now require an authenticated pull on
-GitHub-hosted runners, and it starts Martin only after the web app schema exists — Martin
-discovers SQL functions from the Postgres catalog once at boot, so starting it earlier serves
-empty vector tiles for the job's entire lifetime.
+**A fourth check, `JEV_FIXTURE=1`, runs the same script a second way**: with the Jev flags on,
+`JEV_GROUNDING_MIN_SUPPORT=0.5`, and `JEV_API_KEY`/`JEV_BASE_URL` pointed at a fake local Jev
+server the script starts itself (it speaks the real `/v1/systemone` contract and is strict, so a
+bad request shape fails the test rather than passing against a lenient fake). The corpus carries
+two non-verbatim quotes (`PARAPHRASE:` in the fixture text): the run asserts the one Jev supports
+publishes, the one it contradicts is **held for review and kept off the map**, and a verbatim
+quote is never sent to Jev. It's the one test in the whole suite that boots the real `validate`
+worker (via `tsx`) with the real SDK in it — `jev:verify`'s mocked-fetch tests (below) can't
+catch a Nest DI wiring mistake, which silently resolves to `undefined` under `tsx` rather than
+failing to boot (see `HealthController`'s comment on why that's a real failure mode here):
+
+```bash
+JEV_FIXTURE=1 ALLOW_TEST_DB_RESET=1 EXTRACTION_ENGINE=fake \
+  npm run test:ingestion-fixture:jev --workspace=services/ingest
+```
+
+The fixture also deletes its own `local-directory` rows from `events` before each run — `publish`
+is idempotent on a deterministic id, so a row left by an earlier run (e.g. the baseline, with Jev
+off) would make "was this event kept off the map" unanswerable.
+
+Both share the `bullmq` queue prefix, and by default worker ports 3101–3106 — running either
+one against a Redis another ingestion pipeline is actively using (e.g. a second worktree's
+long-lived dev workers) races jobs between the two and produces confusing cross-contaminated
+results, not a code bug. Use a database/Redis nothing else is polling. To run beside such a
+stack, give the fixture its own: start Postgres/Redis/S3 on spare ports, run
+`db:ensure-schema` and `migrate` against that Postgres, and set `POSTGRES_URL`, `REDIS_PORT`,
+`S3_ENDPOINT` and `FIXTURE_PORT_BASE` (health ports become `BASE+1..+6`) to match.
+
+`services/ingest/scripts/verify-jev.ts` (`npm run jev:verify --workspace=services/ingest`) is
+the fast, every-commit layer for the Jev integration itself: `JevClient` against a mocked
+`fetch` speaking the real contract (request shape, every error path including a 200 with a
+missing answer), and the `judgeEventWithJev`/`scoreDuplicateWithJev` checks — all with no
+database or Redis, same spirit as `extract:verify`/`geocoding:verify`. A mock only proves *our
+reading* of the contract, so `jev:verify -- --live` (needs `JEV_API_KEY`) makes one real call.
+`geocoding:verify` covers `JEV_GEOCODE_RERANK_ENABLED` the same way, with a fake `JevClient`.
+
+CI (`.github/workflows/e2e.yml`) runs all of these — mocked, real, ingestion fixture, Jev
+unit-style, Jev fixture — in that order, every PR and every push to `main`. It swaps `minio-ci`
+(docker-compose.ci.yml) in for `minio`/`minio-init`, since the real MinIO images now require an
+authenticated pull on GitHub-hosted runners, and it starts Martin only after the web app schema
+exists — Martin discovers SQL functions from the Postgres catalog once at boot, so starting it
+earlier serves empty vector tiles for the job's entire lifetime.
 
 ### After opening a PR: watch CI and fix e2e failures until green
 
@@ -118,6 +166,48 @@ comparison is the fastest way to confirm it rather than infer it.
 browser has to fetch new URLs. A hard reload (`Cmd+Shift+R`) cleared the JS case but **not**
 the CSS one, which needed the stylesheet re-requested under a cache-busting query. Don't
 assume a plain refresh picked up your change.
+
+### Debugging note — "some pins show no card on hover"
+
+Two independent causes, both found by testing the live map rather than reading code. Rule these
+out before changing hover logic.
+
+**1. Ghost pins from Martin's tile cache.** Martin's tile cache is LRU-only — no TTL by default and
+no invalidation — so after any change to `events` (deleting, re-ingesting, a fixture or
+`TRUNCATE ... CASCADE`) every tile requested earlier keeps being served as it was. Pins for events that
+no longer exist stay drawn; hovering one calls `GET /api/data/locations/:id`, which correctly returns
+`0` events, and the card has nothing to show. It is zoom-dependent (a tile vanishes at one zoom and not
+another, depending on which tiles were requested before the change), which makes it look random.
+`docker-compose.yml` now runs Martin with `--cache-size 0` (reproduced: with the default cache a tile still
+held its pins after every event was deleted; with the flag it came back empty). To confirm it on a
+running stack, compare the same tile with and without a throwaway query parameter (Martin's cache is
+keyed on the exact URL) and against the function itself:
+
+```js
+// in the browser: exact URL (cached) vs same tile with a cache-busting param (fresh)
+const has = async (u) => (await (await fetch(u, { cache: 'no-store' })).text()).includes('SomePlaceName');
+await has('http://localhost:3001/event_pins/4/4/6?source_ids=local-directory');
+await has('http://localhost:3001/event_pins/4/4/6?source_ids=local-directory&x=' + Date.now());
+```
+
+```sql
+-- the truth, straight from the database
+select encode(event_pins(4,4,6,'{"source_ids":"local-directory"}'::json),'escape') like '%SomePlaceName%';
+```
+
+If they disagree, restart Martin (`docker restart <martin container>`); a deployed Martin has the same
+cache and needs the same flag or a bounded `--cache-expiry`.
+
+**2. The pin icon's dead zone.** The marker SVG once drew its centre dot as a *hole* in the path.
+OpenLayers hit-detects on the icon's own pixels, so the exact centre of every pin head — where a user
+aims — hit nothing while the rim worked. Two pins stacked on one spot made it look even more random.
+Fixed by drawing a solid head with a filled white dot (`pinSvg` in `MapView.tsx`). The older hover specs
+missed it because `findHoverPixel` / `waitForRealMapReady` *scan* for any pixel that hits a feature;
+`e2e-real/specs/map/pin-reliability.spec.ts` hovers the exact head centre (20 px above the tip).
+
+`e2e-real` resets the database it points at. Its config hardcodes the shared dev DB (port 5433) and
+Martin (3001) unless you set `E2E_POSTGRES_URL` / `E2E_MARTIN_URL` **and** `POSTGRES_URL` for the test
+process (global-setup reads that one) — do so to run it against an isolated stack.
 
 ### Dev-only map debug handles
 
@@ -280,6 +370,12 @@ is resolved once and cached, `geocode:review` lists what each matched and
 `--set` corrects it for the whole corpus at once. Treat a new corpus's first
 `geocode:review` output as a required review step, not an optional one.
 
+`--set` also moves pins that are **already published**: `locations` keeps no link to the
+cache key, so it moves any pin sitting exactly at the cache row's *old* coordinates
+(`relocatePublishedPins`) and prints each one. It is an exact match on purpose — publish
+snaps nearby places onto one shared pin, so a radius would drag unrelated pins along. A
+cache row that had no coordinates yet moves nothing.
+
 Invariants that are easy to break and fail silently:
 
 - **`nest-cli.json` must keep `deleteOutDir: false`.** The flag is
@@ -324,6 +420,100 @@ Three things about `openai/gpt-oss-120b` that cost real debugging time:
   _generates_ it. When generation doesn't conform, Groq returns **400**, observed
   on real text with an out-of-enum `datePrecision`. Those are retried; every
   other 400 stays fatal.
+
+#### Jev — opt-in verification/reranking layer
+
+`libs/jev` wraps TypeSafe's Jev, a fast/cheap typed-decision model (Choice /
+Score / yes-no questions, not a generative LLM) used **alongside** the
+existing deterministic checks, never in place of them. It touches four spots,
+each behind its own env flag, all defaulting off:
+
+| Flag                              | Where                                                          | What it adds                                                      |
+| ---------------------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------- |
+| `JEV_GROUNDING_ENABLED`            | `validate` → `grounding-jev` check                             | a supports/contradicts/says_nothing judgment, **only** for quotes `checkGrounding` missed verbatim; can gate |
+| `JEV_DEDUP_SCORING_ENABLED`        | `validate` → `duplicate-jev` check                             | same-year near-duplicate flag beyond `checkDuplicate`'s exact title match (non-gating) |
+| `JEV_CONFIDENCE_RESCORE_ENABLED`   | `validate` → `confidence-jev` check                            | independent re-score of the extractor's confidence on a 5-level concrete rubric (non-gating) |
+| `JEV_GEOCODE_RERANK_ENABLED`       | `NominatimGeocoder.geocode`                                    | Jev picks among the top 5 results (or "none") instead of always taking `usable[0]` |
+| `JEV_PUBLISH_DEDUP_ENABLED`        | `publish` → `duplicate-published` check                        | is this the same event a **different document** already put on the map?; can hold |
+
+Put `JEV_API_KEY` in `services/ingest/.env.local` — `AppConfigModule` loads
+`.env.local` then `.env` (real process env beats both), and only `.env*.local` is
+gitignored in this repo, so never put a key in plain `.env`.
+
+`libs/jev` is a thin fail-open wrapper over the official `@typesafe-ai/sdk`
+(`POST https://api.typesafe.ai/v1/systemone`; the SDK owns the wire contract,
+`Retry-After` handling and typed answers). Questions are built with the SDK's
+`noul`/`choice`/`score`, re-exported from `@app/jev`.
+
+**Two confidence knobs, deliberately opposite in direction.** Both are 0–1
+and both are documented on the env var in `env-validation.schema.ts`:
+
+- `JEV_GROUNDING_MIN_SUPPORT` (default `0`) — the minimum `P(supports)` for a
+  substring-missed event to stay publishable. **`0` never gates**: the check is
+  still recorded (at a 0.5 bar) but cannot hold anything, which is how to bypass
+  Jev's say over publication while keeping its data. Raise it (try 0.5, then tune
+  from the recorded probabilities) to hold low-support events for review. It can
+  only hold events, never rescue one — exact-match quotes are never sent to Jev.
+- `JEV_GEOCODE_MIN_CONFIDENCE` (default `0.8`) — the minimum Jev `confidence` to
+  trust its geocode pick over Nominatim's top result. Here **higher is more
+  conservative** and `0` always takes Jev's pick; bypass is the flag, not the knob.
+
+#### Cross-document duplicates at publish time
+
+Two documents describing one event produce two pins (the event id hashes the document's
+`externalId`; see `plans/11-identity-and-fusion.md`). With `JEV_PUBLISH_DEDUP_ENABLED`,
+`publish` — after geocoding, before anything is written — looks up already-published events
+within 5 km and ±731 days of the new one (`MapWriterService.findNearbyEvents`, any source,
+excluding its own document), narrows by date using the **coarser** of the two precisions
+(`datesCompatible`: a year-only date is stored as `YYYY-01-01`, so it matches the same or next
+calendar year, up to 729 days away — the SQL window must be at least that wide, and `jev:verify`
+fails if it isn't), and sends the nearest 8 to Jev
+as **one request with one yes/no question per candidate** (existing event's quote included).
+The best match is recorded on the candidate as a `duplicate-published` check naming the matched
+event id.
+
+`JEV_PUBLISH_DEDUP_HOLD_AT` (0–1, default **`0`**) holds the event for review when `P(same)` is at
+or above it; **`0` never holds** (record-only — the event publishes and the evidence stays on the
+row), same convention as `JEV_GROUNDING_MIN_SUPPORT`. On the real API a same-event pair scored
+0.93–0.97 and related-but-distinct events 0.02–0.17, but tune it from recorded probabilities on
+your own corpus before raising it: a false positive withholds a real event.
+
+Held events are resolved with `npm run duplicate:review --workspace=services/ingest` (lists them with
+Jev's reasoning), `-- --approve=<eventKey>` ("a different event; publish it", re-queues the
+document's publish job) or `-- --dismiss=<eventKey>` ("a duplicate; leave it out"). There is no admin
+UI. `resolved_at` carries the decision, and `validate`'s candidate upsert is `WHERE resolved_at IS
+NULL` so re-validating cannot overwrite it — without that, a **dismissed** event is re-derived to
+`publish` and then published, because publish skips resolved candidates (the fixture fails if the
+guard is removed).
+
+Known limits: it is best-effort. Two documents publishing **concurrently** can each miss the
+other's insert (the fixture sets `PUBLISH_CONCURRENCY=1` to make it deterministic); place identity
+is only the 5 km radius, so name variants geocoding further apart are never compared; and it flags,
+it does not merge — fusion still needs the identity/provenance schema in plan 11. Any lookup or Jev
+failure publishes as before.
+
+`duplicate-jev` and `confidence-jev` stay **non-gating** — recorded the way
+`checkGrounding` always was: let evidence accumulate before anything new gates
+publication. The geocode flag is the one place Jev changes a chosen output.
+
+Every call site requires both its flag **and** `JEV_API_KEY` (`isJevFeatureEnabled`
+checks both) and goes through `JevClient.tryAsk`, which swallows any failure and
+returns `null`, so a Jev outage, timeout or malformed response falls back to the
+pre-Jev behaviour and can never break — or *newly hold* — the pipeline. `ask`
+also verifies each requested answer is present with the right type: the SDK
+types answers from the questions but does not check the server sent them, and a
+`200` with a missing answer would otherwise throw a `TypeError` inside a check
+and fail the whole `validate` job. Grounding and confidence share **one request
+per event**. With every flag off (or `JEV_API_KEY` unset) behaviour is the
+pre-Jev pipeline's, byte for byte.
+
+History worth knowing: the client was first written against a *guessed* wire
+format (OpenRouter chat-completions) and would have failed every real call —
+silently, because `tryAsk` fails open. A mock only proves our reading of a
+contract, which is why `jev:verify -- --live` exists. Question design follows
+TypeSafe's published guidance: a "none" outcome when nothing may fit, concrete
+rubric levels, one narrow judgment per question, and probabilities rather than
+the argmax.
 
 #### One TypeScript, pinned by path
 

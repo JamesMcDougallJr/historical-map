@@ -5,3 +5,11 @@ PLACE: Fixture Town
 TITLE: The New Railway Line
 DATE: 1890-03-15
 PLACE: Fixture Valley
+
+TITLE: Founding Day at Fixture Village
+DATE: 1850-01-01
+PLACE: Fixture Village
+
+TITLE: Harvest Festival at Fixture Town
+DATE: 1880-09-01
+PLACE: Fixture Town
