@@ -55,12 +55,24 @@ sequentially, never in parallel.
 
 There's also a third, non-Playwright check:
 `services/ingest/scripts/run-ingestion-fixture.ts` runs the full
-detect → publish pipeline against a fake `ExtractionEngine` and a tiny fixture corpus. It only
-resets the `ingest_*` tables (not `sources`/`locations`/`events`), so it's safe before or after
-the suite above:
+detect → publish pipeline against a fake `ExtractionEngine` and a tiny fixture corpus.
+
+**It needs a database of its own — do not point it at your dev database.** It deletes every row of
+`ingest_documents` / `ingest_extractions` / `ingest_event_candidates` and the events published from
+them. This section used to say it was "safe" because it only touched `ingest_*` tables; that was
+false. It used `TRUNCATE ... CASCADE`, which follows foreign keys **whatever their `ON DELETE` action**
+— `events.document_id` references `ingest_documents` — so it also emptied `events` and, through them,
+`event_group_members` (sequence membership). Running it against a dev database did exactly that.
+
+It now uses scoped `DELETE`s and, before deleting anything, `fixture-guard.ts` checks that every
+`ingest_documents` row is one of the two fixture files and every `local-directory` event came from
+one (`local-directory` is also the source key of a real local corpus, so the source alone proves
+nothing). Otherwise it refuses, naming what it found, and deletes nothing —
+`npm run fixture-guard:verify` covers the rule without a database. To run it beside a real stack, give it
+its own Postgres/Redis/S3 on spare ports plus `FIXTURE_PORT_BASE`:
 
 ```bash
-docker compose up -d db redis minio minio-init
+# CI's compose (db, redis, minio-ci) already is its own; locally use an isolated stack, not `db`
 npm run migrate --workspace=services/ingest
 ALLOW_TEST_DB_RESET=1 EXTRACTION_ENGINE=fake npm run test:ingestion-fixture --workspace=services/ingest
 ```

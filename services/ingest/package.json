@@ -28,6 +28,7 @@
     "geocoding:verify": "tsx scripts/verify-geocoding.ts",
     "cleaning:verify": "tsx scripts/verify-cleaning.ts",
     "jev:verify": "tsx scripts/verify-jev.ts",
+    "fixture-guard:verify": "tsx scripts/verify-fixture-guard.ts",
     "test:ingestion-fixture": "tsx scripts/run-ingestion-fixture.ts",
     "test:ingestion-fixture:jev": "JEV_FIXTURE=1 tsx scripts/run-ingestion-fixture.ts"
   },

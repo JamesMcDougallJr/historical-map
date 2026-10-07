@@ -91,6 +91,9 @@ jobs:
           EXTRACTION_ENGINE: fake
         run: npm run test:ingestion-fixture --workspace=services/ingest
 
+      - name: Verify the fixture's reset guard
+        run: npm run fixture-guard:verify --workspace=services/ingest
+
       - name: Verify the Jev client and checks (mocked)
         run: npm run jev:verify --workspace=services/ingest
 

@@ -22,13 +22,16 @@
  * what every other environment actually runs, and don't share that kind
  * of in-process state at all.
  *
- * Resets only the ingest-owned tables (ingest_documents, ingest_sources,
- * ingest_extractions, ingest_event_candidates, geocode_cache) plus its own
- * `local-directory` events — never anything else in sources/locations/events,
- * which the real-backend Playwright suite
- * (e2e-real/) owns. The two can share the same database safely: this
- * script's fixture ids (local-directory source, "Fixture Town" et al.) never
- * collide with e2e-real's (fx-source-*, fx-loc-*).
+ * **Needs its own database.** It deletes every row of the ingest tables
+ * (ingest_documents, ingest_extractions, ingest_event_candidates) and the
+ * events published from them, so it first checks that all of that is the
+ * fixture's (`fixture-guard.ts`) and refuses, deleting nothing, otherwise. It
+ * is not "safe against a dev database": the `local-directory` source key is
+ * the same one a real local corpus uses, and an earlier version of this
+ * script (TRUNCATE ... CASCADE, which follows the events -> ingest_documents
+ * foreign key) emptied a dev database's events and sequences while this
+ * header said it never touched them. It never touches e2e-real's `fx-source-*`
+ * rows, so the two suites can share a database *they own* in CI.
  *
  * `JEV_FIXTURE=1` runs the same pipeline a second way: with
  * `JEV_GROUNDING_ENABLED`/`JEV_DEDUP_SCORING_ENABLED`/
@@ -51,6 +54,7 @@ import http from "node:http";
 import path from "node:path";
 import { Queue } from "bullmq";
 import type { DataSource } from "typeorm";
+import { FIXTURE_SOURCE_KEY, foreignFixtureData } from "./fixture-guard";
 import { createDataSource } from "../libs/database/src/data-source";
 import { GeocodeCache, IngestDocument, IngestSource } from "../libs/database/src/entities";
 import {
@@ -67,26 +71,57 @@ import {
 async function resetIngestTables(): Promise<void> {
   if (process.env["ALLOW_TEST_DB_RESET"] !== "1") {
     throw new Error(
-      "Refusing to run without ALLOW_TEST_DB_RESET=1 — this truncates " +
-        "ingest_documents/ingest_sources/ingest_extractions/" +
-        "ingest_event_candidates/geocode_cache in whatever database " +
-        "POSTGRES_URL points at.",
+      "Refusing to run without ALLOW_TEST_DB_RESET=1 — this deletes the " +
+        "ingest tables' rows (and the fixture's own events) in whatever " +
+        "database POSTGRES_URL points at, after checking they are all the " +
+        "fixture's.",
     );
   }
   const dataSource = createDataSource();
   await dataSource.initialize();
   try {
-    await dataSource.query(
-      "TRUNCATE ingest_event_candidates, ingest_extractions, ingest_documents, " +
-        "ingest_sources, geocode_cache RESTART IDENTITY CASCADE",
+    // Refuse before deleting anything unless it is all the fixture's own.
+    const documents = await dataSource.query(`SELECT external_id FROM ingest_documents`);
+    const events = await dataSource.query(
+      `SELECT d.external_id AS document_external_id, count(*)::int AS n
+       FROM events e LEFT JOIN ingest_documents d ON d.id = e.document_id
+       WHERE e.source_id = $1
+       GROUP BY d.external_id`,
+      [FIXTURE_SOURCE_KEY],
     );
-    // The fixture's own published events too. `publish` is idempotent
-    // (`ON CONFLICT DO NOTHING` on a deterministic id), so rows left by a
-    // previous run make a later run report `already-present` and — worse —
-    // make "was this event kept off the map" unanswerable, since an earlier
-    // run (e.g. the baseline, with Jev off) may have published it. Scoped to
-    // the fixture's source id; never touches e2e-real's `fx-source-*` rows.
-    await dataSource.query("DELETE FROM events WHERE source_id = 'local-directory'");
+    const problems = foreignFixtureData(documents, events);
+    if (problems.length > 0) {
+      throw new Error(
+        `Refusing to reset this database — it holds data that is not the fixture's:\n  - ` +
+          `${problems.join("\n  - ")}\n` +
+          `This is a real dev database. Point POSTGRES_URL at an isolated one (see ` +
+          `"E2E tests" in CLAUDE.md); nothing was deleted.`,
+      );
+    }
+
+    // Scoped DELETEs, deliberately not TRUNCATE ... CASCADE: events.document_id
+    // references ingest_documents, and CASCADE follows foreign keys whatever their
+    // ON DELETE action, so it would also empty `events` and `event_group_members`.
+    //
+    // Events first, while their document ids still resolve: `publish` is
+    // idempotent (`ON CONFLICT DO NOTHING` on a deterministic id), so rows left by
+    // a previous run make a later one report `already-present` and make "was this
+    // event kept off the map" unanswerable (the baseline run, with Jev off, may
+    // have published it). Only the fixture's documents' events — never e2e-real's
+    // `fx-source-*` rows, and (by the guard above) never real ones.
+    await dataSource.query(
+      `DELETE FROM events WHERE document_id IN (SELECT id FROM ingest_documents)`,
+    );
+    await dataSource.query("DELETE FROM ingest_event_candidates");
+    await dataSource.query("DELETE FROM ingest_extractions");
+    await dataSource.query("DELETE FROM ingest_documents");
+    await dataSource.query("DELETE FROM ingest_sources WHERE key = $1", [FIXTURE_SOURCE_KEY]);
+    // Only the three places the fixture seeds — not the whole geocode cache,
+    // which holds hand-corrected coordinates.
+    await dataSource.query(
+      "DELETE FROM geocode_cache WHERE normalized_name = ANY($1::text[])",
+      [FIXTURE_PLACES],
+    );
   } finally {
     await dataSource.destroy();
   }
@@ -114,6 +149,14 @@ async function seedIngestSource(): Promise<void> {
   }
 }
 
+const FIXTURE_GEOCODES: Array<{ name: string; lon: number; lat: number }> = [
+  { name: "fixture town", lon: -111.5, lat: 40.5 },
+  { name: "fixture valley", lon: -111.6, lat: 40.6 },
+  { name: "fixture village", lon: -111.7, lat: 40.7 },
+];
+/** The only `geocode_cache` rows the reset removes. */
+const FIXTURE_PLACES = FIXTURE_GEOCODES.map((p) => p.name);
+
 /**
  * Pre-seeds geocode_cache for the fixture corpus's three place names, so
  * `publish` never calls the real WHG/Nominatim geocoder — GeocodingService
@@ -124,12 +167,7 @@ async function seedGeocodeCache(): Promise<void> {
   await dataSource.initialize();
   try {
     const repo = dataSource.getRepository(GeocodeCache);
-    const places: Array<{ name: string; lon: number; lat: number }> = [
-      { name: "fixture town", lon: -111.5, lat: 40.5 },
-      { name: "fixture valley", lon: -111.6, lat: 40.6 },
-      { name: "fixture village", lon: -111.7, lat: 40.7 },
-    ];
-    for (const place of places) {
+    for (const place of FIXTURE_GEOCODES) {
       await repo.save(
         repo.create({
           normalizedName: place.name,
