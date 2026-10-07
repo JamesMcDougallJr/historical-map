@@ -25,6 +25,13 @@ import {
   scoreDuplicateWithJev,
 } from "../apps/workers/validate/src/validation/jev-checks";
 
+import {
+  type NearbyEvent,
+  datesCompatible,
+  judgeDuplicateWithJev,
+  selectCandidates,
+} from "../apps/workers/publish/src/publishing/jev-dedup";
+
 // Grounding and confidence are one combined request in production; these
 // adapters let each be exercised on its own.
 const scoreGroundingWithJev = async (
@@ -577,6 +584,112 @@ async function main(): Promise<void> {
     const mock = installFetchMock([{ status: 500, body: {} }]);
     const out = await judgeEventWithJev(client(), BOTH_ON, SAMPLE_EVENT, MISS);
     check("a failed combined request nulls both results (nothing appended)", out.grounding === null && out.confidence === null);
+    mock.restore();
+  }
+
+  // ── datesCompatible / selectCandidates (publish-time dedup) ───────────
+  const dc = datesCompatible;
+  check("a year-only date matches a day-precision date in the same year", dc("1850-01-01", "year", "1850-06-02", "day"));
+  check("a year-only date matches an adjacent year (coarser precision rules)", dc("1850-01-01", "year", "1851-12-31", "day"));
+  check("a year-only date does not match two years away", !dc("1850-01-01", "year", "1852-01-01", "year"));
+  check("a null precision is treated as year", dc("1850-01-01", null, "1851-03-01", "day"));
+  check("two day-precision dates match at exactly 14 days", dc("1850-06-02", "day", "1850-06-16", "day"));
+  check("two day-precision dates do not match at 15 days", !dc("1850-06-02", "day", "1850-06-17", "day"));
+  check("month vs day matches within 45 days", dc("1850-06-01", "month", "1850-07-15", "day"));
+  check("month vs day does not match at 46 days", !dc("1850-06-01", "month", "1850-07-17", "day"));
+  check("month vs year falls to the year window", dc("1850-06-01", "month", "1851-01-01", "year"));
+
+  const nearby = (id: string, title: string, extra: Partial<NearbyEvent> = {}): NearbyEvent => ({
+    id,
+    title,
+    description: `${title}.`,
+    date: "1850-01-01",
+    datePrecision: "year",
+    dateText: "1850",
+    sourceId: "other-source",
+    placeName: "Fixture Village",
+    quote: `A quote about ${title}.`,
+    ...extra,
+  });
+  check(
+    "selectCandidates returns nothing for an event with no date",
+    selectCandidates({ dateIso: null, datePrecision: "year" }, [nearby("a", "A")]).length === 0,
+  );
+  check(
+    "selectCandidates drops incompatible dates and caps the list at 8",
+    (() => {
+      const pool = [
+        ...Array.from({ length: 12 }, (_, i) => nearby(`n${i}`, `N${i}`)),
+        nearby("far", "Far", { date: "1900-01-01", dateText: "1900" }),
+      ];
+      const out = selectCandidates({ dateIso: "1850-01-01", datePrecision: "year" }, pool);
+      return out.length === 8 && !out.some((c) => c.id === "far");
+    })(),
+  );
+
+  // ── judgeDuplicateWithJev ─────────────────────────────────────────────
+  const DEDUP_PUB_ON = fakeConfig({ JEV_PUBLISH_DEDUP_ENABLED: true });
+  const holdAt = (n: number) => fakeConfig({ JEV_PUBLISH_DEDUP_ENABLED: true, JEV_PUBLISH_DEDUP_HOLD_AT: n });
+  const THREE = [nearby("ev-0", "Zero"), nearby("ev-1", "Founding Day"), nearby("ev-2", "Two")];
+  const sames = (...ps: number[]) => ok(Object.fromEntries(ps.map((p, i) => [`same_${i}`, noulAnswer(p)])));
+
+  {
+    const mock = installFetchMock([]);
+    const off = await judgeDuplicateWithJev(client(), fakeConfig({}), SAMPLE_EVENT, THREE);
+    const none = await judgeDuplicateWithJev(client(), DEDUP_PUB_ON, SAMPLE_EVENT, []);
+    check(
+      "publish dedup makes no request with the flag off or with no candidates",
+      off === null && none === null && mock.calls.length === 0,
+      `calls=${mock.calls.length}`,
+    );
+    mock.restore();
+  }
+
+  {
+    const mock = installFetchMock([sames(0.2, 0.95, 0.1)]);
+    const result = await judgeDuplicateWithJev(client(), DEDUP_PUB_ON, SAMPLE_EVENT, THREE);
+    const body = bodyOf(mock.calls[0]);
+    check(
+      "all candidates go in ONE request, one noul question each, with their quotes in state",
+      mock.calls.length === 1 &&
+        Object.keys(body.questions).join(",") === "same_0,same_1,same_2" &&
+        Object.values<any>(body.questions).every((q) => q.type === "noul") &&
+        body.state?.existing?.length === 3 &&
+        body.state.existing[1].quote === "A quote about Founding Day.",
+      JSON.stringify(Object.keys(body.questions ?? {})),
+    );
+    check(
+      "the best match is reported by title and id; default knob 0 records without gating",
+      result?.name === "duplicate-published" &&
+        result.passed === false &&
+        result.gating === false &&
+        result.detail?.includes('"Founding Day"') === true &&
+        result.detail.includes("matched=ev-1"),
+      JSON.stringify(result),
+    );
+    mock.restore();
+  }
+
+  for (const [knob, p, passed, gating, label] of [
+    [0.9, 0.95, false, true, "at or above the knob holds"],
+    [0.95, 0.95, false, true, "exactly at the knob holds (inclusive)"],
+    [0.97, 0.95, true, true, "below the knob does not hold"],
+    [0, 0.3, true, false, "a low match with knob 0 is recorded as distinct"],
+  ] as const) {
+    const mock = installFetchMock([sames(0.1, p, 0.05)]);
+    const result = await judgeDuplicateWithJev(client(), holdAt(knob), SAMPLE_EVENT, THREE);
+    check(
+      `publish dedup knob ${knob}, P(same)=${p}: ${label}`,
+      result?.passed === passed && result.gating === gating,
+      JSON.stringify(result),
+    );
+    mock.restore();
+  }
+
+  {
+    const mock = installFetchMock([{ status: 500, body: {} }]);
+    const result = await judgeDuplicateWithJev(client(), holdAt(0.5), SAMPLE_EVENT, THREE);
+    check("publish dedup returns null on a Jev outage even with the gate active (never newly holds)", result === null);
     mock.restore();
   }
 

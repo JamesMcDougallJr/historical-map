@@ -305,7 +305,18 @@ export class ValidationService {
         checks: jsonb(checks),
         event: jsonb(event),
       })
-      .orUpdate(["verdict", "checks", "event", "model_run"], ["event_key"])
+      // `WHERE resolved_at IS NULL`: a reviewer's decision (see
+      // `scripts/duplicate-review.ts`) must survive re-validation. The case it
+      // protects is **dismiss**: a dismissed duplicate is `verdict='review'`
+      // with `resolved_at` set, and this upsert would re-derive
+      // `verdict='publish'` from the deterministic checks — after which
+      // publish, which skips resolved candidates, puts the duplicate on the
+      // map. (Approve survives either way.) Unresolved rows update as before.
+      .orUpdate(["verdict", "checks", "event", "model_run"], ["event_key"], {
+        overwriteCondition: {
+          where: '"ingest_event_candidates"."resolved_at" IS NULL',
+        },
+      })
       .execute();
   }
 }
