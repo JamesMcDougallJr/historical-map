@@ -12,6 +12,14 @@ import { JevClient, isJevFeatureEnabled, noul, type Questions } from "@app/jev";
  * merges — a probable duplicate is held for review (or just recorded), because
  * fusing needs event identity and provenance the schema does not have yet
  * (`plans/11-identity-and-fusion.md`).
+ *
+ * **Best-effort, not atomic.** The lookup reads `events` and the insert writes
+ * it later, and publish jobs run per document, possibly concurrently. Two
+ * documents describing the same event that publish at the same time can each
+ * find nothing nearby, and both publish. Closing that would mean serialising
+ * publishes (or locking on a dedup key); this does not, so treat a miss as
+ * possible. The ingestion fixture sets `PUBLISH_CONCURRENCY=1` to be
+ * deterministic.
  */
 
 /** Place radius for candidates. Geocodes of one place vary by a few km. */
@@ -20,8 +28,17 @@ export const DEDUP_RADIUS_M = 5_000;
 export const DEDUP_POOL_LIMIT = 25;
 /** Candidates actually shown to Jev: bounds the questions (and cost) per event. */
 export const DEDUP_MAX_CANDIDATES = 8;
-/** Widest date window SQL pre-filters on; `datesCompatible` narrows it. */
-export const DEDUP_POOL_DAYS = 366;
+/**
+ * Widest date window SQL pre-filters on; `datesCompatible` narrows it.
+ *
+ * Must be at least the widest gap `datesCompatible` accepts, or SQL silently
+ * drops pairs the rule would have kept. That is the year rule: a year-only date
+ * is stored as `YYYY-01-01` and matches any date in the same or the next
+ * calendar year, so `1850-01-01` against `1851-12-31` is 729 days apart. (A
+ * 366-day window missed everything past about a year into the adjacent year.)
+ * `verify-jev.ts` pins the two together.
+ */
+export const DEDUP_POOL_DAYS = 731;
 
 /** A published event nearby, as `MapWriterService.findNearbyEvents` returns it. */
 export interface NearbyEvent {

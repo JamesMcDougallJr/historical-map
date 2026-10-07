@@ -26,6 +26,7 @@ import {
 } from "../apps/workers/validate/src/validation/jev-checks";
 
 import {
+  DEDUP_POOL_DAYS,
   type NearbyEvent,
   datesCompatible,
   judgeDuplicateWithJev,
@@ -598,6 +599,37 @@ async function main(): Promise<void> {
   check("month vs day matches within 45 days", dc("1850-06-01", "month", "1850-07-15", "day"));
   check("month vs day does not match at 46 days", !dc("1850-06-01", "month", "1850-07-17", "day"));
   check("month vs year falls to the year window", dc("1850-06-01", "month", "1851-01-01", "year"));
+
+  // The SQL pre-filter (±DEDUP_POOL_DAYS) runs BEFORE `datesCompatible`, so any
+  // pair the rule accepts but the window excludes is silently never compared.
+  // Scan every offset for each precision pairing and assert the window covers
+  // everything the rule accepts. (A 366-day window failed this for year dates.)
+  {
+    let widest = 0;
+    for (const aPrecision of ["year", "month", "day"]) {
+      for (const bPrecision of ["year", "month", "day"]) {
+        for (const aDate of ["1850-01-01", "1850-12-31"]) {
+          for (let offset = -900; offset <= 900; offset++) {
+            const bDate = new Date(Date.parse(`${aDate}T00:00:00Z`) + offset * 86_400_000)
+              .toISOString()
+              .slice(0, 10);
+            if (dc(aDate, aPrecision, bDate, bPrecision)) {
+              widest = Math.max(widest, Math.abs(offset));
+            }
+          }
+        }
+      }
+    }
+    check(
+      "the SQL pool window covers every date gap the compatibility rule accepts",
+      widest <= DEDUP_POOL_DAYS,
+      `rule accepts up to ${widest} days; window is ${DEDUP_POOL_DAYS}`,
+    );
+    check(
+      "a year-only date reaches the far end of the adjacent year (1850-01-01 vs 1851-12-31)",
+      dc("1850-01-01", "year", "1851-12-31", "day") && 729 <= DEDUP_POOL_DAYS,
+    );
+  }
 
   const nearby = (id: string, title: string, extra: Partial<NearbyEvent> = {}): NearbyEvent => ({
     id,

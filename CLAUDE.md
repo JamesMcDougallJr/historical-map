@@ -403,9 +403,11 @@ and both are documented on the env var in `env-validation.schema.ts`:
 Two documents describing one event produce two pins (the event id hashes the document's
 `externalId`; see `plans/11-identity-and-fusion.md`). With `JEV_PUBLISH_DEDUP_ENABLED`,
 `publish` — after geocoding, before anything is written — looks up already-published events
-within 5 km and about a year of the new one (`MapWriterService.findNearbyEvents`, any source,
+within 5 km and ±731 days of the new one (`MapWriterService.findNearbyEvents`, any source,
 excluding its own document), narrows by date using the **coarser** of the two precisions
-(`datesCompatible`: a year-only date is stored as `YYYY-01-01`), and sends the nearest 8 to Jev
+(`datesCompatible`: a year-only date is stored as `YYYY-01-01`, so it matches the same or next
+calendar year, up to 729 days away — the SQL window must be at least that wide, and `jev:verify`
+fails if it isn't), and sends the nearest 8 to Jev
 as **one request with one yes/no question per candidate** (existing event's quote included).
 The best match is recorded on the candidate as a `duplicate-published` check naming the matched
 event id.
