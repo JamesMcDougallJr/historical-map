@@ -86,6 +86,12 @@ jobs:
       - name: Run the real-backend E2E suite
         run: npm run test:e2e:real
 
+      # The stdio MCP server's `search` tool against the JSON tier (no
+      # POSTGRES_URL — the script strips it). A few seconds, so it runs here
+      # rather than staying manual (plans/24-search-mcp.md).
+      - name: Verify the stdio MCP search tool
+        run: npm run mcp:verify
+
       - name: Run the ingestion fixture test
         env:
           EXTRACTION_ENGINE: fake

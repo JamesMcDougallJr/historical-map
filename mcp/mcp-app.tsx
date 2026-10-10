@@ -1,4 +1,4 @@
-import { StrictMode } from "react";
+import { StrictMode, useEffect, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import {
   App,
@@ -6,7 +6,9 @@ import {
   applyHostStyleVariables,
   applyHostFonts,
 } from "@modelcontextprotocol/ext-apps";
-import { MapView } from "../app/map/components/MapView";
+import { MapView, type MapViewHandle } from "../app/map/components/MapView";
+import { Snippet } from "../app/map/search/Snippet";
+import type { McpFocusTarget } from "./focus-types";
 import type { EventLayer, HistoricalLocation } from "../app/map/types";
 import "ol/ol.css";
 import "../app/global.css";
@@ -42,6 +44,81 @@ interface McpAppParams {
   locations?: HistoricalLocation[];
   filterYear?: number;
   locationId?: string;
+  /** show_map's `focus`, resolved by the server (mcp/register.ts). */
+  focus?: McpFocusTarget | null;
+}
+
+/**
+ * The inline map plus show_map's focus: the same imperative actions /map's
+ * search bar drives MapView with. Documents and passages get their text and
+ * page in a small overlay — never the original file, whose presigned URL is
+ * an origin this sandbox's CSP blocks.
+ */
+function McpMap({
+  locations,
+  focus,
+}: {
+  locations: HistoricalLocation[];
+  focus: McpFocusTarget | null;
+}): JSX.Element {
+  const mapRef = useRef<MapViewHandle>(null);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !focus) return;
+    switch (focus.kind) {
+      case "event":
+        map.showEvent(focus);
+        break;
+      case "location":
+        map.showLocation(focus);
+        break;
+      default:
+        map.focusLocations(focus.locationIds, focus.coordinates, {
+          path: focus.path,
+        });
+    }
+  }, [focus, locations]);
+
+  const passages = focus && "passages" in focus ? (focus.passages ?? []) : [];
+  return (
+    <div style={{ position: "relative", height: "100%", width: "100%" }}>
+      <MapView
+        ref={mapRef}
+        locations={locations}
+        initialEventLayers={INLINE_LAYERS}
+        showNav={false}
+      />
+      {focus && "passages" in focus && (
+        <aside
+          data-testid="mcp-focus-panel"
+          className="absolute left-3 top-3 z-30 max-h-[70%] w-72 overflow-y-auto rounded-lg bg-white/95 p-3 text-sm shadow-xl"
+        >
+          <h2 className="mb-2 font-semibold text-slate-900">{focus.title}</h2>
+          {passages.length === 0 && (
+            <p className="text-slate-500">
+              No passages to show for this document.
+            </p>
+          )}
+          <ol className="space-y-2">
+            {passages.map((p, i) => (
+              <li
+                key={i}
+                data-testid="mcp-focus-passage"
+                data-focused={p.focused ? "true" : undefined}
+                className={`rounded border p-2 ${p.focused ? "border-amber-400 bg-amber-50" : "border-slate-200"}`}
+              >
+                <p className="text-slate-700">
+                  <Snippet text={p.snippet} />
+                </p>
+                <p className="mt-1 text-xs text-slate-500">{p.anchor}</p>
+              </li>
+            ))}
+          </ol>
+        </aside>
+      )}
+    </div>
+  );
 }
 
 async function main() {
@@ -50,14 +127,13 @@ async function main() {
 
   const root = createRoot(rootEl);
 
-  const render = (locations: HistoricalLocation[]) =>
+  const render = (
+    locations: HistoricalLocation[],
+    focus: McpFocusTarget | null = null,
+  ) =>
     root.render(
       <StrictMode>
-        <MapView
-          locations={locations}
-          initialEventLayers={INLINE_LAYERS}
-          showNav={false}
-        />
+        <McpMap locations={locations} focus={focus} />
       </StrictMode>,
     );
 
@@ -71,7 +147,7 @@ async function main() {
   // All handlers must be registered BEFORE connect()
   mcpApp.ontoolresult = (result) => {
     const params = (result.structuredContent as McpAppParams | null) ?? {};
-    render(params.locations ?? []);
+    render(params.locations ?? [], params.focus ?? null);
   };
 
   mcpApp.onhostcontextchanged = (ctx) => {

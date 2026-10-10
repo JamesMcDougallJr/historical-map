@@ -1046,3 +1046,25 @@ export async function getDocumentPanel(
     })),
   };
 }
+
+/** One paragraph by key — show_map's passage focus. Null when absent. */
+export async function getPassage(
+  documentId: string,
+  seq: number,
+): Promise<{
+  anchor: string;
+  text: string;
+  documentTitle: string | null;
+} | null> {
+  if (!(await documentsAvailable())) return null;
+  if (!/^[0-9a-f-]{36}$/i.test(documentId)) return null;
+  const [row] = await sqlClient()<
+    { anchor: string; text: string; title: string | null }[]
+  >`
+    SELECT p.anchor, p.text, d.title
+    FROM document_passages p JOIN ingest_documents d ON d.id = p.document_id
+    WHERE p.document_id = ${documentId}::uuid AND p.seq = ${seq}`;
+  return row
+    ? { anchor: row.anchor, text: row.text, documentTitle: row.title }
+    : null;
+}

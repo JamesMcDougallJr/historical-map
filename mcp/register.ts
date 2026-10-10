@@ -18,7 +18,11 @@ import * as storage from "../lib/server-storage";
 import { generateLocationId, generateEventId } from "../app/map/utils/storage";
 import type { HistoricalLocation } from "../app/map/types";
 import type { EventQuery } from "../app/map/utils/event-query";
+import { SEARCH_KINDS } from "../packages/domain/src/search";
+import { search as runSearch } from "../lib/search";
+import { getDocumentPanel, getPassage } from "../lib/search-postgres";
 import { loadAppHtml } from "./app-html";
+import type { McpFocusKind, McpFocusTarget } from "./focus-types";
 
 export const RESOURCE_URI = "ui://historical-map/mcp-app.html";
 
@@ -117,6 +121,121 @@ function trimForTransport(locations: HistoricalLocation[]): {
   };
 }
 
+/**
+ * Turns show_map's `{ kind, id }` into what the App needs to act on it, or
+ * null when it doesn't exist. Documents and passages need Postgres; on the
+ * static backend they resolve to null and the summary says so.
+ */
+async function resolveFocus(
+  kind: McpFocusKind,
+  id: string,
+  q: string | undefined,
+): Promise<McpFocusTarget | null> {
+  switch (kind) {
+    case "event": {
+      for (const location of await storage.getLocations()) {
+        const event = location.events.find((e) => e.id === id);
+        if (event) {
+          return {
+            kind: "event",
+            locationId: location.id,
+            locationName: location.name,
+            coordinates: location.coordinates,
+            eventId: event.id,
+            sourceId: event.sourceId ?? null,
+          };
+        }
+      }
+      return null;
+    }
+    case "location": {
+      const location = await storage.getLocation(id);
+      return location
+        ? {
+            kind: "location",
+            locationId: location.id,
+            locationName: location.name,
+            coordinates: location.coordinates,
+          }
+        : null;
+    }
+    case "sequence": {
+      const result = await storage.getEventGroup(id);
+      if (!result) return null;
+      const byEvent = new Map<string, HistoricalLocation>();
+      for (const location of result.members) {
+        for (const e of location.events) byEvent.set(e.id, location);
+      }
+      const ordered = result.group.memberEventIds
+        .map((eventId) => byEvent.get(eventId))
+        .filter((l): l is HistoricalLocation => Boolean(l));
+      return {
+        kind: "sequence",
+        title: result.group.title,
+        locationIds: Array.from(new Set(ordered.map((l) => l.id))),
+        coordinates: ordered.map((l) => l.coordinates),
+        path: true,
+      };
+    }
+    case "person": {
+      const results = (await storage.searchEvents({ person: id })).sort(
+        (a, b) => a.event.date.localeCompare(b.event.date),
+      );
+      if (results.length === 0) return null;
+      return {
+        kind: "person",
+        title: id,
+        locationIds: Array.from(new Set(results.map((r) => r.location.id))),
+        coordinates: results.map((r) => r.location.coordinates),
+        path: true,
+      };
+    }
+    case "document":
+    case "passage": {
+      if (!process.env["POSTGRES_URL"]) return null;
+      const [documentId, seqText] = kind === "passage" ? id.split(":") : [id];
+      if (!documentId) return null;
+      const panel = await getDocumentPanel(documentId, q ?? null);
+      if (!panel) return null;
+      const passages = panel.passages.map((p) => ({
+        anchor: p.anchor,
+        snippet: p.snippet,
+        focused: kind === "passage" && String(p.seq) === seqText,
+      }));
+      if (kind === "passage" && !passages.some((p) => p.focused)) {
+        const passage = await getPassage(documentId, Number(seqText));
+        if (!passage) return null;
+        passages.unshift({
+          anchor: passage.anchor,
+          snippet: passage.text,
+          focused: true,
+        });
+      }
+      const events = await storage.searchEvents({ documentId });
+      return {
+        kind,
+        title: panel.title ?? "Document",
+        locationIds: Array.from(new Set(events.map((r) => r.location.id))),
+        coordinates: events.map((r) => r.location.coordinates),
+        path: false,
+        passages,
+      };
+    }
+  }
+}
+
+/** The locations a focus target draws, so show_map always includes them. */
+async function focusLocations(
+  focus: McpFocusTarget,
+): Promise<HistoricalLocation[]> {
+  const ids =
+    focus.kind === "event" || focus.kind === "location"
+      ? [focus.locationId]
+      : focus.locationIds.slice(0, 25);
+  const found = await Promise.all(ids.map((id) => storage.getLocation(id)));
+  return found.filter((l): l is HistoricalLocation => Boolean(l));
+}
+
 export interface RegisterOptions {
   /** Expose add_event / delete_location. Never enable on a public endpoint. */
   writable?: boolean;
@@ -148,13 +267,36 @@ export function registerAll(
           .string()
           .optional()
           .describe("Pan to and highlight this location ID"),
+        focus: z
+          .object({
+            kind: z.enum([
+              "event",
+              "location",
+              "sequence",
+              "person",
+              "document",
+              "passage",
+            ]),
+            id: z.string(),
+          })
+          .optional()
+          .describe(
+            "Open one result from the `search` tool on the map: pass its kind and id. Events and places open pinned; sequences, people and documents filter the map to their events.",
+          ),
       },
       _meta: { ui: { resourceUri: RESOURCE_URI } },
     },
     async (args): Promise<CallToolResult> => {
-      const matches = args.query
+      const focus = args.focus
+        ? await resolveFocus(args.focus.kind, args.focus.id, args.query)
+        : null;
+      const searched = args.query
         ? (await storage.searchEvents({ q: args.query })).map((r) => r.location)
         : await storage.getLocations();
+      // The focus target's pins must be among those drawn.
+      const matches = focus
+        ? [...(await focusLocations(focus)), ...searched]
+        : searched;
 
       // Deduplicate — a location appears once per matching event
       const seen = new Set<string>();
@@ -171,12 +313,74 @@ export function registerAll(
         : `Showing map with ${locations.length} location(s).`;
 
       return {
-        content: [{ type: "text", text: summary }],
+        content: [
+          {
+            type: "text",
+            text:
+              args.focus && !focus
+                ? `${summary} (Could not find ${args.focus.kind} ${args.focus.id} to focus.)`
+                : summary,
+          },
+        ],
         structuredContent: {
           locations,
           filterYear: args.filterYear,
           locationId: args.locationId,
+          focus,
         },
+      };
+    },
+  );
+
+  // ── Search ────────────────────────────────────────────────────────────────
+  // The same core as GET /api/search (lib/search.ts) — no HTTP hop to our own
+  // API. Read-only, so safe on the public connector.
+
+  server.tool(
+    "search",
+    "Search the historical map: events, sequences, places, people, source documents and their passages. Returns typed hits; open one on the map with show_map's `focus`.",
+    {
+      q: z
+        .string()
+        .max(200)
+        .describe(
+          "What to find. Names, places, dates ('1840s', '18th century') and quoted phrases all work.",
+        ),
+      kinds: z
+        .array(z.enum(SEARCH_KINDS))
+        .optional()
+        .describe("Restrict result kinds. Default: all."),
+      semantic: z
+        .boolean()
+        .optional()
+        .describe(
+          "Also match by meaning. Use for descriptions of an event rather than its name. `modes.semantic` in the response says whether it ran.",
+        ),
+      fromYear: z
+        .number()
+        .optional()
+        .describe("Timeline filter: from this year"),
+      toYear: z.number().optional().describe("Timeline filter: to this year"),
+      limit: z.number().int().min(1).max(25).optional(),
+    },
+    async (args): Promise<CallToolResult> => {
+      const result = await runSearch({
+        q: args.q,
+        mode: args.semantic ? "hybrid" : "lexical",
+        prefix: false,
+        kinds: args.kinds ?? [...SEARCH_KINDS],
+        ...(args.limit ? { limit: args.limit } : {}),
+        ...(args.fromYear !== undefined || args.toYear !== undefined
+          ? {
+              timeline: [
+                args.fromYear ?? -Infinity,
+                args.toYear ?? Infinity,
+              ] as [number, number],
+            }
+          : {}),
+      });
+      return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
       };
     },
   );

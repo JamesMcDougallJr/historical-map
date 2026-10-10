@@ -1121,6 +1121,13 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         pinStyleStateRef.current.focus = new Set(locationIds);
         restylePins();
         const map = mapRef.current;
+        // No map yet (the MCP App applies focus right after its first
+        // render): the filter is set; draw the path and fit once it exists.
+        if (!map) {
+          pendingActionRef.current = () =>
+            this.focusLocations(locationIds, coordinates, opts);
+          return;
+        }
         if (map) {
           if (focusPathLayerRef.current) {
             map.removeLayer(focusPathLayerRef.current);

@@ -438,6 +438,15 @@ origin gets blocked. Origins live in `TILE_ORIGINS` in `mcp/register.ts` and go 
 registration (the `resources/list` fallback) and on the content item (which takes
 precedence at read time).
 
+**The `search` tool** (read-only, both transports) is a thin wrapper over `lib/search.ts`, the
+same core as `/api/search` — keep it that way rather than letting the two drift. Its hits feed
+`show_map`'s `focus: { kind, id }`, which the server resolves (`resolveFocus` in
+`mcp/register.ts`, types in `mcp/focus-types.ts`) and the App applies through MapView's
+imperative handle. Document/passage focus shows text and pages only, never the original file
+(its presigned URL is a CSP-blocked origin). `npm run mcp:verify` drives the stdio server's
+`search` against the JSON tier (CI runs it); `e2e/mcp-app-focus.spec.ts` is the only harness for
+the inline App — it builds a development bundle (for `__olMap`) and fakes the host handshake.
+
 Arbitrary user tile URLs and Allmaps IIIF overlays cannot work in the sandbox: their origins
 are unknowable ahead of time. They work normally at `/map`. See `mcp/README.md`.
 

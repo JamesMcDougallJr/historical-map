@@ -16,6 +16,7 @@
     "type-check": "tsc --noEmit",
     "build:mcp": "vite build --config vite.config.mcp.ts",
     "mcp": "tsx mcp/server.ts",
+    "mcp:verify": "tsx scripts/verify-mcp-search.ts",
     "seed:db": "tsx scripts/seed-db.ts",
     "db:ensure-schema": "tsx scripts/ensure-schema.ts",
     "db:backup": "tsx scripts/db-backup.ts",

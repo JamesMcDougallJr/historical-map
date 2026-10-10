@@ -60,6 +60,7 @@ Ask Claude:
 - **"Show events from the 1860s"** → `show_map` with a query filter
 - **"Add the Golden Spike ceremony to my map"** → `add_event` tool writes to `data/map-data.json`
 - **"What events do I have near Salt Lake City?"** → `search_events` tool
+- **"Find the Mountain Meadows sequence and show it"** → `search`, then `show_map` with `focus`
 
 ## Available Tools
 
@@ -67,6 +68,7 @@ Ask Claude:
 |------|-------------|------------------|
 | `show_map` | Renders the interactive map inline (with optional keyword filter) | yes |
 | `search_events` | Returns matching events as JSON (no UI) | yes |
+| `search` | Typed hits — events, sequences, places, people, documents, passages — as JSON, the same core as `/api/search`; open one with `show_map`'s `focus` | yes |
 | `list_locations` | Lists all locations with event counts | yes |
 | `add_event` | Creates a location + event, saves to `data/map-data.json` | **no** |
 | `delete_location` | Removes a location and its events | **no** |
