@@ -40,6 +40,8 @@ import {
   QUEUE_NAMES,
   waitForQueueIdle,
 } from "../libs/queue/src";
+import { SPLITTER_VERSION } from "../libs/parsers/src/passages/split-passages";
+import { backfillPassages } from "./backfill-passages";
 
 async function resetIngestTables(): Promise<void> {
   if (process.env["ALLOW_TEST_DB_RESET"] !== "1") {
@@ -287,6 +289,8 @@ async function main(): Promise<void> {
 
     console.log("Asserting results...");
     await assertResults();
+    console.log("Asserting search passages...");
+    await assertPassages();
     console.log("OK — ingestion fixture pipeline produced the expected rows.");
   } finally {
     await Promise.all(queues.map((q) => q.close()));
@@ -332,6 +336,87 @@ async function assertResults(): Promise<void> {
     }
   } finally {
     await dataSource.destroy();
+  }
+}
+
+interface PassageSnapshot {
+  rows: string;
+  links: string;
+  extractions: number;
+}
+
+async function snapshotPassages(): Promise<PassageSnapshot> {
+  const dataSource = createDataSource();
+  await dataSource.initialize();
+  try {
+    const rows = await dataSource.query(
+      `SELECT document_id, seq, anchor, text, extractor_version, splitter_version
+         FROM document_passages ORDER BY document_id, seq`,
+    );
+    const links = await dataSource.query(
+      `SELECT document_id, seq, event_id FROM passage_events
+        ORDER BY document_id, seq, event_id`,
+    );
+    const [{ n }] = await dataSource.query(
+      `SELECT count(*)::int AS n FROM ingest_extractions`,
+    );
+    return { rows: JSON.stringify(rows), links: JSON.stringify(links), extractions: n };
+  } finally {
+    await dataSource.destroy();
+  }
+}
+
+/**
+ * extract-text wrote document_passages for every document, publish linked
+ * every event whose quote is verbatim in a paragraph (the fake engine quotes
+ * whole blocks, so all three), and re-cutting from the stored artifacts is
+ * idempotent and touches nothing upstream.
+ */
+async function assertPassages(): Promise<void> {
+  const dataSource = createDataSource();
+  await dataSource.initialize();
+  try {
+    const perDoc: Array<{ id: string; n: number; versions: string }> =
+      await dataSource.query(
+        `SELECT d.id, count(p.seq)::int AS n,
+                string_agg(DISTINCT p.extractor_version || '/' || p.splitter_version, ',') AS versions
+           FROM ingest_documents d
+           LEFT JOIN document_passages p ON p.document_id = d.id
+          GROUP BY d.id`,
+      );
+    for (const doc of perDoc) {
+      if (doc.n === 0) throw new Error(`document ${doc.id} has no passages`);
+      if (!doc.versions?.endsWith(`/${SPLITTER_VERSION}`)) {
+        throw new Error(`document ${doc.id} passages at versions ${doc.versions}`);
+      }
+    }
+    const unlinked: Array<{ title: string }> = await dataSource.query(
+      `SELECT e.title FROM events e
+        WHERE e.source_id = 'local-directory'
+          AND NOT EXISTS (SELECT 1 FROM passage_events pe WHERE pe.event_id = e.id)`,
+    );
+    if (unlinked.length > 0) {
+      throw new Error(
+        `expected every fixture event linked to its paragraph, unlinked: ${unlinked
+          .map((e) => e.title)
+          .join(", ")}`,
+      );
+    }
+  } finally {
+    await dataSource.destroy();
+  }
+
+  const before = await snapshotPassages();
+  const result = await backfillPassages({});
+  if (result.indexed !== 0) {
+    throw new Error(`backfill re-indexed ${result.indexed} current document(s)`);
+  }
+  await backfillPassages({ force: true });
+  const after = await snapshotPassages();
+  if (after.rows !== before.rows) throw new Error("re-cut changed document_passages");
+  if (after.links !== before.links) throw new Error("re-cut changed passage_events");
+  if (after.extractions !== before.extractions) {
+    throw new Error("re-cutting passages created ingest_extractions rows");
   }
 }
 

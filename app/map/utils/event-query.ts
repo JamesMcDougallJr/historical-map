@@ -22,6 +22,8 @@ export interface EventQuery {
   groupId?: string;
   /** With `groupId`, also include events belonging to its descendant groups. */
   includeDescendants?: boolean;
+  /** Restrict to events extracted from this ingested document (search's "show on map"). */
+  documentId?: string;
 }
 
 export interface EventSearchResult {
@@ -52,6 +54,9 @@ export function parseEventQuery(params: URLSearchParams): EventQuery {
       query.bbox = parts as [number, number, number, number];
     }
   }
+
+  const documentId = params.get("document");
+  if (documentId) query.documentId = documentId;
 
   const groupId = params.get("group");
   if (groupId) {

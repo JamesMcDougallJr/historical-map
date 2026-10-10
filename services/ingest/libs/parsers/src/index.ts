@@ -5,3 +5,4 @@ export * from "./parsers.module";
 export * from "./parsers/html.parser";
 export * from "./parsers/pdf.parser";
 export * from "./parsers/text.parser";
+export * from "./passages";

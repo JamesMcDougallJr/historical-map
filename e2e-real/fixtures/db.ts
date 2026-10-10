@@ -3,6 +3,7 @@
 // webServer up yet.
 import {
   ensureSchema,
+  sqlClient,
   upsertEventGroup,
   upsertLocation,
   upsertSource,
@@ -10,7 +11,20 @@ import {
 } from "../../lib/postgres-storage";
 import { applyMartinFunctions } from "../../scripts/apply-martin-functions";
 import { FX_GROUP, FX_LOCATIONS, FX_SOURCES } from "./seed-data";
-import { SEARCH_GROUP, SEARCH_LOCATIONS, SEARCH_SOURCE } from "./search-seed";
+import {
+  FX_INGEST_SOURCE_ID,
+  SEARCH_DOCUMENT_EVENTS,
+  SEARCH_DOCUMENT_LOCATION,
+  SEARCH_DOCUMENTS,
+  SEARCH_GROUP,
+  SEARCH_LOCATIONS,
+  SEARCH_SOURCE,
+} from "./search-seed";
+import {
+  replacePassages,
+  type Queryable,
+  type TransactionalQueryable,
+} from "../../services/ingest/libs/parsers/src/passages/passage-store";
 
 export async function seedFixtureData(): Promise<void> {
   await ensureSchema();
@@ -31,4 +45,64 @@ export async function seedFixtureData(): Promise<void> {
     description: SEARCH_GROUP.description,
   });
   await setEventGroupMembers(SEARCH_GROUP.id, SEARCH_GROUP.memberEventIds);
+  await seedSearchDocuments();
+}
+
+/**
+ * The search corpus's ingested documents: ingest_sources/ingest_documents
+ * rows, their passages, and events published from them.
+ *
+ * The ingest tables belong to services/ingest (and the ingestion fixture
+ * test truncates them), so this deletes only its own rows, by id, rather than
+ * truncating — neither suite can wipe the other's data. Needs ingest
+ * migrations applied: `npm run migrate --workspace=services/ingest`.
+ */
+export async function seedSearchDocuments(): Promise<void> {
+  const sql = sqlClient();
+  const [row] = await sql<{ ok: boolean }[]>`
+    SELECT to_regclass('document_passages') IS NOT NULL AS ok`;
+  if (!row?.ok) {
+    throw new Error(
+      "document_passages is missing — run `npm run migrate --workspace=services/ingest` " +
+        "before the real-backend suite (search fixtures need the ingest tables).",
+    );
+  }
+
+  const ids = SEARCH_DOCUMENTS.map((d) => d.id);
+  await sql`DELETE FROM ingest_documents WHERE id = ANY(${ids}::uuid[])`;
+  await sql`DELETE FROM ingest_sources WHERE id = ${FX_INGEST_SOURCE_ID}::uuid OR key = ${SEARCH_SOURCE.id}`;
+  await sql`
+    INSERT INTO ingest_sources (id, key, display_name, enabled)
+    VALUES (${FX_INGEST_SOURCE_ID}::uuid, ${SEARCH_SOURCE.id}, ${SEARCH_SOURCE.name}, false)`;
+  for (const doc of SEARCH_DOCUMENTS) {
+    await sql`
+      INSERT INTO ingest_documents (id, source_id, external_id, url, title, status)
+      VALUES (${doc.id}::uuid, ${FX_INGEST_SOURCE_ID}::uuid, ${doc.externalId},
+              ${"file:///fixtures/" + doc.externalId}, ${doc.title}, 'published')`;
+  }
+
+  await upsertLocation({ ...SEARCH_DOCUMENT_LOCATION, events: [] });
+  const [doc1] = SEARCH_DOCUMENTS;
+  for (const e of SEARCH_DOCUMENT_EVENTS) {
+    await sql`
+      INSERT INTO events (id, location_id, source_id, title, date, description,
+                          source, date_precision, document_id, anchor)
+      VALUES (${e.id}, ${SEARCH_DOCUMENT_LOCATION.id}, ${SEARCH_SOURCE.id}, ${e.title},
+              ${e.date}, ${e.description}, ${e.source}, ${e.datePrecision},
+              ${doc1!.id}::uuid, ${e.anchor})
+      ON CONFLICT (id) DO NOTHING`;
+  }
+
+  // The real writer: split, insert, then link events to paragraphs.
+  const asQueryable = (run: (q: string, p?: unknown[]) => Promise<unknown>): Queryable => ({
+    query: run,
+  });
+  const db: TransactionalQueryable = {
+    query: (q, p) => sql.unsafe(q, (p ?? []) as never[]),
+    transaction: (fn) =>
+      sql.begin((tx) => fn(asQueryable((q, p) => tx.unsafe(q, (p ?? []) as never[])))) as never,
+  };
+  for (const doc of SEARCH_DOCUMENTS) {
+    await replacePassages(db, doc.id, doc.segments, 2);
+  }
 }

@@ -1,5 +1,5 @@
 import { Inject, Injectable } from "@nestjs/common";
-import { InjectRepository } from "@nestjs/typeorm";
+import { InjectDataSource, InjectRepository } from "@nestjs/typeorm";
 import type { ExtractedEvent } from "@historical-map/domain";
 import { JobLogger } from "@app/common";
 import {
@@ -9,9 +9,10 @@ import {
   jsonb,
 } from "@app/database";
 import { GeocodingService } from "@app/geocoding";
+import { relinkPassageEvents } from "@app/parsers";
 import type { PublishJobData } from "@app/queue";
 import type { Job } from "bullmq";
-import { IsNull, Repository } from "typeorm";
+import { DataSource, IsNull, Repository } from "typeorm";
 import { MapWriterService } from "./map-writer.service";
 
 /**
@@ -38,6 +39,7 @@ export class PublishingService {
     // injection of a cross-file class silently resolves to undefined under tsx.
     @Inject(GeocodingService) private readonly geocoding: GeocodingService,
     @Inject(MapWriterService) private readonly mapWriter: MapWriterService,
+    @InjectDataSource() private readonly dataSource: DataSource,
   ) {}
 
   async publish(job: Job<PublishJobData>): Promise<void> {
@@ -127,6 +129,11 @@ export class PublishingService {
         else alreadyPresent++;
       }
 
+      // Which paragraph each event was quoted from, for search. Re-derived for
+      // the whole document, so it's idempotent and also covers events an
+      // earlier run published.
+      const linked = await relinkPassageEvents(this.dataSource, documentId);
+
       await this.documentRepo.update(documentId, {
         status: "published",
         completedAt: new Date(),
@@ -136,7 +143,8 @@ export class PublishingService {
       await this.jobLogger.log(
         job,
         `candidates=${candidates.length} published=${published} ` +
-          `already-present=${alreadyPresent} demoted-to-review=${demoted}`,
+          `already-present=${alreadyPresent} demoted-to-review=${demoted} ` +
+          `passage-links=${linked}`,
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

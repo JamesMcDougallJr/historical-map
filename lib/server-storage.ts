@@ -259,6 +259,7 @@ export async function searchEvents(
     for (const event of location.events) {
       if (sourceFilter && !sourceFilter.has(event.sourceId ?? "")) continue;
       if (groupEventIds && !groupEventIds.has(event.id)) continue;
+      if (query.documentId && event.documentId !== query.documentId) continue;
 
       if (lower) {
         const matchesText =

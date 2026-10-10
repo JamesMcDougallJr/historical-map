@@ -1,13 +1,19 @@
 import { test, expect, type APIRequestContext } from "@playwright/test";
-import type { SearchHit, SearchResponse } from "../../../app/map/types";
+import type {
+  PassageHit,
+  SearchHit,
+  SearchResponse,
+} from "../../../app/map/types";
+import { FX_DOC_1, FX_DOC_2 } from "../../fixtures/search-seed";
 
 // GET /api/search against real Postgres, over the search fixture corpus
 // (e2e-real/fixtures/search-seed.ts). Tests *features* — stemming, accents,
 // filters, kinds. Ranking quality lives in search-golden.spec.ts, so a
 // ranking change that breaks a golden query is obviously that kind of failure.
 //
-// Document and passage kinds arrive with document_passages; their cases are
-// added alongside it.
+// Document and passage cases use the two ingested fixture documents
+// (FX_DOC_1/FX_DOC_2 in search-seed.ts), written through the real ingest
+// passage writer.
 
 // The webServer sets MAP_API_KEY, and /api/search follows /api/data/search's
 // policy of gating on it when set.
@@ -119,7 +125,7 @@ test.describe("GET /api/search (real backend)", () => {
     expect(res.modes).toEqual({
       lexical: true,
       semantic: false,
-      documents: false,
+      documents: true,
     });
   });
 
@@ -314,5 +320,168 @@ test.describe("GET /api/search (real backend)", () => {
     });
     const body = (await res.json()) as { results: { event: { id: string } }[] };
     expect(body.results.map((r) => r.event.id)).toContain("fx-ev-massacre");
+  });
+
+  // ── Documents and passages ────────────────────────────────────────────────
+
+  const passages = (hits: SearchHit[]) =>
+    hits.filter((h): h is PassageHit => h.kind === "passage");
+
+  test("passages and documents come back typed", async ({ request }) => {
+    const res = await search(request, { q: "chronicle" });
+    expect(passages(res.hits).length).toBeGreaterThan(0);
+    expect(ids(res.hits, "document")).toContain(FX_DOC_1);
+  });
+
+  test("passage cap: at most 2 per document; the document counts all 8", async ({
+    request,
+  }) => {
+    const res = await search(request, { q: "chronicle", limit: "20" });
+    const fromDoc1 = passages(res.hits).filter(
+      (p) => p.documentId === FX_DOC_1,
+    );
+    expect(fromDoc1.length).toBeLessThanOrEqual(2);
+    const doc = res.hits.find(
+      (h) => h.kind === "document" && h.id === FX_DOC_1,
+    );
+    expect(doc && "matchCount" in doc ? doc.matchCount : null).toBe(8);
+  });
+
+  test("paragraph grain: the snippet is that paragraph, not its page", async ({
+    request,
+  }) => {
+    const hits = passages((await search(request, { q: "zephyr" })).hits);
+    expect(hits.map((p) => p.anchor)).toEqual(["p.1¶3"]);
+    expect(hits[0]!.snippet).toContain("\u0002zephyr\u0003");
+    // Words from other paragraphs on page 1 aren't in it.
+    expect(hits[0]!.snippet).not.toMatch(/ochre|ramparts|weavers/);
+  });
+
+  test("a paragraph crossing a page break is anchored where it starts", async ({
+    request,
+  }) => {
+    const hits = passages((await search(request, { q: "quillwork" })).hits);
+    expect(hits.map((p) => p.anchor)).toEqual(["p.1¶4"]);
+  });
+
+  test("a passage lists the event quoted from it", async ({ request }) => {
+    // "ramparts" is in p.1¶2 but not in the event's own quote, so the passage
+    // isn't folded into the event.
+    const hit = passages((await search(request, { q: "ramparts" })).hits)[0];
+    expect(hit?.anchor).toBe("p.1¶2");
+    expect(hit?.eventIds).toEqual(["fx-ev-doc-q1"]);
+  });
+
+  test("one sentence, one hit: the event carries its matching quote paragraph", async ({
+    request,
+  }) => {
+    const res = await search(request, { q: "obsidian fortress" });
+    const event = res.hits.find((h) => h.id === "fx-ev-doc-q1");
+    expect(event?.kind).toBe("event");
+    expect(
+      event && "quotePassage" in event ? event.quotePassage?.anchor : null,
+    ).toBe("p.1¶2");
+    expect(ids(res.hits, "passage")).not.toContain(`${FX_DOC_1}:2`);
+  });
+
+  test("an unlinked passage stays a passage hit", async ({ request }) => {
+    const hit = passages((await search(request, { q: "basalt" })).hits)[0];
+    expect(hit?.anchor).toBe("p.3¶2");
+    expect(hit?.eventIds).toEqual([]);
+  });
+
+  test("lenient timeline rule for undated passages", async ({ request }) => {
+    // FX_DOC_1's events span 1650–1700; nothing is dated 1660–1670.
+    const inSpan = await search(request, {
+      q: "basalt",
+      from: "1660",
+      to: "1670",
+    });
+    expect(passages(inSpan.hits).map((p) => p.anchor)).toEqual(["p.3¶2"]);
+    // A document hit is stricter: it needs an event actually in range.
+    expect(ids(inSpan.hits, "document")).not.toContain(FX_DOC_1);
+
+    const outOfSpan = await search(request, {
+      q: "basalt",
+      from: "1800",
+      to: "1900",
+    });
+    expect(passages(outOfSpan.hits)).toEqual([]);
+  });
+
+  test("a passage's markup comes back as inert text", async ({ request }) => {
+    const hit = passages((await search(request, { q: "lantern" })).hits)[0]!;
+    expect(hit.snippet).toContain("\u0002lantern\u0003");
+    expect(hit.snippet).not.toContain("<script");
+  });
+
+  test("a document title match outranks body matches", async ({ request }) => {
+    const res = await search(request, { q: "ledger" });
+    const doc = res.hits.find((h) => h.kind === "document");
+    expect(doc?.id).toBe(FX_DOC_2);
+    expect(doc?.matchedOn).toContain("title");
+  });
+
+  test("an unlinked event keeps its page anchor and no passage claims it", async ({
+    request,
+  }) => {
+    const res = await request.get(`/api/documents/${FX_DOC_1}?q=chronicle`, {
+      headers: HEADERS,
+    });
+    expect(res.status()).toBe(200);
+    const panel = (await res.json()) as {
+      passages: { seq: number; anchor: string; eventIds: string[] }[];
+      events: { id: string; anchor: string | null }[];
+    };
+    const unlinked = panel.events.find((e) => e.id === "fx-ev-doc-unlinked");
+    expect(unlinked?.anchor).toBe("p.2");
+    expect(panel.passages.flatMap((p) => p.eventIds)).not.toContain(
+      "fx-ev-doc-unlinked",
+    );
+  });
+
+  test("document panel endpoint", async ({ request }) => {
+    const get = async (path: string) => {
+      const res = await request.get(path, { headers: HEADERS });
+      expect(res.status()).toBe(200);
+      return (await res.json()) as {
+        title: string;
+        passages: { seq: number; anchor: string }[];
+        events: { id: string }[];
+      };
+    };
+    const panel = await get(`/api/documents/${FX_DOC_1}?q=chronicle`);
+    expect(panel.title).toBe("Annals of the Obsidian Basin");
+    const seqs = panel.passages.map((p) => p.seq);
+    expect(seqs).toHaveLength(8);
+    expect(seqs).toEqual([...seqs].sort((a, b) => a - b));
+    expect(panel.events.map((e) => e.id).sort()).toEqual([
+      "fx-ev-doc-q1",
+      "fx-ev-doc-q2",
+      "fx-ev-doc-unlinked",
+    ]);
+    // Without q: no passages, just the events.
+    expect((await get(`/api/documents/${FX_DOC_1}`)).passages).toEqual([]);
+    expect((await get(`/api/documents/${FX_DOC_2}`)).events).toEqual([]);
+
+    const missing = await request.get(
+      "/api/documents/00000000-0000-4000-8000-000000000000",
+      { headers: HEADERS },
+    );
+    expect(missing.status()).toBe(404);
+  });
+
+  test("EventQuery.documentId: /api/data/search?document= lists a document's events", async ({
+    request,
+  }) => {
+    const res = await request.get(`/api/data/search?document=${FX_DOC_1}`, {
+      headers: HEADERS,
+    });
+    const body = (await res.json()) as { results: { event: { id: string } }[] };
+    expect(body.results.map((r) => r.event.id).sort()).toEqual([
+      "fx-ev-doc-q1",
+      "fx-ev-doc-q2",
+      "fx-ev-doc-unlinked",
+    ]);
   });
 });

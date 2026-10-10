@@ -18,9 +18,11 @@ import type postgres from "postgres";
 import type {
   Bbox,
   DatePrecision,
+  DocumentHit,
   EventHit,
   LocationHit,
   MatchField,
+  PassageHit,
   SequenceHit,
   YearRange,
 } from "@/app/map/types";
@@ -574,5 +576,379 @@ export async function browseLocationIds(
   return {
     locationIds: rows.slice(0, cap).map((r) => r.location_id),
     truncated: rows.length > cap,
+  };
+}
+
+// ── Documents and passages ──────────────────────────────────────────────────
+//
+// Source text lives in `document_passages`, one row per paragraph, owned by
+// services/ingest (its migration, its writers). The web app only reads it, as
+// it already reads ingest_documents for "view source".
+//
+// Passages carry no date. With a date filter on, the plan's lenient rule
+// applies: a passage stays when its document's published events *span* the
+// range — an undated page about Aztec religion in a book whose events run
+// 1100–1900 is in for 1500–1600. A document hit is stricter: at least one of
+// its events must actually be in range.
+
+let documentsReady: boolean | null = null;
+
+/**
+ * Whether the ingest-owned search tables exist. A deploy that never ran
+ * ingest migrations (local dev on `npm run seed:db` alone) has no
+ * document_passages, and search should say "no documents" rather than 500.
+ * Only a positive answer is cached: the tables may appear later in a
+ * long-lived dev server.
+ */
+export async function documentsAvailable(): Promise<boolean> {
+  if (documentsReady) return true;
+  await ensureSchema();
+  const [row] = await sqlClient()<{ ok: boolean }[]>`
+    SELECT to_regclass('document_passages') IS NOT NULL
+       AND to_regclass('passage_events') IS NOT NULL AS ok`;
+  documentsReady = row?.ok ? true : null;
+  return Boolean(row?.ok);
+}
+
+/** Documents whose published events span `years` (the lenient passage rule). */
+function documentSpanFilter(sql: Sql, years: YearRange | undefined): Fragment {
+  if (!years) return sql``;
+  const lo = Number.isFinite(years[0]) ? years[0] : null;
+  const hi = Number.isFinite(years[1]) ? years[1] : null;
+  return sql`
+    AND p.document_id IN (
+      SELECT e.document_id FROM events e
+      WHERE e.document_id IS NOT NULL
+      GROUP BY e.document_id
+      HAVING (${lo}::int IS NULL OR max(event_hi_year(e.date, e.date_precision)) >= ${lo}::int)
+         AND (${hi}::int IS NULL OR min(event_lo_year(e.date, e.date_precision)) <= ${hi}::int))`;
+}
+
+function sourceKeyFilter(sql: Sql, input: PgSearchInput): Fragment {
+  const sourceIds = input.sourceIds?.length ? input.sourceIds : null;
+  return sql`AND (${sourceIds}::text[] IS NULL OR s.key = ANY(${sourceIds}))`;
+}
+
+interface PassageSearchRow {
+  document_id: string;
+  seq: number;
+  anchor: string | null;
+  doc_title: string | null;
+  source_key: string;
+  score: number;
+  event_ids: string[];
+  snippet: string;
+}
+
+/**
+ * The top paragraphs, at most `perDocument` from any one document so one long
+ * book can't fill the list. `exclude` holds `documentId:seq` keys already
+ * shown elsewhere (an event's own quote paragraph — see foldQuotePassages).
+ */
+export async function searchPassageHits(
+  input: PgSearchInput,
+  perDocument: number,
+  exclude: Set<string>,
+): Promise<PassageHit[]> {
+  const sql = sqlClient();
+  const excluded = Array.from(exclude);
+  const rows = await sql<PassageSearchRow[]>`
+    WITH ${withQueries(sql, input)},
+    matched AS (
+      SELECT p.document_id, p.seq, p.anchor, p.text,
+             d.title AS doc_title, s.key AS source_key,
+             ts_rank_cd(p.search_tsv, q.qe_any) AS score
+      FROM document_passages p
+      JOIN ingest_documents d ON d.id = p.document_id
+      JOIN ingest_sources s ON s.id = d.source_id, q
+      WHERE p.search_tsv @@ q.qe
+        AND NOT ((p.document_id::text || ':' || p.seq) = ANY(${excluded}::text[]))
+        ${documentSpanFilter(sql, input.years)}
+        ${sourceKeyFilter(sql, input)}
+    ),
+    capped AS (
+      SELECT m.*, row_number() OVER (PARTITION BY m.document_id ORDER BY m.score DESC, m.seq) AS rn
+      FROM matched m
+    ),
+    top AS (
+      SELECT * FROM capped WHERE rn <= ${perDocument}
+      ORDER BY score DESC, document_id, seq
+      LIMIT ${input.limit}
+    )
+    SELECT t.document_id, t.seq, t.anchor, t.doc_title, t.source_key, t.score,
+           coalesce((SELECT array_agg(pe.event_id ORDER BY pe.event_id) FROM passage_events pe
+                      WHERE pe.document_id = t.document_id AND pe.seq = t.seq), '{}') AS event_ids,
+           ts_headline('hm_english', ${clean(sql, sql`t.text`)}, q.qe_any, ${HEADLINE_OPTS}) AS snippet
+    FROM top t, q
+    ORDER BY t.score DESC, t.document_id, t.seq`;
+
+  return rows.map((r) => ({
+    kind: "passage",
+    id: `${r.document_id}:${r.seq}`,
+    title: r.doc_title ?? "Untitled document",
+    documentId: r.document_id,
+    documentTitle: r.doc_title ?? "Untitled document",
+    sourceId: r.source_key,
+    anchor: r.anchor,
+    snippet: r.snippet,
+    score: Number(r.score),
+    eventIds: r.event_ids,
+    matchedOn: ["body"],
+  }));
+}
+
+interface DocumentSearchRow {
+  id: string;
+  title: string | null;
+  source_key: string;
+  match_count: number;
+  best_anchor: string | null;
+  best_seq: number | null;
+  title_hit: boolean;
+  event_count: number;
+  score: number;
+  snippet: string;
+}
+
+/**
+ * Documents roll up from the same passage matches as passage hits, plus a
+ * title match. Score: best passage, a little for how many matched, and a
+ * title match outranks any body match. `bestAnchor` is the top passage's, so
+ * clicking can deep-link with the existing `#page=N` machinery.
+ */
+export async function searchDocumentHits(
+  input: PgSearchInput,
+): Promise<Array<DocumentHit & { bestSeq: number | null; titleHit: boolean }>> {
+  const sql = sqlClient();
+  const lo =
+    input.years && Number.isFinite(input.years[0]) ? input.years[0] : null;
+  const hi =
+    input.years && Number.isFinite(input.years[1]) ? input.years[1] : null;
+  const filtered = input.years !== undefined;
+
+  const rows = await sql<DocumentSearchRow[]>`
+    WITH ${withQueries(sql, input)},
+    matched AS (
+      SELECT p.document_id, p.seq, p.anchor, p.text, ts_rank_cd(p.search_tsv, q.qe_any) AS r
+      FROM document_passages p, q
+      WHERE p.search_tsv @@ q.qe
+    ),
+    agg AS (
+      SELECT document_id, count(*)::int AS match_count, max(r) AS best
+      FROM matched GROUP BY document_id
+    ),
+    best AS (
+      SELECT DISTINCT ON (document_id) document_id, seq, anchor, text
+      FROM matched ORDER BY document_id, r DESC, seq
+    ),
+    docs AS (
+      SELECT d.id, d.title, s.key AS source_key,
+             coalesce(a.match_count, 0) AS match_count,
+             b.anchor AS best_anchor, b.seq AS best_seq, b.text AS best_text,
+             (to_tsvector('hm_english', coalesce(d.title, '')) @@ q.qe) AS title_hit,
+             (SELECT count(*)::int FROM events e
+               WHERE e.document_id = d.id
+                 AND (${lo}::int IS NULL OR event_hi_year(e.date, e.date_precision) >= ${lo}::int)
+                 AND (${hi}::int IS NULL OR event_lo_year(e.date, e.date_precision) <= ${hi}::int)
+             ) AS event_count,
+             coalesce(a.best, 0) + 0.05 * ln(1 + coalesce(a.match_count, 0))
+               + CASE WHEN to_tsvector('hm_english', coalesce(d.title, '')) @@ q.qe THEN 1 ELSE 0 END
+               AS score
+      FROM ingest_documents d
+      JOIN ingest_sources s ON s.id = d.source_id
+      LEFT JOIN agg a ON a.document_id = d.id
+      LEFT JOIN best b ON b.document_id = d.id, q
+      WHERE (a.document_id IS NOT NULL OR to_tsvector('hm_english', coalesce(d.title, '')) @@ q.qe)
+        ${sourceKeyFilter(sql, input)}
+    )
+    SELECT docs.id, docs.title, docs.source_key, docs.match_count, docs.best_anchor,
+           docs.best_seq, docs.title_hit, docs.event_count, docs.score,
+           ts_headline('hm_english',
+             ${clean(sql, sql`coalesce(docs.best_text, docs.title)`)}, q.qe_any, ${HEADLINE_OPTS}) AS snippet
+    FROM docs, q
+    WHERE NOT ${filtered}::boolean OR docs.event_count > 0
+    ORDER BY docs.score DESC, docs.id
+    LIMIT ${input.limit}`;
+
+  return rows.map((r) => {
+    const matchedOn: MatchField[] = [];
+    if (r.title_hit) matchedOn.push("title");
+    if (r.match_count > 0) matchedOn.push("body");
+    return {
+      kind: "document",
+      id: r.id,
+      title: r.title ?? "Untitled document",
+      snippet: r.snippet,
+      score: Number(r.score),
+      matchedOn,
+      sourceId: r.source_key,
+      bestAnchor: r.best_anchor,
+      matchCount: r.match_count,
+      eventCount: r.event_count,
+      bestSeq: r.best_seq,
+      titleHit: r.title_hit,
+    };
+  });
+}
+
+/**
+ * One sentence, one result. An event's source quote also sits inside the
+ * paragraph it was extracted from; when that paragraph matches too, it rides
+ * along on the event hit as `quotePassage` (the original wording is the
+ * better snippet anyway) and is kept out of the passage group.
+ *
+ * Returns the `documentId:seq` keys it attached, for the passage query to
+ * exclude.
+ */
+export async function foldQuotePassages(
+  input: PgSearchInput,
+  events: EventHit[],
+): Promise<Set<string>> {
+  const attached = new Set<string>();
+  if (events.length === 0) return attached;
+  const sql = sqlClient();
+  const rows = await sql<
+    {
+      event_id: string;
+      document_id: string;
+      seq: number;
+      anchor: string;
+      snippet: string;
+    }[]
+  >`
+    WITH ${withQueries(sql, input)}
+    SELECT DISTINCT ON (pe.event_id) pe.event_id, p.document_id, p.seq, p.anchor,
+           ts_headline('hm_english', ${clean(sql, sql`p.text`)}, q.qe_any, ${HEADLINE_OPTS}) AS snippet
+    FROM passage_events pe
+    JOIN document_passages p ON p.document_id = pe.document_id AND p.seq = pe.seq, q
+    WHERE pe.event_id = ANY(${events.map((e) => e.id)}::text[])
+      AND p.search_tsv @@ q.qe
+    ORDER BY pe.event_id, p.seq`;
+
+  const byEvent = new Map(rows.map((r) => [r.event_id, r]));
+  for (const event of events) {
+    const r = byEvent.get(event.id);
+    if (!r) continue;
+    event.quotePassage = {
+      documentId: r.document_id,
+      anchor: r.anchor,
+      snippet: r.snippet,
+    };
+    attached.add(`${r.document_id}:${r.seq}`);
+  }
+  return attached;
+}
+
+// ── Document panel ──────────────────────────────────────────────────────────
+
+export interface DocumentPanel {
+  id: string;
+  title: string | null;
+  sourceId: string;
+  sourceName: string;
+  extractedAt: string | null;
+  passages: Array<{
+    seq: number;
+    anchor: string;
+    snippet: string;
+    eventIds: string[];
+  }>;
+  events: Array<{
+    id: string;
+    title: string;
+    date: string;
+    datePrecision?: DatePrecision;
+    anchor: string | null;
+    locationId: string;
+  }>;
+}
+
+/**
+ * Everything the document panel (plans/21) shows: every paragraph matching
+ * `q`, in document order, and the document's published events. Null for an
+ * unknown document. Without `q`, no passages — the panel is the event list.
+ */
+export async function getDocumentPanel(
+  documentId: string,
+  q: string | null,
+): Promise<DocumentPanel | null> {
+  if (!(await documentsAvailable())) return null;
+  const sql = sqlClient();
+  if (!/^[0-9a-f-]{36}$/i.test(documentId)) return null;
+
+  const [doc] = await sql<
+    {
+      id: string;
+      title: string | null;
+      source_key: string;
+      source_name: string;
+      text_ready_at: Date | null;
+    }[]
+  >`
+    SELECT d.id, d.title, s.key AS source_key, s.display_name AS source_name, d.text_ready_at
+    FROM ingest_documents d JOIN ingest_sources s ON s.id = d.source_id
+    WHERE d.id = ${documentId}::uuid`;
+  if (!doc) return null;
+
+  let passages: DocumentPanel["passages"] = [];
+  const text = q?.trim();
+  if (text) {
+    const input: PgSearchInput = {
+      text,
+      anyText: text,
+      prefix: null,
+      trigram: false,
+      limit: 0,
+    };
+    const rows = await sql<
+      { seq: number; anchor: string; snippet: string; event_ids: string[] }[]
+    >`
+      WITH ${withQueries(sql, input)}
+      SELECT p.seq, p.anchor,
+             ts_headline('hm_english', ${clean(sql, sql`p.text`)}, q.qe_any, ${HEADLINE_OPTS}) AS snippet,
+             coalesce((SELECT array_agg(pe.event_id ORDER BY pe.event_id) FROM passage_events pe
+                        WHERE pe.document_id = p.document_id AND pe.seq = p.seq), '{}') AS event_ids
+      FROM document_passages p, q
+      WHERE p.document_id = ${documentId}::uuid AND p.search_tsv @@ q.qe
+      ORDER BY p.seq`;
+    passages = rows.map((r) => ({
+      seq: r.seq,
+      anchor: r.anchor,
+      snippet: r.snippet,
+      eventIds: r.event_ids,
+    }));
+  }
+
+  const events = await sql<
+    {
+      id: string;
+      title: string;
+      date: Date;
+      date_precision: DatePrecision | null;
+      anchor: string | null;
+      location_id: string;
+    }[]
+  >`
+    SELECT id, title, date, date_precision, anchor, location_id
+    FROM events WHERE document_id = ${documentId}::uuid
+    ORDER BY date, id`;
+
+  return {
+    id: doc.id,
+    title: doc.title,
+    sourceId: doc.source_key,
+    sourceName: doc.source_name,
+    extractedAt: doc.text_ready_at
+      ? new Date(doc.text_ready_at).toISOString()
+      : null,
+    passages,
+    events: events.map((e) => ({
+      id: e.id,
+      title: e.title,
+      date: isoDate(e.date),
+      ...(e.date_precision ? { datePrecision: e.date_precision } : {}),
+      anchor: e.anchor,
+      locationId: e.location_id,
+    })),
   };
 }

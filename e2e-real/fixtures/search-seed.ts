@@ -220,3 +220,109 @@ export const SEARCH_GROUP: Pick<EventGroup, "id" | "title" | "description"> & {
   description: "Events in southern Utah, September 1857 and after.",
   memberEventIds: ["fx-ev-siege", "fx-ev-massacre", "fx-ev-burial"],
 };
+
+// ── Source documents ────────────────────────────────────────────────────────
+//
+// Two ingested documents with passages, written through the real ingest
+// writer (replacePassages → splitPassages + relinkPassageEvents), so the
+// fixtures exercise the same code extract-text and publish run.
+//
+// `ingest_documents.id` is a uuid, so the plan's "fx-doc-1" is a fixed uuid.
+// Every paragraph is over the splitter's 200-char minimum, so each stays its
+// own passage; each carries one marker word no other paragraph uses, plus
+// "chronicle", which all eight share (the passage-cap case).
+
+export const FX_DOC_1 = "00000000-0000-4000-8000-0000000fd001";
+export const FX_DOC_2 = "00000000-0000-4000-8000-0000000fd002";
+export const FX_INGEST_SOURCE_ID = "00000000-0000-4000-8000-0000000f5001";
+
+/** The quote of fx-ev-doc-q1 — inside p.1¶2. */
+export const DOC_QUOTE_1 =
+  "The garrison surrendered the obsidian fortress at dawn after a long investment.";
+/** The quote of fx-ev-doc-q2 — inside p.3¶1. */
+export const DOC_QUOTE_2 =
+  "Traders carried turquoise north along the old road every spring.";
+
+const P1 =
+  "This chronicle opens with the ochre hills that ring the basin, where the first settlers built low houses of adobe and stone and counted their seasons by the rains that came and went across the wide, dry plain below.";
+const P2 = `The ramparts were tall and the chronicle is plain about what followed. ${DOC_QUOTE_1} Nobody inside had eaten for many days, and the commander saw no reason to prolong the suffering of his people.`;
+const P3 =
+  "A zephyr from the south carried the smell of rain for weeks before any fell, and the chronicle records that the elders gathered each evening in the plaza to argue over when to plant the maize and the beans.";
+// p.1¶4 runs across the page break: page 1 ends mid-sentence.
+const P4_PAGE1 =
+  "Among the crafts the chronicle praises most highly, none is described at greater length than the work of the weavers of the valley, who practised";
+const P4_PAGE2 =
+  "quillwork of remarkable delicacy, dyeing porcupine quills with roots and berries and stitching them into patterns that no two families shared.";
+const P5 =
+  "The marigold fields below the town were the pride of every household, and the chronicle lists, year by year, how many baskets of flowers were carried to the shrine on the hill for the autumn festival.";
+const P6 = `Commerce mattered as much as war, and the chronicle gives it equal space. ${DOC_QUOTE_2} They returned with shells, feathers and salt, and the market at the crossing grew larger each year.`;
+// Linked to no event — the lenient undated-passage rule's subject.
+const P7 =
+  "The basalt quarry east of the river supplied every grinding stone in the region, and the chronicle notes that its masons kept their methods secret, passing them only from father to son across generations.";
+// Untrusted text: ts_headline must never hand this back as markup.
+const P8 =
+  "A lantern hung at the gate of the mission every night. <script>alert(1)</script> The chronicle ends here, with the lantern still burning and the gate still open to any traveller who came along the road.";
+
+export const SEARCH_DOCUMENTS = [
+  {
+    id: FX_DOC_1,
+    externalId: "fx-doc-1.pdf",
+    title: "Annals of the Obsidian Basin",
+    segments: [
+      { anchor: "p.1", text: [P1, P2, P3, P4_PAGE1].join("\n") },
+      { anchor: "p.2", text: [P4_PAGE2, P5].join("\n") },
+      { anchor: "p.3", text: [P6, P7, P8].join("\n") },
+    ],
+  },
+  {
+    // No published events — the document panel's empty-events state.
+    id: FX_DOC_2,
+    externalId: "fx-doc-2.pdf",
+    title: "Ledger of the Northern Missions",
+    segments: [
+      {
+        anchor: "p.1",
+        text: "The candlewax accounts of the northern missions fill most of this ledger, item after item, with the chronicle of what each mission bought, what it sold, and what it begged from its neighbours in a hard winter.",
+      },
+    ],
+  },
+];
+
+export const SEARCH_DOCUMENT_LOCATION = {
+  id: "fx-loc-archive",
+  name: "Obsidian Basin",
+  coordinates: [-106.6, 35.1] as [number, number],
+};
+
+/** Events published from FX_DOC_1: two quoted verbatim, one not at all. */
+export const SEARCH_DOCUMENT_EVENTS = [
+  {
+    id: "fx-ev-doc-q1",
+    title: "Fortress Surrenders",
+    description: "A besieged garrison gave up its stronghold.",
+    date: "1650-01-01",
+    datePrecision: "year",
+    source: DOC_QUOTE_1,
+    anchor: "p.1",
+  },
+  {
+    id: "fx-ev-doc-q2",
+    title: "Northern Trade Route Opens",
+    description: "Merchants began regular journeys north.",
+    date: "1700-01-01",
+    datePrecision: "year",
+    source: DOC_QUOTE_2,
+    anchor: "p.3",
+  },
+  {
+    // Its quote appears in no paragraph: no passage link, page anchor only.
+    id: "fx-ev-doc-unlinked",
+    title: "Embassy Arrives",
+    description: "Envoys arrived bearing gifts.",
+    date: "1680-01-01",
+    datePrecision: "year",
+    source:
+      "An embassy arrived with gifts that no page of this book records anywhere.",
+    anchor: "p.2",
+  },
+];

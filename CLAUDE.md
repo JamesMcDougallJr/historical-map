@@ -40,6 +40,8 @@ npm run db:backup                          # it truncates and reseeds your dev D
                                             # no separate test DB; Martin's DATABASE_URL in
                                             # docker-compose.yml points at the same `db` npm run dev uses
 docker compose up -d db martin
+POSTGRES_URL=postgres://postgres:password@localhost:5433/db \
+  npm run migrate --workspace=services/ingest   # search fixtures seed document_passages
 ALLOW_TEST_DB_RESET=1 npm run test:e2e:real
 ```
 
@@ -257,12 +259,22 @@ from evidence rather than guessed. First real run: 90/131 quotes found.
 `publish` reads only `verdict = 'publish'` and demotes back to review when
 geocoding fails, since `locations` requires coordinates.
 
+**`document_passages` is search's index over document text** — one row per paragraph, cut
+from the stored artifact by `splitPassages` (`libs/parsers/src/passages/`). `extract-text`
+rewrites it with every artifact; `publish` re-derives `passage_events` (which event was
+quoted from which paragraph) for the whole document after each run. It has its own
+`SPLITTER_VERSION`, separate from `EXTRACTOR_VERSION`: bumping it re-cuts passages from
+stored artifacts with no re-cleaning, fetch or extraction (`extract-text` does it on its
+"already extracted" path, or run `search:backfill-passages`). The splitter splits on
+sentence punctuation, not line length — real PDFs reach it already reflowed into
+paragraph-length lines; see plans/20-search-lexical.md for the measurement.
+
 Verifiers (`--workspace=services/ingest`): `sources:verify` and `extract:verify`
 need nothing at all; `db:verify` needs Postgres, `queue:verify` needs Redis.
 `extract:verify -- --live` additionally makes one real Groq call.
 
 Operator scripts: `detect:trigger`, `queue:inspect`, `queue:requeue`,
-`geocode:review`, `seed:sources`.
+`geocode:review`, `seed:sources`, `search:backfill-passages`.
 
 Deploy is `docker-compose.prod.yml` layered on `docker-compose.yml`. The web app
 is **not** in it — it stays on Vercel; these workers are long-lived processes

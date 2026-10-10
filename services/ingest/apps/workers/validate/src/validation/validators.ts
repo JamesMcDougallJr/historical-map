@@ -1,4 +1,5 @@
 import type { ExtractedEvent, ValidationCheck } from "@historical-map/domain";
+import { MIN_QUOTE_CHARS, normaliseQuote } from "@app/parsers";
 
 /**
  * The checks the pipeline runs on an extracted event before it can reach the
@@ -32,8 +33,8 @@ export function checkGrounding(
   event: ExtractedEvent,
   context: ValidationContext,
 ): ValidationCheck {
-  const quote = normalise(event.sourceText);
-  if (quote.length < 20) {
+  const quote = normaliseQuote(event.sourceText);
+  if (quote.length < MIN_QUOTE_CHARS) {
     return {
       name: "grounding",
       passed: false,
@@ -41,7 +42,7 @@ export function checkGrounding(
       detail: "quote too short to verify",
     };
   }
-  const found = normalise(context.documentText).includes(quote);
+  const found = normaliseQuote(context.documentText).includes(quote);
   return {
     name: "grounding",
     passed: found,

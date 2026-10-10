@@ -16,6 +16,7 @@ import {
   intersectYearRanges,
   SEARCH_KINDS,
   type Bbox,
+  type DocumentHit,
   type SearchHit,
   type SearchKind,
   type SearchResponse,
@@ -49,6 +50,8 @@ const DEFAULT_LIMITS: Record<SearchKind, number> = {
   document: 3,
   passage: 4,
 };
+/** One long book mustn't fill the passage list. */
+const PASSAGES_PER_DOCUMENT = 2;
 /** A date-only browse lists that period's events, so it gets a longer list. */
 const DEFAULT_BROWSE_LIMIT = 20;
 
@@ -184,7 +187,8 @@ export async function search(req: SearchRequest): Promise<SearchResponse> {
   const started = Date.now();
   const p = prepare(req);
   const kinds = new Set(req.kinds);
-  const documents = false; // document/passage kinds land with document_passages (S1, part 3)
+  // Document and passage hits need Postgres *and* the ingest-owned tables.
+  const documents = usePostgres() && (await pg.documentsAvailable());
 
   const respond = (
     hits: SearchHit[],
@@ -235,7 +239,7 @@ export async function search(req: SearchRequest): Promise<SearchResponse> {
     return respond(await pg.browseEventHits(input));
   }
 
-  const [events, sequences, locations] = await Promise.all([
+  const [events, sequences, locations, documentHits] = await Promise.all([
     kinds.has("event")
       ? pg.searchEventHits(pgInput(req, p, limitFor("event")))
       : [],
@@ -245,8 +249,45 @@ export async function search(req: SearchRequest): Promise<SearchResponse> {
     kinds.has("location")
       ? pg.searchLocationHits(pgInput(req, p, limitFor("location")))
       : [],
+    documents && kinds.has("document")
+      ? pg.searchDocumentHits(pgInput(req, p, limitFor("document")))
+      : [],
   ]);
-  const hits: SearchHit[] = [...events, ...sequences, ...locations];
+
+  // One sentence, one result: an event's own quote paragraph rides on the
+  // event hit and stays out of the passage group.
+  const folded = documents
+    ? await pg.foldQuotePassages(pgInput(req, p, 0), events)
+    : new Set<string>();
+  const passages =
+    documents && kinds.has("passage")
+      ? await pg.searchPassageHits(
+          pgInput(req, p, limitFor("passage")),
+          PASSAGES_PER_DOCUMENT,
+          folded,
+        )
+      : [];
+
+  // A document whose only match is one passage already listed adds nothing
+  // the passage row doesn't say.
+  const listed = new Set(passages.map((h) => h.id));
+  const docs: DocumentHit[] = documentHits
+    .filter(
+      (d) =>
+        d.titleHit ||
+        d.matchCount !== 1 ||
+        d.bestSeq === null ||
+        !listed.has(`${d.id}:${d.bestSeq}`),
+    )
+    .map(({ bestSeq: _bestSeq, titleHit: _titleHit, ...hit }) => hit);
+
+  const hits: SearchHit[] = [
+    ...events,
+    ...sequences,
+    ...locations,
+    ...docs,
+    ...passages,
+  ];
   return respond(hits, findTopHit(hits, p.text));
 }
 

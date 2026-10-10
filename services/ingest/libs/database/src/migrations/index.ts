@@ -3,6 +3,7 @@ import { AddPublishTables1757894400000 } from "./1757894400000-add-publish-table
 import { SplitTextExtraction1757980800000 } from "./1757980800000-split-text-extraction";
 import { AddEventAnchor1760140800000 } from "./1760140800000-add-event-anchor";
 import { AddGeocodeCandidates1760227200000 } from "./1760227200000-add-geocode-candidates";
+import { AddDocumentPassages1760313600000 } from "./1760313600000-add-document-passages";
 
 /**
  * Explicit imports, in order. **Do not replace this with a glob.**
@@ -22,4 +23,5 @@ export const INGEST_MIGRATIONS = [
   SplitTextExtraction1757980800000,
   AddEventAnchor1760140800000,
   AddGeocodeCandidates1760227200000,
+  AddDocumentPassages1760313600000,
 ];

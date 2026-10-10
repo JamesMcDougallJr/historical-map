@@ -745,6 +745,7 @@ export async function searchEvents(
       AND (${to}::date IS NULL OR e.date <= ${to}::date)
       AND (${sourceIds}::text[] IS NULL OR e.source_id = ANY(${sourceIds}))
       AND (${groupEventIds}::text[] IS NULL OR e.id = ANY(${groupEventIds}))
+      AND (${query.documentId ?? null}::text IS NULL OR e.document_id::text = ${query.documentId ?? null})
       AND (${bbox}::double precision[] IS NULL
            OR ST_Intersects(
                 l.geom,
