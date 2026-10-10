@@ -362,6 +362,13 @@ on `POSTGRES_URL`. Its API mirrors the browser module's but is **async** — ser
 filesystems are ephemeral and read-only, so writes only persist under Postgres. Postgres
 tables are created on demand by `ensureSchema()`.
 
+**Search columns are generated, and depend on things outside the tables.** `ensureSchema()`
+adds `search_tsv`/`name_tsv` to `events`, `locations` and `event_groups`, built from two
+custom text search configurations (`hm_english` stems, `hm_simple` doesn't; both fold accents
+through `unaccent`) plus `immutable_unaccent()` and `event_lo_year()`/`event_hi_year()` — the
+SQL twin of `eventYearSpan()` in `packages/domain/src/date-interval.ts`; change both together.
+A table-scoped `db:restore` into a fresh container needs `npm run db:ensure-schema` first.
+
 `app/map/page.tsx` (thin, 102 lines) bridges browser and server: on first visit it seeds
 `localStorage` from `GET /api/data/locations`, and it polls that endpoint every 5s to pick
 up writes made through the MCP server — but **only when `NEXT_PUBLIC_MAP_API_KEY` is set**.
@@ -449,6 +456,11 @@ the first one arrives with the ingestion engine's `extract` worker (`plans/08-ex
 - `/api/data/locations`, `/api/data/locations/[id]/events`, `/api/data/search` — CRUD over
   `lib/server-storage.ts`, gated on an optional `x-api-key` vs `MAP_API_KEY`
 - `/api/mcp` — the MCP connector
+- `/api/search`, `/api/search/matches` — typed, grouped search hits and the matching pin ids
+  (plans/20-search-lexical.md). All logic is in `lib/search.ts` (orchestration, date parsing via
+  `app/map/utils/search-query.ts`), `lib/search-postgres.ts` (one ranked query per kind) and
+  `lib/search-static.ts` (the in-memory fallback without `POSTGRES_URL`). Snippets carry
+  `\u0002`/`\u0003` sentinels around matches — never HTML; render them as text.
 
 ### Security
 

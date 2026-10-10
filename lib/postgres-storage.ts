@@ -25,9 +25,19 @@ function sql() {
   if (!client) {
     const url = process.env["POSTGRES_URL"];
     if (!url) throw new Error("POSTGRES_URL is not set");
-    client = postgres(url, { max: 5 });
+    // Full-text search raises NOTICEs for stopword-only queries ("the") on
+    // every request; they are expected and would otherwise flood the log.
+    client = postgres(url, {
+      max: 5,
+      connection: { client_min_messages: "warning" },
+    });
   }
   return client;
+}
+
+/** The shared client, for lib/search-postgres.ts. Same pool, same lifetime. */
+export function sqlClient() {
+  return sql();
 }
 
 interface LocationRow {
@@ -136,8 +146,108 @@ export function ensureSchema(): Promise<void> {
         PRIMARY KEY (group_id, event_id)
       )`;
     await db`CREATE INDEX IF NOT EXISTS event_group_members_event_idx ON event_group_members (event_id)`;
+
+    await ensureSearchSchema();
   })();
   return schemaReady;
+}
+
+/**
+ * Full-text and trigram search (plans/20-search-lexical.md). Everything here is
+ * derived from columns above, so it can be dropped and rebuilt at will.
+ *
+ * Two text search configurations, both folding accents through `unaccent` so
+ * "Tenochtitlan" and "Tenochtitlán" match either way — and, unlike wrapping
+ * the input in `unaccent()`, `ts_headline` still highlights the original
+ * accented word:
+ *   - `hm_english` stems, for prose (titles, descriptions, quotes).
+ *   - `hm_simple` doesn't, for names, where stemming mangles proper nouns and
+ *     an exact name match should stay strong.
+ *
+ * `search_tsv` weights: title A, date_text B, description C, source quote D.
+ * The place name is not in `events` — it gets its own vector on `locations`,
+ * joined at query time rather than denormalised, so a renamed location
+ * (`geocode:review --set`) can never leave stale text on its events.
+ */
+async function ensureSearchSchema(): Promise<void> {
+  const db = sql();
+  await db`CREATE EXTENSION IF NOT EXISTS pg_trgm`;
+  await db`CREATE EXTENSION IF NOT EXISTS unaccent`;
+
+  // `unaccent()` is STABLE, so it can't appear in an index expression. Naming
+  // the dictionary explicitly makes the result fixed — the standard workaround.
+  await db`
+    CREATE OR REPLACE FUNCTION immutable_unaccent(text) RETURNS text
+      LANGUAGE sql IMMUTABLE PARALLEL SAFE STRICT
+      AS $$ SELECT public.unaccent('public.unaccent'::regdictionary, $1) $$`;
+
+  // No IF NOT EXISTS for text search configurations; concurrent first boots
+  // race on the check, hence the exception handler.
+  await db.unsafe(`
+    DO $$ BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_ts_config WHERE cfgname = 'hm_english') THEN
+        CREATE TEXT SEARCH CONFIGURATION hm_english (COPY = english);
+        ALTER TEXT SEARCH CONFIGURATION hm_english
+          ALTER MAPPING FOR hword, hword_part, word WITH unaccent, english_stem;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_ts_config WHERE cfgname = 'hm_simple') THEN
+        CREATE TEXT SEARCH CONFIGURATION hm_simple (COPY = simple);
+        ALTER TEXT SEARCH CONFIGURATION hm_simple
+          ALTER MAPPING FOR hword, hword_part, word WITH unaccent, simple;
+      END IF;
+    EXCEPTION WHEN duplicate_object OR unique_violation THEN NULL;
+    END $$`);
+
+  // The SQL twin of eventYearSpan() in packages/domain/src/date-interval.ts:
+  // the inclusive span of years an event's date covers, given its precision.
+  // Change both together.
+  await db`
+    CREATE OR REPLACE FUNCTION event_lo_year(d date, prec text) RETURNS int
+      LANGUAGE sql IMMUTABLE PARALLEL SAFE
+      AS $$ SELECT CASE prec
+        WHEN 'decade' THEN EXTRACT(YEAR FROM d)::int - (EXTRACT(YEAR FROM d)::int % 10)
+        WHEN 'circa'  THEN EXTRACT(YEAR FROM d)::int - 5
+        ELSE EXTRACT(YEAR FROM d)::int END $$`;
+  await db`
+    CREATE OR REPLACE FUNCTION event_hi_year(d date, prec text) RETURNS int
+      LANGUAGE sql IMMUTABLE PARALLEL SAFE
+      AS $$ SELECT CASE prec
+        WHEN 'decade' THEN EXTRACT(YEAR FROM d)::int - (EXTRACT(YEAR FROM d)::int % 10) + 9
+        WHEN 'circa'  THEN EXTRACT(YEAR FROM d)::int + 5
+        ELSE EXTRACT(YEAR FROM d)::int END $$`;
+
+  await db`
+    ALTER TABLE events ADD COLUMN IF NOT EXISTS search_tsv tsvector
+      GENERATED ALWAYS AS (
+        setweight(to_tsvector('hm_english', coalesce(title, '')),       'A') ||
+        setweight(to_tsvector('hm_english', coalesce(date_text, '')),   'B') ||
+        setweight(to_tsvector('hm_english', coalesce(description, '')), 'C') ||
+        setweight(to_tsvector('hm_english', coalesce(source, '')),      'D')
+      ) STORED`;
+  await db`
+    ALTER TABLE events ADD COLUMN IF NOT EXISTS name_tsv tsvector
+      GENERATED ALWAYS AS (to_tsvector('hm_simple', coalesce(title, ''))) STORED`;
+  await db`CREATE INDEX IF NOT EXISTS events_search_tsv_idx ON events USING GIN (search_tsv)`;
+  await db`CREATE INDEX IF NOT EXISTS events_name_tsv_idx ON events USING GIN (name_tsv)`;
+  await db`CREATE INDEX IF NOT EXISTS events_title_trgm_idx ON events USING GIN (immutable_unaccent(title) gin_trgm_ops)`;
+
+  await db`
+    ALTER TABLE locations ADD COLUMN IF NOT EXISTS search_tsv tsvector
+      GENERATED ALWAYS AS (to_tsvector('hm_simple', coalesce(name, ''))) STORED`;
+  await db`CREATE INDEX IF NOT EXISTS locations_search_tsv_idx ON locations USING GIN (search_tsv)`;
+  await db`CREATE INDEX IF NOT EXISTS locations_name_trgm_idx ON locations USING GIN (immutable_unaccent(name) gin_trgm_ops)`;
+
+  await db`
+    ALTER TABLE event_groups ADD COLUMN IF NOT EXISTS search_tsv tsvector
+      GENERATED ALWAYS AS (
+        setweight(to_tsvector('hm_english', coalesce(title, '')),       'A') ||
+        setweight(to_tsvector('hm_english', coalesce(description, '')), 'C')
+      ) STORED`;
+  await db`
+    ALTER TABLE event_groups ADD COLUMN IF NOT EXISTS name_tsv tsvector
+      GENERATED ALWAYS AS (to_tsvector('hm_simple', coalesce(title, ''))) STORED`;
+  await db`CREATE INDEX IF NOT EXISTS event_groups_search_tsv_idx ON event_groups USING GIN (search_tsv)`;
+  await db`CREATE INDEX IF NOT EXISTS event_groups_title_trgm_idx ON event_groups USING GIN (immutable_unaccent(title) gin_trgm_ops)`;
 }
 
 function toEvent(row: EventRow, groupIds?: string[]): HistoricalEvent {
@@ -611,7 +721,10 @@ export async function searchEvents(
   await ensureSchema();
   const db = sql();
 
-  const like = query.q ? `%${query.q}%` : null;
+  // Same matcher as /api/search (lib/search-postgres.ts): stemmed full text
+  // plus unstemmed names, ranked. Not date-parsed — EventQuery has its own
+  // fromYear/toYear, and these callers predate the search bar.
+  const q = query.q?.trim() || null;
   const from = query.fromYear !== undefined ? `${query.fromYear}-01-01` : null;
   const to = query.toYear !== undefined ? `${query.toYear}-12-31` : null;
   const bbox = query.bbox ?? null;
@@ -624,8 +737,10 @@ export async function searchEvents(
     SELECT e.*, l.name AS loc_name, l.lon, l.lat
     FROM events e
     JOIN locations l ON l.id = e.location_id
-    WHERE (${like}::text IS NULL
-           OR e.title ILIKE ${like} OR e.description ILIKE ${like} OR l.name ILIKE ${like})
+    WHERE (${q}::text IS NULL
+           OR e.search_tsv @@ websearch_to_tsquery('hm_english', ${q}::text)
+           OR e.name_tsv @@ websearch_to_tsquery('hm_simple', ${q}::text)
+           OR l.search_tsv @@ websearch_to_tsquery('hm_simple', ${q}::text))
       AND (${from}::date IS NULL OR e.date >= ${from}::date)
       AND (${to}::date IS NULL OR e.date <= ${to}::date)
       AND (${sourceIds}::text[] IS NULL OR e.source_id = ANY(${sourceIds}))
@@ -635,7 +750,9 @@ export async function searchEvents(
                 l.geom,
                 ST_MakeEnvelope(${bbox?.[0] ?? 0}, ${bbox?.[1] ?? 0},
                                 ${bbox?.[2] ?? 0}, ${bbox?.[3] ?? 0}, 4326)))
-    ORDER BY e.date ASC`;
+    ORDER BY CASE WHEN ${q}::text IS NULL THEN 0
+                  ELSE ts_rank_cd(e.search_tsv, websearch_to_tsquery('hm_english', ${q}::text)) END DESC,
+             e.date ASC`;
 
   return rows.map((row) => ({
     event: toEvent(row),
