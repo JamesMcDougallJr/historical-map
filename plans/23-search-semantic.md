@@ -110,6 +110,34 @@ GROUP BY id ORDER BY score DESC LIMIT $k;
   the golden-set queries with a timeline range too, because the vector floor
   may need to differ when the candidate pool is small.
 
+## Every mechanism, and what proves it
+
+The whole design in one list. Each row is a decision above (or in 12/13) and
+the check that fails if it's broken. Nothing here ships on "it should work":
+a row without a check is a bug in this plan.
+
+| #   | Mechanism                                                                                                                                                                   | Verified by                                                                                                                                                                                                         |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | **Events are embedded from composed text** — plan 13's `{title}. {description} Place: {placeName} Date: {dateText}`, without `sourceText`                                   | ingestion fixture: the fake's call log shows exactly that string per event; a pure spec over `composeEventText()` pins the format                                                                                   |
+| 2   | **Sequences are embedded** — `{title}. {description} Includes: {member titles, seq order}`                                                                                  | ingestion fixture: every fixture group gets an `event_group_embeddings` row; hybrid spec: a sequence paraphrase finds `fx-grp-meadows` with `meaning`                                                               |
+| 3   | **Passages are embedded** — the paragraph text, one vector per `document_passages` row                                                                                      | ingestion fixture: no null `embedding` after the sweep; hybrid spec "passages semantic"                                                                                                                             |
+| 4   | **Locations are not embedded**                                                                                                                                              | hybrid spec: no `location` hit ever carries `meaning`; there is no location-embedding table (`db:verify` asserts the table list)                                                                                    |
+| 5   | **Vectors are unit length** (`normalize: true`, plan 12), which is what makes `<#>` equal cosine                                                                            | `EmbeddingEngine` contract spec: every vector the Bedrock _and_ fake engines return has ‖v‖ = 1 ± 1e-3; ingestion fixture: `SELECT max(abs(vector_norm(embedding) - 1))` over every embedding table is < 1e-3       |
+| 6   | **One model, one dimension**: stored vectors and the query vector come from the same `EMBEDDING_MODEL`/`dims`                                                               | hybrid spec: with stored rows tagged a different model, `mode=hybrid` degrades to lexical with `modes.semantic = false` (comparing across models is meaningless, so the vector arm refuses rather than ranks)       |
+| 7   | **Staleness**: `content_hash` beside every embedding; the `embed` worker's sweep re-embeds mismatches                                                                       | ingestion fixture: editing one event re-embeds that row only; editing a group's title re-embeds that group only; changing `EMBEDDING_MODEL` replaces every row                                                      |
+| 8   | **The query is embedded only on submit** — typeahead never calls Bedrock                                                                                                    | UI spec: keystrokes never send `mode=hybrid`; hybrid spec: `mode=hybrid&prefix=1` (a typeahead request that claims hybrid) leaves the fake's call counter unchanged — the server enforces it too                    |
+| 9   | **Query embeddings are cached** (`search_query_embeddings`, keyed on normalised query + model + dims, with a TTL)                                                           | hybrid spec "cache"; plus: a cache row older than the TTL is ignored and re-embedded (counter +1), and the sweep deletes it                                                                                         |
+| 10  | **Comparison is `<#>` (negative inner product)**                                                                                                                            | hybrid spec: for a recorded query, the vector arm's order equals the order of exact cosine similarity computed in the test from `search-vectors.json`                                                               |
+| 11  | **No vector index yet — exact scan.** Revisit at ~50k vector rows or when the vector arm's p95 exceeds 50 ms, whichever comes first; the fix is HNSW + 0.8's iterative scan | `search:eval` prints vector-arm latency (p50/p95) and row counts; the CI pgvector-version check (below) guarantees 0.8 is there when the index is needed                                                            |
+| 12  | **Hybrid, fused by RRF** (`k = 60`, ranks only), not a mode switch and not score blending                                                                                   | hybrid spec "hybrid ≥ lexical on names"; golden ship gate: hybrid recall@5 ≥ lexical-only, and MRR not lower on the lexical golden entries                                                                          |
+| 13  | **`matchedOn: ["meaning"]` only for vector-only hits**; a hit both arms found keeps its lexical fields and gets no `meaning`                                                | hybrid spec: a paraphrase hit has exactly `["meaning"]`; `q=Tenochtitlan&mode=hybrid` → the top hit's `matchedOn` contains `title` and not `meaning`                                                                |
+| 14  | **Relevance floor on the vector arm**, set from the golden set                                                                                                              | hybrid spec "relevance floor" over **three** negative queries (not one); `search:eval --floor` prints recall vs. false-meaning-hits per candidate threshold, and the chosen value is recorded here with its numbers |
+| 15  | **Filters run inside the vector CTE**, before ranking                                                                                                                       | hybrid spec "timeline pre-filter" (with distractors so an in-range hit sits beyond 50 unfiltered); the same for `sources`/`bbox` under "limit to view"                                                              |
+| 16  | **Fallback**: any embedder error → lexical results, `modes.semantic = false`, no retry, never a 5xx                                                                         | hybrid spec "embedder down" for throttling _and_ a validation error _and_ a timeout (the fake sleeps past the request budget)                                                                                       |
+| 17  | **Cost limits**: per-IP hybrid limit, daily Bedrock ceiling, query-length clamp, cache                                                                                      | hybrid specs "rate limit", "daily ceiling", "cache"; a 1,000-char hybrid query embeds at most 200 characters (the fake records the text it was given)                                                               |
+| 18  | **AWS Budgets alert** on Bedrock spend — the backstop the app can't provide                                                                                                 | manual, before turning hybrid on in the UI: the alert exists in `infra/` (or is recorded as created in the console), with its threshold noted here                                                                  |
+| 19  | **Live path works** — the real Bedrock engine, the IAM user's narrow permission, and latency from Vercel's region                                                           | manual `search:verify -- --live` (like `extract:verify -- --live`): one query embeds, ‖v‖ = 1, dims = 256, and the round-trip time is printed; a call to any other model is denied (proves the IAM scope)           |
+
 ## Query embedding at request time
 
 - **Only on submit** (19, decision 3). Typeahead never embeds.
@@ -184,6 +212,9 @@ vector arm did the work:
 | `fx-ev-tenochtitlan` (exists)                         | "when the Aztec capital fell"                                    |
 | `fx-ev-tula`, "Overthrow of Tula"                     | "Toltec collapse"                                                |
 | _none relevant_                                       | "Napoleon's coronation" → expects **no** vector hits (the floor) |
+| _none relevant_                                       | "the Battle of Hastings" → no vector hits                        |
+| _none relevant_                                       | "Apollo moon landing" → no vector hits                           |
+| `fx-grp-meadows` (exists)                             | "the sequence of events at the southern Utah valley in 1857"     |
 
 Their vectors are recorded in `search-vectors.json` by
 `search:record-vectors`.
@@ -203,6 +234,16 @@ Their vectors are recorded in `search-vectors.json` by
 | daily ceiling             | set the ceiling to 2, run 3 hybrid queries → the third degrades to lexical with `modes.semantic = false`                                                                                                                                                                                                |
 | rate limit                | hybrid requests past the per-IP limit → 429, while lexical requests from the same IP still succeed                                                                                                                                                                                                      |
 | static backend            | without Postgres, `mode=hybrid` → lexical results with `modes.semantic = false`                                                                                                                                                                                                                         |
+| sequence semantic         | the sequence paraphrase above → `fx-grp-meadows` returned with `matchedOn: ["meaning"]`                                                                                                                                                                                                                 |
+| no location vectors       | every hybrid query in this spec → no `location` hit carries `meaning`                                                                                                                                                                                                                                   |
+| meaning label             | a paraphrase hit's `matchedOn` is exactly `["meaning"]`; `q=Tenochtitlan&mode=hybrid` → top hit has `title`, not `meaning`                                                                                                                                                                              |
+| inner-product order       | for "when the Aztec capital fell", the vector arm's event order equals exact cosine order computed in the test from `search-vectors.json`                                                                                                                                                               |
+| typeahead never embeds    | `mode=hybrid&prefix=1` → fake call counter unchanged, `modes.semantic = false`                                                                                                                                                                                                                          |
+| model mismatch            | stored embeddings tagged another model → `mode=hybrid` degrades to lexical, `modes.semantic = false`                                                                                                                                                                                                    |
+| cache expiry              | a cached query embedding older than the TTL → re-embedded (counter +1); the sweep removes the stale row                                                                                                                                                                                                 |
+| embedder failure kinds    | `EMBEDDING_FAKE_FAIL=validation` and `=timeout` behave like `=throttle`: 200, lexical, `modes.semantic = false`, counter = 1                                                                                                                                                                            |
+| length clamp              | a 1,000-char hybrid query → the fake recorded at most 200 characters of input                                                                                                                                                                                                                           |
+| limit-to-view pre-filter  | `mode=hybrid` with `bbox`/`sources` → no vector hit outside them, and an in-view hit that ranks beyond 50 unfiltered still appears                                                                                                                                                                      |
 
 The golden spec from 20 picks up `mode: "hybrid"` entries automatically.
 
@@ -216,10 +257,31 @@ The golden spec from 20 picks up `mode: "hybrid"` entries automatically.
   shows one text.
 - Changing `EMBEDDING_MODEL` re-embeds everything. Rows from the old model
   are replaced, not duplicated.
+- The fake's call log shows each event's text in plan 13's composed format,
+  without `sourceText` (row 1 of the table above).
+- Every fixture group has an `event_group_embeddings` row; editing a group's
+  title re-embeds that group only.
+- Every embedding table: `max(abs(vector_norm(embedding) - 1)) < 1e-3`, and
+  every row's `dims` matches `vector_dims(embedding)`.
 - Passages: every `document_passages` row gets a non-null `embedding` after
   the sweep. A `SPLITTER_VERSION` bump re-cuts passages, and the sweep
   re-embeds exactly the new rows. An `EXTRACTOR_VERSION` bump that rewrites passages also clears
   and re-fills their embeddings.
+
+### `EmbeddingEngine` contract — `services/ingest/scripts/verify-embeddings.ts`
+
+`npm run embed:verify` needs nothing (it exercises the fake), and runs in CI:
+
+- Every vector returned has the configured `dims` and unit length.
+- The fake throws on a text that isn't in `search-vectors.json`, naming it.
+- `composeEventText()` and `composeGroupText()` produce the documented
+  strings for a fixed input (pins rows 1 and 2).
+- Error classification: `ThrottlingException` → retryable, `ValidationException`
+  → not (plan 12); the web app path never retries either.
+
+`npm run embed:verify -- --live` is the manual live check (row 19): one real
+Titan call, its dims/norm/latency printed, and one call to a model the IAM
+user isn't granted, which must be denied.
 
 ### Image and infra checks (CI)
 
@@ -248,8 +310,18 @@ The golden spec from 20 picks up `mode: "hybrid"` entries automatically.
 5. Web app: query embedding + cache + hybrid SQL behind `mode=hybrid`.
 6. Golden-set comparison, floor tuning, then turn it on in the UI.
 
-The E2E specs above land **with** each step, not after step 6: steps 1, 3–4
-and 5 each have their own CI checks, and a step isn't done until they pass.
+The E2E specs above land **with** each step, not after step 6, and a step
+isn't done until its checks pass:
+
+| Step | Done when                                                                                                                                                                                          |
+| ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0    | RDS reports `extversion` 0.8.x for `vector` (recorded here)                                                                                                                                        |
+| 1    | CI's pgvector-version check is green, and every existing e2e-real spec stays green on the new image                                                                                                |
+| 2    | `embed:verify` green in CI; `embed:verify -- --live` run once by hand, output recorded here                                                                                                        |
+| 3    | ingestion-fixture event + sequence bullets green (composition, staleness, unit length)                                                                                                             |
+| 4    | ingestion-fixture passage bullets green                                                                                                                                                            |
+| 5    | every `search-hybrid.spec.ts` row green                                                                                                                                                            |
+| 6    | `search:eval` shows hybrid ≥ lexical (recall@5, MRR on lexical entries), the floor chosen with its numbers recorded, the Budgets alert in place (row 18), then the UI sends `mode=hybrid` on Enter |
 
 ## Decided (2026-10-08)
 
