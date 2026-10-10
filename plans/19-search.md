@@ -1,8 +1,11 @@
 # Search — phase index
 
-**Status: design, not scheduled.** Five files, read in order. Each phase gets
-discussed again right before it is built, following the working agreement in
-[00-README.md](./00-README.md).
+**Status (2026-10-10): S1, S2, Stretch A and Stretch B are done** on branch
+`search-lexical`; each phase file says what was verified and where it
+deviated. **S3 (semantic) is not started** — it is blocked on two things only
+the owner can do: the RDS minor-version bump to ≥ 16.5 (pgvector 0.8, step 0
+in 23) and a Bedrock-only IAM key to record the real Titan vectors the CI
+fake replays. Five files, read in order.
 
 One search bar on `/map` that finds **events**, **sequences** and **source
 documents**. Each result shows which kind it is, and clicking it does whatever
