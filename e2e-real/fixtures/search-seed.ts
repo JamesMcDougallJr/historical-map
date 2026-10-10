@@ -211,6 +211,58 @@ export const SEARCH_LOCATIONS: HistoricalLocation[] = [
   },
 ];
 
+/**
+ * People (plans/22-search-people.md). Three events name Brigham Young under
+ * two spellings — the Level 2 honesty rule keeps "President Young" a separate
+ * person hit — one also names John Smith, and one mentions him only in its
+ * description, which must rank below the events that *name* him. No title
+ * contains the name, so the person field is what's being tested.
+ */
+export const PEOPLE_LOCATION: HistoricalLocation = {
+  id: "fx-loc-ogden",
+  name: "Ogden",
+  coordinates: [-111.97, 41.22],
+  events: [
+    {
+      id: "fx-ev-young-1",
+      title: "Vanguard Company Arrives",
+      description:
+        "The first company descended Emigration Canyon into the valley.",
+      date: "1847-07-24",
+      datePrecision: "day",
+      sourceId: "fx-source-search",
+      people: ["Brigham Young"],
+    },
+    {
+      id: "fx-ev-young-2",
+      title: "Territorial Governor Replaced",
+      description: "Washington appointed a new governor for the territory.",
+      date: "1857-01-01",
+      datePrecision: "year",
+      sourceId: "fx-source-search",
+      people: ["President Young", "John Smith"],
+    },
+    {
+      id: "fx-ev-young-3",
+      title: "Founder Dies",
+      description: "The territory's founder died at seventy-six.",
+      date: "1877-08-29",
+      datePrecision: "day",
+      sourceId: "fx-source-search",
+      people: ["Brigham Young"],
+    },
+    {
+      id: "fx-ev-young-body",
+      title: "Tabernacle Organ Installed",
+      description:
+        "A great organ was installed, and Brigham Young attended its dedication.",
+      date: "1867-01-01",
+      datePrecision: "year",
+      sourceId: "fx-source-search",
+    },
+  ],
+};
+
 /** A sequence of three 1857–1859 members, none of whose titles it repeats. */
 export const SEARCH_GROUP: Pick<EventGroup, "id" | "title" | "description"> & {
   memberEventIds: string[];

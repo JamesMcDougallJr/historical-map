@@ -24,6 +24,8 @@ export interface EventQuery {
   includeDescendants?: boolean;
   /** Restrict to events extracted from this ingested document (search's "show on map"). */
   documentId?: string;
+  /** Restrict to events naming this person (a normalised name — search's person action). */
+  person?: string;
 }
 
 export interface EventSearchResult {
@@ -57,6 +59,9 @@ export function parseEventQuery(params: URLSearchParams): EventQuery {
 
   const documentId = params.get("document");
   if (documentId) query.documentId = documentId;
+
+  const person = params.get("person");
+  if (person) query.person = person;
 
   const groupId = params.get("group");
   if (groupId) {

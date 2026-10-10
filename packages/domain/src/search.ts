@@ -16,6 +16,7 @@ export const SEARCH_KINDS = [
   "event",
   "sequence",
   "location",
+  "person",
   "document",
   "passage",
 ] as const;
@@ -103,10 +104,26 @@ export interface PassageHit extends HitBase {
   eventIds: string[];
 }
 
+/**
+ * A distinct normalised name among the events' people mentions (Level 2 of
+ * plans/22-search-people.md). Not an identity: "brigham young" and
+ * "president young" are separate hits until a resolver says otherwise, and
+ * the honest display of that is two rows.
+ */
+export interface PersonHit extends HitBase {
+  kind: "person";
+  /** The normalised name — the stable key until people get canonical ids. */
+  id: string;
+  /** In-range events naming them. */
+  eventCount: number;
+  dateRange: [string, string] | null;
+}
+
 export type SearchHit =
   | EventHit
   | SequenceHit
   | LocationHit
+  | PersonHit
   | DocumentHit
   | PassageHit;
 

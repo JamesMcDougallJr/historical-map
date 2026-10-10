@@ -286,3 +286,99 @@ test("a shared ?q=&hit= URL reproduces the map state", async ({ page }) => {
   await expect.poll(() => pinned(page)).toBe(true);
   await expect(page.getByTestId("map-popup")).toContainText("Far Away Event");
 });
+
+// ── People (plans/22-search-people.md) ──────────────────────────────────────
+
+/** Serves /api/data/search?person=… with two events, given their locations (in date order). */
+async function mockPersonEvents(
+  page: Page,
+  locations: Array<{ id: string; name: string; coordinates: [number, number] }>,
+) {
+  await page.route("**/api/data/search?person=**", (route) =>
+    route.fulfill({
+      json: {
+        // Deliberately returned newest first: the panel must sort by date.
+        results: locations
+          .map((location, i) => ({
+            location: { ...location, events: [] },
+            event: {
+              id: `person-ev-${i}`,
+              title: `Person event ${i}`,
+              description: "",
+              date: `${1847 + i * 30}-01-01`,
+              datePrecision: "year",
+            },
+          }))
+          .reverse(),
+      },
+    }),
+  );
+}
+
+const hasPath = (page: Page) =>
+  page.evaluate(() =>
+    (
+      window as unknown as {
+        __olMap: {
+          getLayers(): { getArray(): Array<{ get(k: string): unknown }> };
+        };
+      }
+    ).__olMap
+      .getLayers()
+      .getArray()
+      .some((l) => l.get("layerId") === "focus-path"),
+  );
+
+test("person row: icon, name and 'N events · range'", async ({ page }) => {
+  await open(page, [SEARCH_HITS.person]);
+  await page.getByTestId("search-input").fill("brigham");
+  const row = page.locator('[data-testid="search-row"][data-kind="person"]');
+  await expect(row.getByTestId("search-row-kind")).toHaveText("Person");
+  await expect(row.getByTestId("search-row-title")).toHaveText("Brigham Young");
+  await expect(row.getByTestId("search-row-icon").locator("svg")).toBeVisible();
+  await expect(row.getByTestId("search-row-context")).toHaveText(
+    "2 events · 1847–1877",
+  );
+  await expect(page.getByTestId("search-section-person")).toContainText(
+    "People",
+  );
+});
+
+test("person: filters to their events, chip, date-ordered panel; no path when far apart", async ({
+  page,
+}) => {
+  await open(page, [SEARCH_HITS.person]);
+  await mockPersonEvents(page, [TEST_LOCATION, FAR_LOCATION]);
+  await searchAndClick(page, "person");
+
+  await expect(page.getByTestId("search-focus-chip")).toContainText(
+    "Showing: Brigham Young",
+  );
+  const items = page.getByTestId("person-panel-event");
+  await expect(items).toHaveCount(2);
+  await expect(items.nth(0)).toHaveAttribute("data-event-id", "person-ev-0"); // 1847
+  await expect(items.nth(1)).toHaveAttribute("data-event-id", "person-ev-1"); // 1877
+  // ~150km apart: past the proximity threshold, so filter only.
+  expect(await hasPath(page)).toBe(false);
+});
+
+test("person: close-together events get the date-ordered path", async ({
+  page,
+}) => {
+  await open(page, [SEARCH_HITS.person]);
+  const near = {
+    id: "test-location-near",
+    name: "Near Test Location",
+    coordinates: [
+      TEST_LOCATION.coordinates[0] + 0.05,
+      TEST_LOCATION.coordinates[1],
+    ] as [number, number],
+  };
+  await mockPersonEvents(page, [TEST_LOCATION, near]);
+  await searchAndClick(page, "person");
+  await expect(page.getByTestId("person-panel-event")).toHaveCount(2);
+  await expect.poll(() => hasPath(page)).toBe(true);
+  // Clearing the chip removes the filter and the path.
+  await page.getByTestId("search-focus-chip-clear").click();
+  await expect.poll(() => hasPath(page)).toBe(false);
+});

@@ -334,6 +334,26 @@ async function assertResults(): Promise<void> {
         );
       }
     }
+
+    // People (plans/22): verbatim names plus normalised keys, honorifics
+    // stripped only while two words remain, accents folded; an event naming
+    // nobody writes no rows.
+    const people: Array<{ title: string; name: string; name_norm: string }> =
+      await dataSource.query(
+        `SELECT e.title, ee.name, ee.name_norm
+           FROM event_entities ee JOIN events e ON e.id = ee.event_id
+          WHERE e.source_id = 'local-directory' AND ee.type = 'person'
+          ORDER BY e.title, ee.name_norm`,
+      );
+    const got = JSON.stringify(people.map((p) => [p.title, p.name, p.name_norm]));
+    const want = JSON.stringify([
+      ["The Centennial Parade", "Mayor Ezra Fixture", "ezra fixture"],
+      ["The Centennial Parade", "President Ulysses S. Grant", "ulysses s grant"],
+      ["The Founding of Fixture Village", "Élise Fixture", "elise fixture"],
+    ]);
+    if (got !== want) {
+      throw new Error(`event_entities: expected ${want}, got ${got}`);
+    }
   } finally {
     await dataSource.destroy();
   }

@@ -424,8 +424,17 @@ export interface MapViewHandle {
     groupId: string,
     bbox: [number, number, number, number] | null,
   ): void;
-  /** Draw only these locations — a document's events — and fit to them. */
-  focusLocations(locationIds: string[], coordinates: [number, number][]): void;
+  /**
+   * Draw only these locations — a document's or a person's events — and fit
+   * to them. With `path`, `coordinates` are in order (a person's events by
+   * date) and a dashed path joins them when they're close enough — plan 18's
+   * proximity rule, the same as a sequence; spread out, it's filter-only.
+   */
+  focusLocations(
+    locationIds: string[],
+    coordinates: [number, number][],
+    opts?: { path?: boolean },
+  ): void;
   /** Undo focusGroup/focusLocations. */
   clearFocus(): void;
   closePopup(): void;
@@ -477,6 +486,8 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   const overlayLayersRef = useRef<Map<string, BaseLayer>>(new Map());
   const eventLayersRef = useRef<Map<string, BaseLayer>>(new Map());
   const groupConnectiveLayerRef = useRef<VectorLayer | null>(null);
+  /** focusLocations' date-ordered path (a person's events), when drawn. */
+  const focusPathLayerRef = useRef<VectorLayer | null>(null);
   const mapRef = useRef<OlMap | null>(null);
 
   const [eventLayers, setEventLayers] = useState<EventLayer[]>(
@@ -1106,10 +1117,43 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           });
         }
       },
-      focusLocations(locationIds, coordinates) {
+      focusLocations(locationIds, coordinates, opts) {
         pinStyleStateRef.current.focus = new Set(locationIds);
         restylePins();
         const map = mapRef.current;
+        if (map) {
+          if (focusPathLayerRef.current) {
+            map.removeLayer(focusPathLayerRef.current);
+            focusPathLayerRef.current = null;
+          }
+          if (
+            opts?.path &&
+            coordinates.length > 1 &&
+            maxPairwiseDistanceKm(coordinates) <= GROUP_CONNECTIVE_THRESHOLD_KM
+          ) {
+            const pathLayer = new VectorLayer({
+              source: new VectorSource({
+                features: [
+                  new Feature({
+                    geometry: new LineString(
+                      coordinates.map((c) => fromLonLat(c)),
+                    ),
+                  }),
+                ],
+              }),
+              style: new Style({
+                stroke: new Stroke({
+                  color: "#1e293b",
+                  width: 2,
+                  lineDash: [6, 4],
+                }),
+              }),
+            });
+            pathLayer.set("layerId", "focus-path");
+            focusPathLayerRef.current = pathLayer;
+            map.addLayer(pathLayer);
+          }
+        }
         if (map && coordinates.length) {
           const extent = boundingExtent(coordinates.map((c) => fromLonLat(c)));
           map.getView().fit(extent, {
@@ -1123,6 +1167,10 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         setSelectedGroupId(null);
         pinStyleStateRef.current.focus = null;
         restylePins();
+        if (focusPathLayerRef.current) {
+          mapRef.current?.removeLayer(focusPathLayerRef.current);
+          focusPathLayerRef.current = null;
+        }
       },
       closePopup() {
         isPopupHoveredRef.current = false;

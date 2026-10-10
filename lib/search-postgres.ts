@@ -23,6 +23,7 @@ import type {
   LocationHit,
   MatchField,
   PassageHit,
+  PersonHit,
   SequenceHit,
   YearRange,
 } from "@/app/map/types";
@@ -108,11 +109,27 @@ function eventMatch(sql: Sql, input: PgSearchInput): Fragment {
   const trigram = input.trigram
     ? sql`OR immutable_unaccent(${raw}) <% immutable_unaccent(e.title)`
     : sql``;
+  // People mentions count as part of the event too (plans/22): "brigham
+  // young" finds the events that name him, not just ones whose prose does.
   return sql`
-    (e.search_tsv @@ q.qe_any OR e.name_tsv @@ q.qs_any OR l.search_tsv @@ q.qs_any ${trigram})
-    AND ((e.search_tsv || to_tsvector('hm_english', l.name)) @@ q.qe
-         OR (e.name_tsv || l.search_tsv) @@ q.qs
+    (e.search_tsv @@ q.qe_any OR e.name_tsv @@ q.qs_any OR l.search_tsv @@ q.qs_any
+     OR EXISTS (SELECT 1 FROM event_entities ee
+                 WHERE ee.event_id = e.id AND ee.name_tsv @@ q.qs_any)
+     ${trigram})
+    AND ((e.search_tsv || to_tsvector('hm_english', l.name) || ${peopleVector(sql)}) @@ q.qe
+         OR (e.name_tsv || l.search_tsv || to_tsvector('hm_simple', ${peopleText(sql)})) @@ q.qs
          ${trigram})`;
+}
+
+/** An event's people mentions as one string (normalised names), for alias `e`. */
+function peopleText(sql: Sql): Fragment {
+  return sql`coalesce((SELECT string_agg(ee.name_norm, ' ') FROM event_entities ee
+                        WHERE ee.event_id = e.id), '')`;
+}
+
+/** People mentions as a weight-B vector: between title (A) and description (C). */
+function peopleVector(sql: Sql): Fragment {
+  return sql`setweight(to_tsvector('hm_english', ${peopleText(sql)}), 'B')`;
 }
 
 function withQueries(sql: Sql, input: PgSearchInput): Fragment {
@@ -175,6 +192,7 @@ interface EventSearchRow {
   m_body: boolean;
   m_quote: boolean;
   m_place: boolean;
+  m_person: boolean;
   snippet: string;
 }
 
@@ -196,8 +214,9 @@ export async function searchEventHits(
              e.source, e.search_tsv, e.name_tsv, e.location_id, e.source_id,
              l.name AS loc_name, l.lon, l.lat,
              (l.search_tsv @@ q.qs_any) AS m_place,
+             (${peopleVector(sql)} @@ q.qe_any) AS m_person,
              ${sim} AS sim,
-             ts_rank_cd(e.search_tsv, q.qe_any)
+             ts_rank_cd(e.search_tsv || ${peopleVector(sql)}, q.qe_any)
                + CASE WHEN e.name_tsv @@ q.qs THEN ${TITLE_NAME_BONUS}::real ELSE 0 END
                + CASE WHEN l.search_tsv @@ q.qs_any THEN ${PLACE_BONUS}::real ELSE 0 END
                + ${TRIGRAM_WEIGHT}::real * ${sim} AS score
@@ -220,7 +239,7 @@ export async function searchEventHits(
     )
     SELECT f.id, f.title, f.date, f.date_precision, f.date_text, f.location_id,
            f.loc_name, f.lon, f.lat, f.source_id, f.score, f.sim,
-           f.m_title, f.m_date, f.m_body, f.m_quote, f.m_place,
+           f.m_title, f.m_date, f.m_body, f.m_quote, f.m_place, f.m_person,
            -- Show the field that explains the match: the description when it
            -- matched, else the source quote, else the description anyway.
            ts_headline('hm_english',
@@ -233,6 +252,7 @@ export async function searchEventHits(
     const matchedOn: MatchField[] = [];
     if (r.m_title) matchedOn.push("title");
     if (r.m_place) matchedOn.push("place");
+    if (r.m_person) matchedOn.push("person");
     if (r.m_date) matchedOn.push("date");
     if (r.m_body) matchedOn.push("body");
     if (r.m_quote) matchedOn.push("quote");
@@ -525,6 +545,80 @@ export async function searchLocationHits(
     score: Number(r.score),
     matchedOn: ["place"],
     coordinates: [r.lon, r.lat],
+    eventCount: r.event_count,
+    dateRange: r.d0 && r.d1 ? [isoDate(r.d0), isoDate(r.d1)] : null,
+  }));
+}
+
+// ── People ──────────────────────────────────────────────────────────────────
+
+interface PersonSearchRow {
+  name_norm: string;
+  display: string;
+  event_count: number;
+  d0: Date | null;
+  d1: Date | null;
+  score: number;
+  snippet: string;
+}
+
+/**
+ * One hit per distinct normalised name among people mentions (plans/22,
+ * Level 2). Aliases stay separate rows on purpose — "brigham young" and
+ * "president young" — because merging them is identity work this level
+ * doesn't do. Counts are in-range events only; a name with none is absent.
+ * Trigram similarity on the normalised name catches spelling drift
+ * ("brigam young").
+ */
+export async function searchPersonHits(
+  input: PgSearchInput,
+  normalizedQuery: string,
+): Promise<PersonHit[]> {
+  await ensureSchema();
+  const sql = sqlClient();
+  const trigram = input.trigram
+    ? sql`OR ${normalizedQuery} % ee.name_norm`
+    : sql``;
+  const rows = await sql<PersonSearchRow[]>`
+    WITH ${withQueries(sql, input)},
+    matched AS (
+      SELECT ee.name_norm, ee.name, ee.event_id,
+             (ee.name_tsv @@ q.qs) AS words_hit
+      FROM event_entities ee, q
+      WHERE ee.type = 'person' AND (ee.name_tsv @@ q.qs ${trigram})
+    ),
+    in_range AS (
+      SELECT m.*, e.date
+      FROM matched m
+      JOIN events e ON e.id = m.event_id
+      JOIN locations l ON l.id = e.location_id
+      WHERE true
+        ${yearFilter(sql, input.years)}
+        ${viewFilter(sql, input)}
+    ),
+    grouped AS (
+      SELECT name_norm,
+             mode() WITHIN GROUP (ORDER BY name) AS display,
+             count(DISTINCT event_id)::int AS event_count,
+             min(date) AS d0, max(date) AS d1,
+             CASE WHEN name_norm = ${normalizedQuery} THEN 1 ELSE 0 END
+               + CASE WHEN bool_or(words_hit) THEN 0.5 ELSE 0 END
+               + similarity(name_norm, ${normalizedQuery}) AS score
+      FROM in_range
+      GROUP BY name_norm
+    )
+    SELECT g.*, ts_headline('hm_simple', ${clean(sql, sql`g.display`)}, q.qs_any, ${HEADLINE_OPTS}) AS snippet
+    FROM grouped g, q
+    ORDER BY g.score DESC, g.event_count DESC, g.name_norm
+    LIMIT ${input.limit}`;
+
+  return rows.map((r) => ({
+    kind: "person",
+    id: r.name_norm,
+    title: r.display,
+    snippet: r.snippet,
+    score: Number(r.score),
+    matchedOn: ["person"],
     eventCount: r.event_count,
     dateRange: r.d0 && r.d1 ? [isoDate(r.d0), isoDate(r.d1)] : null,
   }));

@@ -9,6 +9,7 @@
 import type {
   DatePrecision,
   EventGroup,
+  HistoricalEvent,
   HistoricalLocation,
   SearchKind,
   SearchResponse,
@@ -119,4 +120,17 @@ export function fetchDocumentEvents(
   results: Array<{ location: HistoricalLocation; event: { id: string } }>;
 }> {
   return getJson(`/api/data/search?document=${encodeURIComponent(id)}`, signal);
+}
+
+/** A person's events (by normalised name), in date order — the person action. */
+export function fetchPersonEvents(
+  personId: string,
+  signal?: AbortSignal,
+): Promise<{
+  results: Array<{ location: HistoricalLocation; event: HistoricalEvent }>;
+}> {
+  return getJson(
+    `/api/data/search?person=${encodeURIComponent(personId)}`,
+    signal,
+  );
 }

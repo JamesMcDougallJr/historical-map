@@ -34,6 +34,10 @@ Places:
 - Never output latitude, longitude, or any coordinate. Something else geocodes these.
 - Use null when the text names no place. A null place is fine; a guessed one is not.
 
+People:
+- people lists every person the text names in connection with this event, each exactly as written — "President Young", "the Viceroy Revillagigedo". Do not expand, correct or merge names; do not add anyone the text does not name here.
+- Use an empty array when the text names no one. Groups ("the emigrants", "the Aztecs") are not people.
+
 Confidence:
 - Report how sure you are that this is a real, correctly-dated event drawn from this text.
 - Below 0.5 for anything you are reconstructing from fragmentary or garbled text — this corpus includes OCR output, and mangled text is common.

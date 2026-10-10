@@ -12,3 +12,4 @@ export * from "./events";
 export * from "./ingestion";
 export * from "./date-interval";
 export * from "./search";
+export * from "./entities";

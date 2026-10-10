@@ -18,6 +18,7 @@ import type {
   HistoricalLocation,
 } from "../app/map/types";
 import type { EventQuery } from "../app/map/utils/event-query";
+import { cleanMentions, normalizeEntityName } from "@historical-map/domain";
 
 let client: ReturnType<typeof postgres> | null = null;
 
@@ -247,6 +248,25 @@ async function ensureSearchSchema(): Promise<void> {
     ALTER TABLE event_groups ADD COLUMN IF NOT EXISTS name_tsv tsvector
       GENERATED ALWAYS AS (to_tsvector('hm_simple', coalesce(title, ''))) STORED`;
   await db`CREATE INDEX IF NOT EXISTS event_groups_search_tsv_idx ON event_groups USING GIN (search_tsv)`;
+
+  // People (and later other entity types) named by events — one row per
+  // mention, verbatim plus a normalised key (packages/domain/src/entities.ts).
+  // A map table like events: the web app owns its schema, and publish writes
+  // it alongside each event. Not an identity table — see plans/22.
+  await db`
+    CREATE TABLE IF NOT EXISTS event_entities (
+      event_id  text NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+      type      text NOT NULL,
+      name      text NOT NULL,
+      name_norm text NOT NULL,
+      PRIMARY KEY (event_id, type, name_norm)
+    )`;
+  await db`
+    ALTER TABLE event_entities ADD COLUMN IF NOT EXISTS name_tsv tsvector
+      GENERATED ALWAYS AS (to_tsvector('hm_simple', name_norm)) STORED`;
+  await db`CREATE INDEX IF NOT EXISTS event_entities_tsv_idx ON event_entities USING GIN (name_tsv)`;
+  await db`CREATE INDEX IF NOT EXISTS event_entities_norm_trgm_idx ON event_entities USING GIN (name_norm gin_trgm_ops)`;
+  await db`CREATE INDEX IF NOT EXISTS event_entities_type_norm_idx ON event_entities (type, name_norm)`;
   await db`CREATE INDEX IF NOT EXISTS event_groups_title_trgm_idx ON event_groups USING GIN (immutable_unaccent(title) gin_trgm_ops)`;
 }
 
@@ -448,6 +468,20 @@ async function insertEvent(
             ${e.description}, ${e.imageUrl ?? null}, ${e.source ?? null},
             ${e.tags ?? null}, ${e.datePrecision ?? null}, ${e.dateText ?? null})
     ON CONFLICT (id) DO NOTHING`;
+  await insertPeople(e.id, e.people);
+}
+
+/** Writes an event's people mentions to event_entities. Idempotent. */
+export async function insertPeople(
+  eventId: string,
+  people: readonly string[] | undefined,
+): Promise<void> {
+  for (const name of cleanMentions(people)) {
+    await sql()`
+      INSERT INTO event_entities (event_id, type, name, name_norm)
+      VALUES (${eventId}, 'person', ${name}, ${normalizeEntityName(name)})
+      ON CONFLICT DO NOTHING`;
+  }
 }
 
 export async function deleteLocation(id: string): Promise<boolean> {
@@ -746,6 +780,9 @@ export async function searchEvents(
       AND (${sourceIds}::text[] IS NULL OR e.source_id = ANY(${sourceIds}))
       AND (${groupEventIds}::text[] IS NULL OR e.id = ANY(${groupEventIds}))
       AND (${query.documentId ?? null}::text IS NULL OR e.document_id::text = ${query.documentId ?? null})
+      AND (${query.person ?? null}::text IS NULL OR EXISTS (
+            SELECT 1 FROM event_entities ee
+            WHERE ee.event_id = e.id AND ee.type = 'person' AND ee.name_norm = ${query.person ?? null}))
       AND (${bbox}::double precision[] IS NULL
            OR ST_Intersects(
                 l.geom,

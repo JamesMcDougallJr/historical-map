@@ -259,6 +259,14 @@ from evidence rather than guessed. First real run: 90/131 quotes found.
 `publish` reads only `verdict = 'publish'` and demotes back to review when
 geocoding fails, since `locations` requires coordinates.
 
+**People are extracted verbatim, not resolved.** The extraction schema has a `people`
+array (names exactly as written); `publish` writes them to `event_entities` (type `person`,
+a web-app-owned map table created by `ensureSchema()`), with `name_norm` from
+`normalizeEntityName` in `packages/domain/src/entities.ts`. "Brigham Young" and "President
+Young" are two names — search shows them as separate person hits on purpose; merging them
+is identity work (plans/22 Level 3, with plan 13), not a normaliser tweak. Events extracted
+before the field existed have no people until re-extracted (deliberately not backfilled).
+
 **`document_passages` is search's index over document text** — one row per paragraph, cut
 from the stored artifact by `splitPassages` (`libs/parsers/src/passages/`). `extract-text`
 rewrites it with every artifact; `publish` re-derives `passage_events` (which event was

@@ -65,6 +65,7 @@ const SECTION_ORDER: SearchKind[] = [
   "event",
   "sequence",
   "location",
+  "person",
   "document",
   "passage",
 ];
@@ -72,6 +73,7 @@ const SECTION_LABEL: Record<SearchKind, string> = {
   event: "Events",
   sequence: "Sequences",
   location: "Places",
+  person: "People",
   document: "Documents",
   passage: "Passages",
 };
@@ -79,6 +81,7 @@ const KIND_LABEL: Record<SearchKind, string> = {
   event: "Event",
   sequence: "Sequence",
   location: "Place",
+  person: "Person",
   document: "Document",
   passage: "Passage",
 };
@@ -130,6 +133,13 @@ function KindIcon({ kind }: { kind: SearchKind }): JSX.Element {
         <svg {...common}>
           <path d="M3 21h18M5 21V10l7-5 7 5v11" />
           <path d="M10 21v-5h4v5" />
+        </svg>
+      );
+    case "person":
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="8" r="4" />
+          <path d="M4 21c0-4 3.6-7 8-7s8 3 8 7" />
         </svg>
       );
     case "document":
@@ -842,6 +852,13 @@ function RowContext({
       return <SequenceContext hit={hit} />;
     case "location":
       return <LocationContext hit={hit} />;
+    case "person":
+      return (
+        <span>
+          {hit.eventCount} event{hit.eventCount === 1 ? "" : "s"}
+          {hit.dateRange ? ` · ${yearSpan(hit.dateRange)}` : ""}
+        </span>
+      );
     case "document":
       return <DocumentContext hit={hit} sources={sources} />;
     case "passage":

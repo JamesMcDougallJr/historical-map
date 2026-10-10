@@ -31,6 +31,12 @@ export interface HistoricalEvent {
   anchor?: string;
   /** Derived: which EventGroups list this event's id. Never written directly — storage layers populate it by scanning `memberEventIds`. */
   groupIds?: string[];
+  /**
+   * People named in this event, verbatim. Written to `event_entities`
+   * (type "person") by the Postgres backend and searched from there; the JSON
+   * backend keeps and searches them inline. Not populated on Postgres reads.
+   */
+  people?: string[];
 }
 
 /**

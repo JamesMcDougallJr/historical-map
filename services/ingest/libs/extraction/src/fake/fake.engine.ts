@@ -34,6 +34,13 @@ export class FakeExtractionEngine implements ExtractionEngine {
       const title = block.match(/^TITLE:\s*(.+)$/m)?.[1]?.trim();
       const date = block.match(/^DATE:\s*(.+)$/m)?.[1]?.trim();
       const place = block.match(/^PLACE:\s*(.+)$/m)?.[1]?.trim();
+      // "PEOPLE: Brigham Young; President Young" — absent means nobody named.
+      const people =
+        block
+          .match(/^PEOPLE:\s*(.+)$/m)?.[1]
+          ?.split(";")
+          .map((n) => n.trim())
+          .filter(Boolean) ?? [];
       if (!title || !date) continue;
 
       events.push({
@@ -49,6 +56,7 @@ export class FakeExtractionEngine implements ExtractionEngine {
         dateIso: date,
         datePrecision: "day",
         placeName: place ?? null,
+        people,
         anchor: chunk.anchors[0] ?? null,
       });
     }

@@ -10,6 +10,7 @@
 
 import {
   eventInYearRange,
+  normalizeEntityName,
   eventYearSpan,
   yearRangesOverlap,
   SNIPPET_MARK_END,
@@ -20,6 +21,7 @@ import {
   type HistoricalLocation,
   type LocationHit,
   type MatchField,
+  type PersonHit,
   type SequenceHit,
   type YearRange,
 } from "@historical-map/domain";
@@ -37,6 +39,7 @@ export interface StaticSearchInput {
 
 const FIELD_WEIGHTS = {
   title: 3,
+  person: 2,
   place: 2,
   date: 1.5,
   body: 1,
@@ -173,6 +176,7 @@ export interface StaticSearchResult {
   events: EventHit[];
   sequences: SequenceHit[];
   locations: LocationHit[];
+  people: PersonHit[];
 }
 
 export function searchStatic(
@@ -204,6 +208,7 @@ export function searchStatic(
         const s = scoreFields(
           {
             title: e.title,
+            person: (e.people ?? []).join(" "),
             place: loc.name,
             date: e.dateText ?? "",
             body: e.description,
@@ -250,6 +255,7 @@ export function searchStatic(
       events: events.slice(0, input.limit),
       sequences: [],
       locations: [],
+      people: [],
     };
   }
 
@@ -358,7 +364,66 @@ export function searchStatic(
     events: events.slice(0, input.limit),
     sequences: sequences.slice(0, input.limit),
     locations: locations.slice(0, input.limit),
+    people: staticPeople(data, q, eventPasses).slice(0, input.limit),
   };
+}
+
+/** One hit per distinct normalised name, counting in-range events only. */
+function staticPeople(
+  data: HistoricalEventsData,
+  q: Query,
+  eventPasses: (
+    loc: HistoricalLocation,
+    e: HistoricalLocation["events"][number],
+  ) => boolean,
+): PersonHit[] {
+  const byName = new Map<
+    string,
+    { names: Map<string, number>; dates: string[]; score: number }
+  >();
+  for (const loc of data.locations) {
+    for (const e of loc.events) {
+      if (!eventPasses(loc, e)) continue;
+      for (const name of e.people ?? []) {
+        const s = scoreFields({ person: name }, q);
+        if (!s) continue;
+        const norm = normalizeEntityName(name);
+        const entry = byName.get(norm) ?? {
+          names: new Map<string, number>(),
+          dates: [],
+          score: 0,
+        };
+        entry.names.set(name, (entry.names.get(name) ?? 0) + 1);
+        entry.dates.push(e.date);
+        entry.score = Math.max(entry.score, s.score);
+        byName.set(norm, entry);
+      }
+    }
+  }
+  const people: PersonHit[] = Array.from(byName.entries()).map(
+    ([norm, entry]) => {
+      const display = Array.from(entry.names.entries()).sort(
+        (a, b) => b[1] - a[1],
+      )[0]![0];
+      const dates = entry.dates.sort();
+      return {
+        kind: "person",
+        id: norm,
+        title: display,
+        snippet: staticSnippet(display, q),
+        score: entry.score,
+        matchedOn: ["person"],
+        eventCount: dates.length,
+        dateRange: [dates[0]!, dates[dates.length - 1]!],
+      };
+    },
+  );
+  return people.sort(
+    (a, b) =>
+      b.score - a.score ||
+      b.eventCount - a.eventCount ||
+      a.id.localeCompare(b.id),
+  );
 }
 
 /** Location ids of every matching event, for live map highlighting. */

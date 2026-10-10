@@ -13,6 +13,7 @@ import { applyMartinFunctions } from "../../scripts/apply-martin-functions";
 import { FX_GROUP, FX_LOCATIONS, FX_SOURCES } from "./seed-data";
 import {
   FX_INGEST_SOURCE_ID,
+  PEOPLE_LOCATION,
   SEARCH_DOCUMENT_EVENTS,
   SEARCH_DOCUMENT_LOCATION,
   SEARCH_DOCUMENTS,
@@ -39,6 +40,7 @@ export async function seedFixtureData(): Promise<void> {
   // The search corpus (search-seed.ts) — its own source, so it is its own layer.
   await upsertSource(SEARCH_SOURCE);
   for (const location of SEARCH_LOCATIONS) await upsertLocation(location);
+  await upsertLocation(PEOPLE_LOCATION);
   await upsertEventGroup({
     id: SEARCH_GROUP.id,
     title: SEARCH_GROUP.title,

@@ -14,6 +14,7 @@
 
 import {
   intersectYearRanges,
+  normalizeEntityName,
   SEARCH_KINDS,
   type Bbox,
   type DocumentHit,
@@ -47,6 +48,7 @@ const DEFAULT_LIMITS: Record<SearchKind, number> = {
   event: 8,
   sequence: 3,
   location: 3,
+  person: 3,
   document: 3,
   passage: 4,
 };
@@ -229,6 +231,9 @@ export async function search(req: SearchRequest): Promise<SearchResponse> {
       ...(kinds.has("location")
         ? result.locations.slice(0, limitFor("location"))
         : []),
+      ...(kinds.has("person")
+        ? result.people.slice(0, limitFor("person"))
+        : []),
     ];
     return respond(hits, browse ? undefined : findTopHit(hits, p.text));
   }
@@ -239,20 +244,27 @@ export async function search(req: SearchRequest): Promise<SearchResponse> {
     return respond(await pg.browseEventHits(input));
   }
 
-  const [events, sequences, locations, documentHits] = await Promise.all([
-    kinds.has("event")
-      ? pg.searchEventHits(pgInput(req, p, limitFor("event")))
-      : [],
-    kinds.has("sequence")
-      ? pg.searchSequenceHits(pgInput(req, p, limitFor("sequence")))
-      : [],
-    kinds.has("location")
-      ? pg.searchLocationHits(pgInput(req, p, limitFor("location")))
-      : [],
-    documents && kinds.has("document")
-      ? pg.searchDocumentHits(pgInput(req, p, limitFor("document")))
-      : [],
-  ]);
+  const [events, sequences, locations, people, documentHits] =
+    await Promise.all([
+      kinds.has("event")
+        ? pg.searchEventHits(pgInput(req, p, limitFor("event")))
+        : [],
+      kinds.has("sequence")
+        ? pg.searchSequenceHits(pgInput(req, p, limitFor("sequence")))
+        : [],
+      kinds.has("location")
+        ? pg.searchLocationHits(pgInput(req, p, limitFor("location")))
+        : [],
+      kinds.has("person")
+        ? pg.searchPersonHits(
+            pgInput(req, p, limitFor("person")),
+            normalizeEntityName(p.text),
+          )
+        : [],
+      documents && kinds.has("document")
+        ? pg.searchDocumentHits(pgInput(req, p, limitFor("document")))
+        : [],
+    ]);
 
   // One sentence, one result: an event's own quote paragraph rides on the
   // event hit and stays out of the passage group.
@@ -285,6 +297,7 @@ export async function search(req: SearchRequest): Promise<SearchResponse> {
     ...events,
     ...sequences,
     ...locations,
+    ...people,
     ...docs,
     ...passages,
   ];
@@ -306,7 +319,10 @@ function findTopHit(
   if (!target) return undefined;
   const exact = hits.filter(
     (h) =>
-      (h.kind === "event" || h.kind === "sequence" || h.kind === "location") &&
+      (h.kind === "event" ||
+        h.kind === "sequence" ||
+        h.kind === "location" ||
+        h.kind === "person") &&
       norm(h.title) === target,
   );
   if (exact.length !== 1) return undefined;

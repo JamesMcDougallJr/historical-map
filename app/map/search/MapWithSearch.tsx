@@ -26,7 +26,8 @@ import type {
 } from "../types";
 import { MapView, type MapViewHandle } from "../components/MapView";
 import { DocumentPanel } from "./DocumentPanel";
-import { fetchDocumentEvents } from "./search-client";
+import { fetchDocumentEvents, fetchPersonEvents } from "./search-client";
+import { PersonPanel } from "./PersonPanel";
 import { hitKey, SearchBox, useSearchLayout } from "./SearchBox";
 import { SequencePanel } from "./SequencePanel";
 import { useSearch } from "./useSearch";
@@ -38,6 +39,15 @@ const mapClient = createMapClient({
 type Panel =
   | { kind: "document"; documentId: string; focusSeq: number | null }
   | { kind: "sequence"; groupId: string; title: string }
+  | {
+      kind: "person";
+      personId: string;
+      title: string;
+      events: Array<{
+        event: HistoricalEvent;
+        location: HistoricalLocation;
+      }> | null;
+    }
   | null;
 
 function readUrl(): { q: string; hit: string | null } {
@@ -146,6 +156,30 @@ export function MapWithSearch({
     });
   }, []);
 
+  /**
+   * A person: filter to the events naming them, fit, and join them by date —
+   * plan 18's sequence rendering, ordered by `date` instead of `seq`.
+   */
+  const showPerson = useCallback(async (personId: string, title: string) => {
+    const { results } = await fetchPersonEvents(personId).catch(() => ({
+      results: [],
+    }));
+    const ordered = [...results].sort((a, b) =>
+      a.event.date.localeCompare(b.event.date),
+    );
+    const ids = Array.from(new Set(ordered.map((r) => r.location.id)));
+    mapRef.current?.focusLocations(
+      ids,
+      ordered.map((r) => r.location.coordinates),
+      { path: true },
+    );
+    setPanel((current) =>
+      current?.kind === "person" && current.personId === personId
+        ? { kind: "person", personId, title, events: ordered }
+        : current,
+    );
+  }, []);
+
   /** The one dispatcher every search action goes through. */
   const activate = useCallback(
     (hit: SearchHit, opts: { push?: boolean } = {}) => {
@@ -181,9 +215,20 @@ export function MapWithSearch({
             focusSeq: Number(hit.id.split(":").pop()),
           });
           break;
+        case "person":
+          mapRef.current?.closePopup();
+          setFocusLabel(hit.title);
+          setPanel({
+            kind: "person",
+            personId: hit.id,
+            title: hit.title,
+            events: null,
+          });
+          void showPerson(hit.id, hit.title);
+          break;
       }
     },
-    [search.input, showEventHit],
+    [search.input, showEventHit, showPerson],
   );
 
   /** Back (Esc or the browser's back button): the result list, query intact. */
@@ -306,7 +351,7 @@ export function MapWithSearch({
   );
 
   const closePanel = useCallback(() => {
-    if (panel?.kind === "sequence") clearFocus();
+    if (panel?.kind === "sequence" || panel?.kind === "person") clearFocus();
     setPanel(null);
     setQuoteAnchor(null);
     writeUrl(search.input, null, false);
@@ -356,7 +401,9 @@ export function MapWithSearch({
             data-testid="search-focus-chip-clear"
             onClick={() => {
               clearFocus();
-              if (panel?.kind === "sequence") setPanel(null);
+              if (panel?.kind === "sequence" || panel?.kind === "person") {
+                setPanel(null);
+              }
             }}
           >
             ×
@@ -397,6 +444,15 @@ export function MapWithSearch({
             void showEventById(eventId, locationId)
           }
           onShowAll={(id, title) => void onShowAll(id, title)}
+          onClose={closePanel}
+        />
+      )}
+      {panel?.kind === "person" && (
+        <PersonPanel
+          layout={layout}
+          title={panel.title}
+          events={panel.events}
+          onShowEvent={onShowMember}
           onClose={closePanel}
         />
       )}

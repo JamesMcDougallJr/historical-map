@@ -342,6 +342,16 @@ export const SEARCH_HITS = {
     matchCount: 12,
     eventCount: 1,
   },
+  person: {
+    kind: "person",
+    id: "brigham young",
+    title: "Brigham Young",
+    snippet: `${M0}Brigham${M1} Young`,
+    score: 1,
+    matchedOn: ["person"],
+    eventCount: 2,
+    dateRange: ["1847-07-24", "1877-08-29"],
+  },
   passage: {
     kind: "passage",
     id: `${DOC_ID}:7`,

@@ -120,6 +120,7 @@ export class PublishingService {
           dateText: event.dateText,
           documentId,
           anchor: event.anchor,
+          ...(event.people ? { people: event.people } : {}),
         });
 
         await this.candidateRepo.update(candidate.id, {

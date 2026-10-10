@@ -4,6 +4,7 @@
 // HistoricalEventsData.
 import { test, expect } from "@playwright/test";
 import { searchStatic } from "../lib/search-static";
+import { normalizeEntityName } from "../packages/domain/src/entities";
 import type { HistoricalEventsData } from "../app/map/types";
 
 const DATA: HistoricalEventsData = {
@@ -22,6 +23,7 @@ const DATA: HistoricalEventsData = {
           date: "1857-09-11",
           datePrecision: "day",
           source: "the Fancher train",
+          people: ["President Brigham Young"],
         },
       ],
     },
@@ -36,6 +38,7 @@ const DATA: HistoricalEventsData = {
           description: "The party rested on the meadows.",
           date: "1857-01-01",
           datePrecision: "year",
+          people: ["Brigham Young", "President Young"],
         },
       ],
     },
@@ -132,4 +135,30 @@ test("snippets carry sentinel marks, never HTML", () => {
   const hit = run("meadows").events.find((e) => e.id === "ev-body")!;
   expect(hit.snippet).toContain("\u0002meadows\u0003");
   expect(hit.snippet).not.toContain("<mark>");
+});
+
+test("people: normalised names, honorifics stripped only while two words remain", () => {
+  expect(normalizeEntityName("President Brigham Young")).toBe("brigham young");
+  expect(normalizeEntityName("President Young")).toBe("president young");
+  expect(normalizeEntityName("Gen. Torcuato  Trujillo")).toBe(
+    "torcuato trujillo",
+  );
+  expect(normalizeEntityName("Élise Fixture")).toBe("elise fixture");
+  expect(normalizeEntityName("Hernando Cortés")).toBe("hernando cortes");
+});
+
+test("people: a person field match, and one hit per normalised name", () => {
+  const { events, people } = run("young");
+  expect(events.every((e) => e.matchedOn.includes("person"))).toBe(true);
+  // "President Brigham Young" and "Brigham Young" share a key; "President
+  // Young" doesn't — aliases stay separate.
+  expect(people.map((p) => [p.id, p.eventCount])).toEqual([
+    ["brigham young", 2],
+    ["president young", 1],
+  ]);
+  expect(people[0]!.title).toMatch(/Brigham Young/);
+  expect(
+    run("young", { years: [1857, 1857] }).people.map((p) => p.eventCount),
+  ).toEqual([2, 1]);
+  expect(run("young", { years: [1900, 1950] }).people).toEqual([]);
 });
