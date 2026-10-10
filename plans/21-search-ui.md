@@ -1,5 +1,20 @@
 # S2 — The search bar: typed results and what clicking does
 
+> **Status: done (2026-10-10)** on branch `search-lexical`. Verified locally:
+> the whole mocked suite (132 passed — every `e2e/search-*` spec, including the
+> touch projects on iPad landscape/portrait and iPhone) and the real-backend
+> `e2e-real/specs/map/search.spec.ts` against Postgres (GeoJSON layers; Martin
+> isn't available on the build machine, so its MVT path runs in CI).
+> Deviations: the sequence panel reads `/api/data/groups/:id` (seq order)
+> rather than `/api/data/search?group=`; the slow-hint specs use real time with
+> wide margins instead of `page.clock`, which would also freeze OpenLayers'
+> rendering and the debounce; the "hidden in the MCP App" spec is a source
+> guard (MapView may not import `app/map/search/`) rather than a run of the
+> embed. Map pins now use the same precision-aware year spans as search
+> (`db/martin-functions.sql`, the GeoJSON features route, the inline layer and
+> the popup filter), closing S1's open item. `waitForMapReady` now waits for a
+> settled map, which also fixes the hover specs' pre-existing flakiness.
+
 Part of [19-search.md](./19-search.md). Consumes the `/api/search` contract
 from [20-search-lexical.md](./20-search-lexical.md). It can be built against a
 stubbed response as soon as that contract is fixed, the same way

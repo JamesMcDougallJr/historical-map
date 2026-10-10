@@ -16,6 +16,8 @@ interface MapPopupProps {
   onHeaderMouseDown?: (e: React.MouseEvent) => void;
   acknowledgedIds?: Set<string>;
   onAcknowledge?: (eventId: string) => void;
+  /** Open on this event's year tab and page — search's event action. */
+  focusEventId?: string | null;
 }
 
 export function MapPopup({
@@ -25,6 +27,7 @@ export function MapPopup({
   onHeaderMouseDown,
   acknowledgedIds,
   onAcknowledge,
+  focusEventId,
 }: MapPopupProps) {
   const popupRef = useRef<HTMLDivElement>(null);
   /**
@@ -40,6 +43,8 @@ export function MapPopup({
     locationId: string;
     year: string;
     page: number;
+    /** The focused event when this choice was made; a new focus supersedes it. */
+    focusKey: string | null;
   } | null>(null);
   const [isMobile, setIsMobile] = useState(false);
 
@@ -71,9 +76,29 @@ export function MapPopup({
   const locationId = location?.id ?? "";
   // Only honour the selection if its year still exists — the timeline can
   // filter the year the user was on out from under them.
-  const selectionApplies =
-    selection?.locationId === locationId && eventsByYear.has(selection.year);
-  const activeYear = selectionApplies ? selection.year : (years[0] ?? "");
+  const focusKey = focusEventId ?? null;
+  const userSelectionApplies =
+    selection?.locationId === locationId &&
+    selection.focusKey === focusKey &&
+    eventsByYear.has(selection.year);
+  // A focused event (search's event action) picks the starting tab and page,
+  // derived in render like the user's selection, until the user picks another.
+  const focused = useMemo(() => {
+    if (!focusEventId) return null;
+    for (const [year, events] of Array.from(eventsByYear.entries())) {
+      const index = events.findIndex((e) => e.id === focusEventId);
+      if (index >= 0) {
+        return { year, page: Math.floor(index / EVENTS_PER_PAGE) };
+      }
+    }
+    return null;
+  }, [focusEventId, eventsByYear]);
+  const effective = userSelectionApplies
+    ? selection
+    : focused
+      ? { locationId, focusKey, ...focused }
+      : null;
+  const activeYear = effective ? effective.year : (years[0] ?? "");
 
   // Get events for current year
   const currentYearEvents = useMemo(() => {
@@ -82,8 +107,8 @@ export function MapPopup({
 
   // Pagination
   const totalPages = Math.ceil(currentYearEvents.length / EVENTS_PER_PAGE);
-  const currentPage = selectionApplies
-    ? Math.min(selection.page, Math.max(0, totalPages - 1))
+  const currentPage = effective
+    ? Math.min(effective.page, Math.max(0, totalPages - 1))
     : 0;
   const paginatedEvents = useMemo(() => {
     const start = currentPage * EVENTS_PER_PAGE;
@@ -92,12 +117,12 @@ export function MapPopup({
 
   // Handle year change
   const handleYearChange = (year: string) => {
-    setSelection({ locationId, year, page: 0 });
+    setSelection({ locationId, year, page: 0, focusKey });
   };
 
   // Handle page change
   const handlePageChange = (page: number) => {
-    setSelection({ locationId, year: activeYear, page });
+    setSelection({ locationId, year: activeYear, page, focusKey });
   };
 
   // A pin is on the map because it has events, so a popup with none is not a

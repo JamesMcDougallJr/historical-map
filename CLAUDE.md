@@ -129,7 +129,7 @@ production builds):
 | Global             | What it is                                                                                        |
 | ------------------ | ------------------------------------------------------------------------------------------------- |
 | `window.__olMap`   | The live OpenLayers `Map` — layers, sources, view, hit testing                                    |
-| `window.__olDebug` | The popup/hover **refs** (read `.current`): `popupHovered`, `hoverTimeout`, `pinned`, `hoveredId` |
+| `window.__olDebug` | The popup/hover **refs** (read `.current`): `popupHovered`, `hoverTimeout`, `pinned`, `hoveredId`, and `pinStyle` — the timeline/search-highlight/pulse/focus state every pin's style is computed from |
 
 They exist because the hover and popup state deliberately lives in refs rather than state —
 OpenLayers event handlers are registered once and would otherwise close over stale values
@@ -396,6 +396,19 @@ nav chrome for embedding. Changing it affects Claude's inline map too.
 - `overlayLayersRef` (a `Map<string, BaseLayer>`) caches OL layers by overlay ID
 - Popup hover uses a 300ms debounce; `isPinnedRef` mirrors `isPinned` state to avoid stale
   closures in OL event handlers
+- **Every event-layer pin is styled by one style function** reading `pinStyleStateRef` —
+  timeline span, search highlight/dim, pulsed row, "Showing: …" focus filter. Change any of
+  it and call `layer.changed()`: that re-styles without refetching (an MVT `setUrl` would
+  refetch every tile). Vector layers' timeline filtering lives there too, so don't go back to
+  `feature.setStyle` for it — that overrode highlighting.
+- **On /map, MapView is driven from `app/map/search/MapWithSearch.tsx`**: the timeline is
+  lifted into it as optional controlled props (absent → MapView's own state, which is what
+  the MCP App uses), and search actions go through the imperative `MapViewHandle`
+  (`showEvent`, `showLocation`, `focusGroup`, `focusLocations`). MapView must never import
+  `app/map/search/` — a spec guards it, since the MCP bundle would grow.
+- The map is rebuilt whenever `locations`/`eventLayers` change; the view (or an in-flight
+  fly's target) and an open popup are carried across, so a rebuild no longer snaps back to the
+  default centre.
 
 ### MCP server — two transports, one registration
 

@@ -137,7 +137,12 @@ function staticSnippet(text: string, q: Query, max = 200): string {
   if (marks.length === 0) return truncate(clean, max);
 
   const first = marks[0]![0];
-  const start = Math.max(0, first - 60);
+  // Start on a word boundary, never mid-word.
+  let start = Math.max(0, first - 60);
+  if (start > 0) {
+    const space = clean.indexOf(" ", start);
+    start = space >= 0 && space < first ? space + 1 : first;
+  }
   const end = Math.min(clean.length, start + max);
   let out = "";
   let pos = start;

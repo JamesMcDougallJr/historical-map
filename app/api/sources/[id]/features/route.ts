@@ -10,7 +10,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import * as storage from "@/lib/server-storage";
-import { eventYear } from "@/app/map/utils/event-query";
+import { eventYearSpan } from "@historical-map/domain";
 
 export const dynamic = "force-dynamic";
 
@@ -46,13 +46,16 @@ export async function GET(
     const events = location.events.filter((e) => e.sourceId === sourceId);
     if (events.length === 0) continue;
 
-    const years = events.map((e) => eventYear(e.date)).filter(Number.isFinite);
+    // Precision-aware, like search: a year-only event spans its year, a
+    // circa one a few years either side — so a search hit is always a pin
+    // the timeline would draw.
+    const spans = events.map((e) => eventYearSpan(e.date, e.datePrecision));
     const properties: PinProperties = {
       location_id: location.id,
       source_id: sourceId,
       name: location.name,
-      min_year: years.length ? Math.min(...years) : 0,
-      max_year: years.length ? Math.max(...years) : 0,
+      min_year: Math.min(...spans.map((sp) => sp[0])),
+      max_year: Math.max(...spans.map((sp) => sp[1])),
       event_count: events.length,
       events: JSON.stringify(events),
     };

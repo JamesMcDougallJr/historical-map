@@ -11,19 +11,23 @@ import VectorTileSource from "ol/source/VectorTile";
 import MVT from "ol/format/MVT";
 import { defaults as defaultControls } from "ol/control/defaults";
 import {
+  forwardRef,
   useEffect,
+  useImperativeHandle,
   useLayoutEffect,
   useRef,
   useState,
   useCallback,
   useMemo,
+  type ReactNode,
 } from "react";
-import { fromLonLat, toLonLat } from "ol/proj";
+import { fromLonLat, toLonLat, transformExtent } from "ol/proj";
 import { boundingExtent } from "ol/extent";
 import Point from "ol/geom/Point";
 import LineString from "ol/geom/LineString";
-import Style from "ol/style/Style";
+import Style, { type StyleFunction } from "ol/style/Style";
 import Icon from "ol/style/Icon";
+import CircleStyle from "ol/style/Circle";
 import Fill from "ol/style/Fill";
 import Stroke from "ol/style/Stroke";
 import Text from "ol/style/Text";
@@ -58,7 +62,7 @@ import {
   acknowledgeEvent as ackEvent,
   type MapProgress,
 } from "../utils/storage";
-import { getYear } from "../utils/date-utils";
+import { eventInYearRange, eventYearSpan } from "@historical-map/domain";
 import type BaseLayer from "ol/layer/Base";
 import type { FeatureLike } from "ol/Feature";
 // Positions OL's controls, overlays and attribution. Imported here rather than
@@ -194,6 +198,107 @@ function pinStyleFor(color: string | undefined): Style {
 }
 
 /**
+ * Everything the shared pin style function reads, held in a ref.
+ *
+ * OL creates a layer's style function once, so — like `isPinnedRef` — anything
+ * it depends on has to be read through a ref or it closes over stale values.
+ * Changing any of this calls `layer.changed()`, which re-styles the features
+ * already drawn **without refetching**: on the MVT path, `source.setUrl` would
+ * refetch every tile, which is why highlighting must never go through it.
+ */
+interface PinStyleState {
+  /** Pins carry `min_year`/`max_year`, the precision-aware span of their events. */
+  timeline: { enabled: boolean; range: [number, number] };
+  /** Search highlight: matching location ids, or null when no search is active. */
+  highlight: ReadonlySet<string> | null;
+  /** False when the id list is capped: highlight those, but dim nothing. */
+  dimOthers: boolean;
+  /** The single location whose result row is focused in the search list. */
+  pulse: string | null;
+  /** A "Showing: …" filter (a document's events): only these locations draw. */
+  focus: ReadonlySet<string> | null;
+}
+
+interface PinStyleSet {
+  normal: Style;
+  /** Source colour with a halo and a scale bump. */
+  highlight: Style[];
+  /** Same colour at low opacity, so layer colours still read correctly. */
+  dim: Style;
+  pulse: Style[];
+}
+
+const pinStyleSets = new Map<string, PinStyleSet>();
+
+function pinIconSrc(color: string): string {
+  return `data:image/svg+xml,${encodeURIComponent(`
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="32" height="32">
+  <path fill="${color}" d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
+</svg>
+`)}`;
+}
+
+function pinStyleSet(color = "#3b82f6"): PinStyleSet {
+  const cached = pinStyleSets.get(color);
+  if (cached) return cached;
+  const src = pinIconSrc(color);
+  // The halo sits on the pin's head: the icon is anchored at its tip, so the
+  // circle is displaced upward by roughly the head's height.
+  const halo = (radius: number) =>
+    new Style({
+      image: new CircleStyle({
+        radius,
+        displacement: [0, 22],
+        fill: new Fill({ color: "rgba(250, 204, 21, 0.45)" }),
+        stroke: new Stroke({ color: "#ffffff", width: 2 }),
+      }),
+    });
+  const icon = (scale: number, opacity = 1) =>
+    new Style({ image: new Icon({ anchor: [0.5, 1], src, scale, opacity }) });
+  const set: PinStyleSet = {
+    normal: icon(1),
+    highlight: [halo(14), icon(1.25)],
+    dim: icon(1, 0.25),
+    pulse: [halo(18), icon(1.5)],
+  };
+  pinStyleSets.set(color, set);
+  return set;
+}
+
+function makePinStyleFunction(
+  color: string | undefined,
+  state: { current: PinStyleState },
+): StyleFunction {
+  return (feature) => {
+    const s = state.current;
+    const id = feature.get("location_id") as string | undefined;
+    // Highlighting composes with the timeline: a pin the timeline hides stays
+    // hidden, whatever matches.
+    if (s.timeline.enabled) {
+      const min = (feature.get("min_year") as number | undefined) ?? -Infinity;
+      const max = (feature.get("max_year") as number | undefined) ?? Infinity;
+      if (max < s.timeline.range[0] || min > s.timeline.range[1]) return;
+    }
+    if (s.focus && !(id && s.focus.has(id))) return;
+    const styles = pinStyleSet(color);
+    if (s.pulse && id === s.pulse) return styles.pulse;
+    if (!s.highlight) return styles.normal;
+    if (id && s.highlight.has(id)) return styles.highlight;
+    return s.dimOthers ? styles.dim : styles.normal;
+  };
+}
+
+/** The precision-aware year span of a location's events, for `min_year`/`max_year`. */
+function eventsYearSpan(events: HistoricalEvent[]): [number, number] {
+  const spans = events.map((e) => eventYearSpan(e.date, e.datePrecision));
+  if (spans.length === 0) return [0, 0];
+  return [
+    Math.min(...spans.map((sp) => sp[0])),
+    Math.max(...spans.map((sp) => sp[1])),
+  ];
+}
+
+/**
  * Builds an OpenLayers layer for an event source, switching on how it's served
  * — directly parallel to createOverlayLayer below.
  *
@@ -203,14 +308,13 @@ function pinStyleFor(color: string | undefined): Style {
 function buildEventLayer(
   layer: EventLayer,
   locations: HistoricalLocation[],
+  styleState: { current: PinStyleState },
 ): BaseLayer {
-  const style = pinStyleFor(layer.color);
+  const style = makePinStyleFunction(layer.color, styleState);
 
   if (layer.kind === "inline") {
     const features = locations.map((location) => {
-      const years = location.events
-        .map((e) => parseInt(getYear(e.date), 10))
-        .filter(Number.isFinite);
+      const [minYear, maxYear] = eventsYearSpan(location.events);
       return new Feature({
         geometry: new Point(fromLonLat(location.coordinates)),
         // Same property names the other two kinds emit, so hover, click and
@@ -218,8 +322,8 @@ function buildEventLayer(
         location_id: location.id,
         source_id: layer.id,
         name: location.name,
-        min_year: years.length ? Math.min(...years) : 0,
-        max_year: years.length ? Math.max(...years) : 0,
+        min_year: minYear,
+        max_year: maxYear,
         event_count: location.events.length,
       });
     });
@@ -271,18 +375,90 @@ export interface MapViewProps {
   homeHref?: string;
   importHref?: string;
   onRefresh?: () => void;
+
+  // ── Timeline, optionally controlled ───────────────────────────────────────
+  // /map lifts the timeline into the page shell, because search follows it.
+  // Absent, MapView keeps its own state — the MCP App passes none of these and
+  // is unchanged. One slider, one source of truth either way.
+  timelineRange?: [number, number];
+  onTimelineRangeChange?: (range: [number, number]) => void;
+  timelineEnabled?: boolean;
+  onTimelineEnabledChange?: (enabled: boolean) => void;
+  /** Whether the timeline panel is open — so a search chip can open it. */
+  timelineOpen?: boolean;
+  onTimelineOpenChange?: (open: boolean) => void;
+
+  // ── Search (the page shell's; the embed never passes these) ───────────────
+  /** Matching location ids while a search is active; null renders as today. */
+  highlightLocationIds?: ReadonlySet<string> | null;
+  /** Dim pins outside the highlight. False when the match list was capped. */
+  highlightDimsOthers?: boolean;
+  /** The location of the focused search result row, drawn pulsed. */
+  pulseLocationId?: string | null;
+  /** Rendered first in the top-left control row — where /map puts its search bar. */
+  topLeftSlot?: ReactNode;
 }
 
-export function MapView({
-  locations,
-  initialOverlays,
-  initialEventLayers,
-  eventGroups = [],
-  showNav = true,
-  homeHref = "/",
-  importHref = "/map/import",
-  onRefresh,
-}: MapViewProps): JSX.Element {
+/**
+ * The imperative API the page shell drives MapView with — search's click
+ * actions. Imperative rather than more props, which is how MapView got long:
+ * each of these is a one-shot "do this now", not state.
+ */
+export interface MapViewHandle {
+  /** Fly to an event's location and open its popup pinned, on that event. */
+  showEvent(target: {
+    locationId: string;
+    locationName: string;
+    coordinates: [number, number];
+    eventId: string;
+    sourceId: string | null;
+  }): void;
+  /** Fly to a location and open its popup pinned at its first in-range event. */
+  showLocation(target: {
+    locationId: string;
+    locationName: string;
+    coordinates: [number, number];
+  }): void;
+  /** Filter to a sequence (plan 18's rendering) and fit to its extent. */
+  focusGroup(
+    groupId: string,
+    bbox: [number, number, number, number] | null,
+  ): void;
+  /** Draw only these locations — a document's events — and fit to them. */
+  focusLocations(locationIds: string[], coordinates: [number, number][]): void;
+  /** Undo focusGroup/focusLocations. */
+  clearFocus(): void;
+  closePopup(): void;
+  /** The "Limit to view" filter: viewport bbox (lon/lat) and visible sources. */
+  getViewFilter(): {
+    bbox: [number, number, number, number] | null;
+    sourceIds: string[];
+  };
+}
+
+export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
+  {
+    locations,
+    initialOverlays,
+    initialEventLayers,
+    eventGroups = [],
+    showNav = true,
+    homeHref = "/",
+    importHref = "/map/import",
+    onRefresh,
+    timelineRange: timelineRangeProp,
+    onTimelineRangeChange,
+    timelineEnabled: timelineEnabledProp,
+    onTimelineEnabledChange,
+    timelineOpen,
+    onTimelineOpenChange,
+    highlightLocationIds = null,
+    highlightDimsOthers = true,
+    pulseLocationId = null,
+    topLeftSlot,
+  },
+  ref,
+): JSX.Element {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const popupRef = useRef<HTMLDivElement>(null);
   const overlayRef = useRef<Overlay | null>(null);
@@ -319,6 +495,15 @@ export function MapView({
   useEffect(() => {
     locationsByIdRef.current = locationsById;
   }, [locationsById]);
+
+  /** The map effect's openPopup, for the imperative handle (it closes over that map's overlay). */
+  const openPopupRef = useRef<
+    ((stub: HistoricalLocation, pinned: boolean) => Promise<void>) | null
+  >(null);
+  /** Where an in-progress fly is headed, so a map rebuild mid-fly lands there. */
+  const viewTargetRef = useRef<{ center: number[]; zoom: number } | null>(null);
+  /** An action deferred until the next map is built (see showEvent). */
+  const pendingActionRef = useRef<((map: OlMap) => void) | null>(null);
 
   // Detail fetched on demand for pins whose events aren't already in memory.
   const locationCacheRef = useRef<Map<string, HistoricalLocation>>(new Map());
@@ -361,10 +546,44 @@ export function MapView({
   const [overlayLoadingState, setOverlayLoadingState] = useState<
     Record<string, boolean>
   >({});
-  const [timelineRange, setTimelineRange] = useState<[number, number]>([
-    1776, 2020,
-  ]);
-  const [isTimelineEnabled, setIsTimelineEnabled] = useState(false);
+  const [internalTimelineRange, setInternalTimelineRange] = useState<
+    [number, number]
+  >([1776, 2020]);
+  const [internalTimelineEnabled, setInternalTimelineEnabled] = useState(false);
+  const timelineRange = timelineRangeProp ?? internalTimelineRange;
+  const isTimelineEnabled = timelineEnabledProp ?? internalTimelineEnabled;
+  const setTimelineRange = useCallback(
+    (range: [number, number]) => {
+      if (timelineRangeProp === undefined) setInternalTimelineRange(range);
+      onTimelineRangeChange?.(range);
+    },
+    [timelineRangeProp, onTimelineRangeChange],
+  );
+  const setIsTimelineEnabled = useCallback(
+    (enabled: boolean) => {
+      if (timelineEnabledProp === undefined)
+        setInternalTimelineEnabled(enabled);
+      onTimelineEnabledChange?.(enabled);
+    },
+    [timelineEnabledProp, onTimelineEnabledChange],
+  );
+
+  // What the pin style function reads; see PinStyleState.
+  const pinStyleStateRef = useRef<PinStyleState>({
+    timeline: { enabled: isTimelineEnabled, range: timelineRange },
+    highlight: highlightLocationIds,
+    dimOthers: highlightDimsOthers,
+    pulse: pulseLocationId,
+    focus: null,
+  });
+  /** Re-styles every event layer from pinStyleStateRef, without refetching. */
+  const restylePins = useCallback(() => {
+    for (const olLayer of Array.from(eventLayersRef.current.values())) {
+      olLayer.changed();
+    }
+  }, []);
+  // Which event the next popup should open on (search's event action).
+  const [focusEventId, setFocusEventId] = useState<string | null>(null);
   const [progress, setProgress] = useState<MapProgress>(() => getProgress());
 
   /**
@@ -393,15 +612,18 @@ export function MapView({
     if (!hoveredLocation || !isTimelineEnabled) return hoveredLocation;
     return {
       ...hoveredLocation,
-      events: hoveredLocation.events.filter((evt) => {
-        const year = parseInt(getYear(evt.date), 10);
-        return year >= timelineRange[0] && year <= timelineRange[1];
-      }),
+      // The same precision-aware rule as the pins and search: a year-only
+      // event covers its whole year, a circa one a few years either side.
+      events: hoveredLocation.events.filter((evt) =>
+        eventInYearRange(evt.date, evt.datePrecision, timelineRange),
+      ),
     };
   }, [hoveredLocation, isTimelineEnabled, timelineRange]);
 
+  const hoveredLocationRef = useRef<HistoricalLocation | null>(null);
   // Keep refs in sync
   useEffect(() => {
+    hoveredLocationRef.current = hoveredLocation;
     hoveredLocationIdRef.current = hoveredLocation?.id ?? null;
     // The popup can go away with the pointer still over where it was (the close
     // button, or the timeline filtering its events out), and then no mouseleave
@@ -510,7 +732,7 @@ export function MapView({
     const pinLayers = eventLayers
       .filter((l) => l.enabled)
       .map((l) => {
-        const olLayer = buildEventLayer(l, locations);
+        const olLayer = buildEventLayer(l, locations, pinStyleStateRef);
         eventLayersRef.current.set(l.id, olLayer);
         return olLayer;
       });
@@ -542,6 +764,13 @@ export function MapView({
     countableSources.forEach((s) => s.on("change", recountPins));
     recountPins();
 
+    // This effect rebuilds the map whenever locations or layers change (the
+    // 5s poll, a layer toggle). Carry the previous view across, or every
+    // rebuild snaps back to the default centre — undoing a search's fly.
+    const previousView = mapRef.current?.getView();
+    // Mid-fly, carry the fly's destination, not wherever it had got to — a
+    // shared ?hit= link flies while the first data load is rebuilding the map.
+    const target = viewTargetRef.current;
     const map = new OlMap({
       layers: [
         new TileLayer({
@@ -551,8 +780,11 @@ export function MapView({
       ],
       overlays: [overlay],
       view: new View({
-        center: fromLonLat([-111.8881, 40.7606]),
-        zoom: 8,
+        center:
+          target?.center ??
+          previousView?.getCenter() ??
+          fromLonLat([-111.8881, 40.7606]),
+        zoom: target?.zoom ?? previousView?.getZoom() ?? 8,
       }),
       // Drop OL's zoom/rotate buttons. The attribution stays: OSM's ODbL
       // requires it, and ol/source/OSM sets attributionsCollapsible:false so
@@ -603,6 +835,10 @@ export function MapView({
         hoverTimeout: hoverTimeoutRef,
         pinned: isPinnedRef,
         hoveredId: hoveredLocationIdRef,
+        // What every pin's style is computed from: timeline, search highlight,
+        // pulse and focus filter. Lets a spec check the highlight set against
+        // real MVT tiles, whose features can't be enumerated.
+        pinStyle: pinStyleStateRef,
       };
     }
 
@@ -618,6 +854,9 @@ export function MapView({
       stub: HistoricalLocation,
       pinned: boolean,
     ): Promise<void> => {
+      // A pin opened by hover or click starts on its first event; only the
+      // imperative showEvent picks a specific one (and sets it after this).
+      setFocusEventId(null);
       const full =
         stub.events.length > 0 ? stub : await loadLocationDetail(stub);
       // The pointer may have moved on while the detail was in flight.
@@ -657,6 +896,16 @@ export function MapView({
     };
     popupEl.addEventListener("mouseenter", onPopupEnter);
     popupEl.addEventListener("mouseleave", onPopupLeave);
+
+    openPopupRef.current = openPopup;
+    // A popup that was open (pinned, say) stays anchored on the new overlay.
+    const shown = hoveredLocationRef.current;
+    if (shown) overlay.setPosition(fromLonLat(shown.coordinates));
+    // An action that had to wait for this map — showEvent enabling a layer
+    // that was off rebuilds the map — runs now, against the new one.
+    const pending = pendingActionRef.current;
+    pendingActionRef.current = null;
+    if (pending) pending(map);
 
     map.on("pointermove", (evt) => {
       if (evt.dragging) return;
@@ -728,47 +977,178 @@ export function MapView({
   // Filter pins by timeline range.
   //
   // Each layer kind applies the same range its own way: geojson layers hide
-  // out-of-range features in memory, MVT layers re-request tiles with the range
-  // as query params so the filtering happens in PostGIS. TimelineSlider is
-  // unaware of either.
+  // out-of-range features in the pin style function, MVT layers re-request
+  // tiles with the range as query params so the filtering happens in PostGIS.
+  // TimelineSlider is unaware of either.
   useEffect(() => {
     const [fromYear, toYear] = timelineRange;
 
     for (const layer of eventLayers) {
-      const olLayer = eventLayersRef.current.get(layer.id);
-      if (!olLayer) continue;
-
-      if (layer.kind === "mvt") {
-        const source = (olLayer as VectorTileLayer).getSource();
-        if (!source) continue;
-        // Rebuilt from scratch, not appended — `sourceIds` must be included
-        // every time or a timeline move silently drops the layer's filter.
-        const qs = mvtQueryString({
-          sourceIds: layer.sourceIds,
-          ...(isTimelineEnabled ? { fromYear, toYear } : {}),
-        });
-        source.setUrl(`${layer.url}${qs}`);
-        source.refresh();
-        continue;
-      }
-
-      const source = (olLayer as VectorLayer).getSource();
+      if (layer.kind !== "mvt") continue;
+      const source = (
+        eventLayersRef.current.get(layer.id) as VectorTileLayer | undefined
+      )?.getSource();
       if (!source) continue;
-      const style = pinStyleFor(layer.color);
-      source.getFeatures().forEach((feature) => {
-        if (!isTimelineEnabled) {
-          feature.setStyle(style);
+      // Rebuilt from scratch, not appended — `sourceIds` must be included
+      // every time or a timeline move silently drops the layer's filter.
+      const qs = mvtQueryString({
+        sourceIds: layer.sourceIds,
+        ...(isTimelineEnabled ? { fromYear, toYear } : {}),
+      });
+      source.setUrl(`${layer.url}${qs}`);
+      source.refresh();
+    }
+    // Vector layers filter in the pin style function: pins carry their own
+    // precision-aware year span (min_year/max_year, the same properties the
+    // MVT function emits), so this works without the full event list — and
+    // composes with search highlighting rather than overwriting it.
+    pinStyleStateRef.current.timeline = {
+      enabled: isTimelineEnabled,
+      range: [fromYear, toYear],
+    };
+    restylePins();
+  }, [timelineRange, isTimelineEnabled, eventLayers, restylePins]);
+
+  // Search highlighting: re-style in place, never refetch.
+  useEffect(() => {
+    pinStyleStateRef.current.highlight = highlightLocationIds;
+    pinStyleStateRef.current.dimOthers = highlightDimsOthers;
+    pinStyleStateRef.current.pulse = pulseLocationId;
+    restylePins();
+  }, [highlightLocationIds, highlightDimsOthers, pulseLocationId, restylePins]);
+
+  /** Fly rather than cut, so a long jump shows where it went. */
+  const flyTo = useCallback((map: OlMap, coordinates: [number, number]) => {
+    const view = map.getView();
+    const target = {
+      center: fromLonLat(coordinates),
+      zoom: Math.max(view.getZoom() ?? 8, 10),
+    };
+    viewTargetRef.current = target;
+    view.animate({ ...target, duration: 800 }, () => {
+      if (viewTargetRef.current === target) viewTargetRef.current = null;
+    });
+  }, []);
+
+  useImperativeHandle(ref, (): MapViewHandle => {
+    /**
+     * Opens a pinned popup from data — never from a synthetic pointer event,
+     * because a backgrounded tab has no rendered frame to hit-test against.
+     */
+    const openPinned = (stub: HistoricalLocation, eventId: string | null) => {
+      hoveredLocationIdRef.current = stub.id;
+      const open = openPopupRef.current;
+      if (!open) return;
+      void open(locationsByIdRef.current.get(stub.id) ?? stub, true).then(
+        () => {
+          if (eventId) setFocusEventId(eventId);
+        },
+      );
+    };
+
+    return {
+      showEvent(target) {
+        const stub: HistoricalLocation = {
+          id: target.locationId,
+          name: target.locationName,
+          coordinates: target.coordinates,
+          events: [],
+        };
+        const run = (map: OlMap) => {
+          flyTo(map, target.coordinates);
+          openPinned(stub, target.eventId);
+        };
+        // Flying to a pin that isn't drawn is the worst result here: turn
+        // its source layer on first. Enabling a layer rebuilds the map, so
+        // the fly waits for the new one.
+        const layer = eventLayers.find(
+          (l) =>
+            l.id === target.sourceId ||
+            (target.sourceId !== null &&
+              (l.sourceIds ?? []).includes(target.sourceId)),
+        );
+        if (layer && !layer.enabled) {
+          pendingActionRef.current = run;
+          setEventLayers((prev) =>
+            prev.map((l) => (l.id === layer.id ? { ...l, enabled: true } : l)),
+          );
           return;
         }
-        // Pins carry their own year span, so this works without the full
-        // event list — the same properties the MVT function emits.
-        const min = (feature.get("min_year") as number) ?? -Infinity;
-        const max = (feature.get("max_year") as number) ?? Infinity;
-        const inRange = max >= fromYear && min <= toYear;
-        feature.setStyle(inRange ? style : new Style({}));
-      });
-    }
-  }, [timelineRange, isTimelineEnabled, eventLayers]);
+        // No map yet (a shared ?hit= link, acted on at load): run once built.
+        if (mapRef.current) run(mapRef.current);
+        else pendingActionRef.current = run;
+      },
+      showLocation(target) {
+        const run = (map: OlMap) => {
+          flyTo(map, target.coordinates);
+          openPinned(
+            {
+              id: target.locationId,
+              name: target.locationName,
+              coordinates: target.coordinates,
+              events: [],
+            },
+            null,
+          );
+        };
+        if (mapRef.current) run(mapRef.current);
+        else pendingActionRef.current = run;
+      },
+      focusGroup(groupId, bbox) {
+        setSelectedGroupId(groupId);
+        const map = mapRef.current;
+        if (map && bbox) {
+          const extent = transformExtent(bbox, "EPSG:4326", "EPSG:3857");
+          map.getView().fit(extent, {
+            padding: [80, 80, 80, 80],
+            maxZoom: 12,
+            duration: 600,
+          });
+        }
+      },
+      focusLocations(locationIds, coordinates) {
+        pinStyleStateRef.current.focus = new Set(locationIds);
+        restylePins();
+        const map = mapRef.current;
+        if (map && coordinates.length) {
+          const extent = boundingExtent(coordinates.map((c) => fromLonLat(c)));
+          map.getView().fit(extent, {
+            padding: [80, 80, 80, 80],
+            maxZoom: 12,
+            duration: 600,
+          });
+        }
+      },
+      clearFocus() {
+        setSelectedGroupId(null);
+        pinStyleStateRef.current.focus = null;
+        restylePins();
+      },
+      closePopup() {
+        isPopupHoveredRef.current = false;
+        hoveredLocationIdRef.current = null;
+        setHoveredLocation(null);
+        setIsPinned(false);
+        overlayRef.current?.setPosition(undefined);
+      },
+      getViewFilter() {
+        const map = mapRef.current;
+        const size = map?.getSize();
+        const bbox =
+          map && size
+            ? (transformExtent(
+                map.getView().calculateExtent(size),
+                "EPSG:3857",
+                "EPSG:4326",
+              ) as [number, number, number, number])
+            : null;
+        const sourceIds = eventLayers
+          .filter((l) => l.enabled)
+          .flatMap((l) => l.sourceIds ?? [l.id]);
+        return { bbox, sourceIds: Array.from(new Set(sourceIds)) };
+      },
+    };
+  }, [eventLayers, flyTo, restylePins]);
 
   // Filter/connect pins for a selected Sequence (EventGroup).
   //
@@ -1215,7 +1595,8 @@ export function MapView({
     <div className="relative h-full w-full">
       {/* Floating Controls - Top Left */}
       {showNav && (
-        <div className="absolute top-4 left-4 z-10 flex flex-wrap gap-2">
+        <div className="absolute top-4 left-4 z-20 flex flex-wrap items-start gap-2">
+          {topLeftSlot}
           {onRefresh && (
             <button
               onClick={onRefresh}
@@ -1237,7 +1618,9 @@ export function MapView({
       {/* Stats, score and fullscreen — one row, so they can't overlap. Both used
           to position themselves absolutely in the same corner and collide. */}
       <div className="absolute top-4 right-4 z-10 flex items-center gap-2">
-        <div className="bg-black/60 backdrop-blur-sm px-3 py-2 rounded-lg text-sm text-white shadow-lg whitespace-nowrap">
+        {/* Hidden on phones, where it would sit on top of the top-left
+            controls (search, Refresh, Import) — 390px can't fit both rows. */}
+        <div className="hidden sm:block bg-black/60 backdrop-blur-sm px-3 py-2 rounded-lg text-sm text-white shadow-lg whitespace-nowrap">
           {pinStats.locations} location{pinStats.locations !== 1 ? "s" : ""},{" "}
           {pinStats.events} event{pinStats.events !== 1 ? "s" : ""}
         </div>
@@ -1300,6 +1683,10 @@ export function MapView({
         onRangeChange={setTimelineRange}
         onToggle={setIsTimelineEnabled}
         isEnabled={isTimelineEnabled}
+        {...(timelineOpen !== undefined ? { expanded: timelineOpen } : {})}
+        {...(onTimelineOpenChange
+          ? { onExpandedChange: onTimelineOpenChange }
+          : {})}
       />
 
       {/* Layer Control */}
@@ -1328,8 +1715,9 @@ export function MapView({
           onHeaderMouseDown={handlePopupDragStart}
           acknowledgedIds={acknowledgedIds}
           onAcknowledge={handleAcknowledge}
+          focusEventId={focusEventId}
         />
       </div>
     </div>
   );
-}
+});
