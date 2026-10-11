@@ -434,7 +434,7 @@ each behind its own env flag, all defaulting off:
 | `JEV_DEDUP_SCORING_ENABLED`        | `validate` → `duplicate-jev` check                             | same-year near-duplicate flag beyond `checkDuplicate`'s exact title match (non-gating) |
 | `JEV_CONFIDENCE_RESCORE_ENABLED`   | `validate` → `confidence-jev` check                            | independent re-score of the extractor's confidence on a 5-level concrete rubric (non-gating) |
 | `JEV_GEOCODE_RERANK_ENABLED`       | `NominatimGeocoder.geocode`                                    | Jev picks among the top 5 results (or "none") instead of always taking `usable[0]` |
-| `JEV_PUBLISH_DEDUP_ENABLED`        | `publish` → `duplicate-published` check                        | is this the same event a **different document** already put on the map?; can hold |
+| `JEV_PUBLISH_DEDUP_ENABLED`        | `publish` → `duplicate-published` check                        | is this the same event a **different document** already put on the map?; can auto-resolve a duplicate, publish a new event, or hold for review |
 
 Put `JEV_API_KEY` in `services/ingest/.env.local` — `AppConfigModule` loads
 `.env.local` then `.env` (real process env beats both), and only `.env*.local` is
@@ -468,23 +468,41 @@ excluding its own document), narrows by date using the **coarser** of the two pr
 (`datesCompatible`: a year-only date is stored as `YYYY-01-01`, so it matches the same or next
 calendar year, up to 729 days away — the SQL window must be at least that wide, and `jev:verify`
 fails if it isn't), and sends the nearest 8 to Jev
-as **one request with one yes/no question per candidate** (existing event's quote included).
-The best match is recorded on the candidate as a `duplicate-published` check naming the matched
-event id.
+as **one request**: a yes/no question per candidate ("same as existing event *i*?") **plus
+one over all of them** ("distinct from every one?"). Both are recorded on the candidate as a
+`duplicate-published` check (`data`: `outcome`, `auto`, `matchedEventId`, `pSame`, `pDistinct`).
 
-`JEV_PUBLISH_DEDUP_HOLD_AT` (0–1, default **`0`**) holds the event for review when `P(same)` is at
-or above it; **`0` never holds** (record-only — the event publishes and the evidence stays on the
-row), same convention as `JEV_GROUNDING_MIN_SUPPORT`. On the real API a same-event pair scored
-0.93–0.97 and related-but-distinct events 0.02–0.17, but tune it from recorded probabilities on
-your own corpus before raising it: a false positive withholds a real event.
+Two knobs turn those two readings into three outcomes (`plans/19-publish-dedup-bands.md`);
+**both must agree** before anything is decided automatically, and `0` switches a band off:
 
-Held events are resolved with `npm run duplicate:review --workspace=services/ingest` (lists them with
-Jev's reasoning), `-- --approve=<eventKey>` ("a different event; publish it", re-queues the
-document's publish job) or `-- --dismiss=<eventKey>` ("a duplicate; leave it out"). There is no admin
-UI. `resolved_at` carries the decision, and `validate`'s candidate upsert is `WHERE resolved_at IS
-NULL` so re-validating cannot overwrite it — without that, a **dismissed** event is re-derived to
-`publish` and then published, because publish skips resolved candidates (the fixture fails if the
-guard is removed).
+| Outcome              | When                                                         | What happens                                        |
+| -------------------- | ------------------------------------------------------------ | --------------------------------------------------- |
+| confident duplicate  | `P(same)` ≥ `JEV_PUBLISH_DEDUP_MATCH_AT` **and** `P(distinct)` ≤ `1 − MATCH_AT` | auto-resolved: left off the map, `resolved_at` set, recorded `auto: true` |
+| confident new        | `P(distinct)` ≥ `JEV_PUBLISH_DEDUP_NEW_AT` **and** `P(same)` ≤ `1 − NEW_AT`     | publishes                                           |
+| anything else        | incl. the two answers disagreeing (`P(same)` 0.9 with `P(distinct)` 0.8) | held for review (admin panel / CLI)  |
+
+Both default to **`0`**: nothing is decided, the evidence is recorded and the event publishes
+(`MATCH_AT` 0 = never auto-duplicate; `NEW_AT` 0 = no review band). Suggested values to try on a
+real corpus: `MATCH_AT=0.9`, `NEW_AT=0.8` — a same pair scored 0.93–0.97 and distinct pairs
+0.02–0.17 on the real API — but tune from recorded probabilities first: **a false duplicate
+withholds a real event.** (These replace the earlier single `JEV_PUBLISH_DEDUP_HOLD_AT`.)
+
+An auto-resolved duplicate is **not deleted** and is reversible: it stays in `review`, resolved,
+with its matched event and probabilities on the row. Held and auto-resolved items are resolved in
+the admin panel's **/duplicates** page (it calls the ingestion API's `GET /duplicates`,
+`POST /duplicates/:eventKey/approve|dismiss` through server-side route handlers, so the credentials
+never reach the browser) or with `npm run duplicate:review --workspace=services/ingest` (lists both;
+`-- --approve=<eventKey>` = "a different event; publish it" and also **overturns** an auto-resolved
+one, re-queuing the document's publish job; `-- --dismiss=<eventKey>` = "a duplicate; leave it out",
+held items only). The ingestion API's duplicate routes **write**, so they sit behind the same
+fail-closed Basic auth as the queue dashboard (`BULL_BOARD_USER`/`BULL_BOARD_PASSWORD`; the admin
+app reads the same two variables plus `INGEST_API_URL`, default `http://localhost:3100`). All of it is
+one implementation, `libs/database/src/duplicates.ts`.
+
+`resolved_at` carries the decision, and `validate`'s candidate upsert is `WHERE resolved_at IS
+NULL` so re-validating cannot overwrite it — without that, a **dismissed or auto-resolved** event
+is re-derived to `publish` and then published, because publish skips resolved candidates (the
+fixture fails if the guard is removed; it also re-validates and re-publishes after every decision).
 
 Known limits: it is best-effort. Two documents publishing **concurrently** can each miss the
 other's insert (the fixture sets `PUBLISH_CONCURRENCY=1` to make it deterministic); place identity

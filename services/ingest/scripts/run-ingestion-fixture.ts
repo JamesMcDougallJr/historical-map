@@ -771,6 +771,22 @@ async function resolveHeldDuplicates(queues: Queue[]): Promise<void> {
     waitForQueueIdle(queue(name), { timeoutMs: 60_000, expectedDelayed: 0 });
   const dataSource = createDataSource();
   await dataSource.initialize();
+
+  // The real `api` app, so the admin panel's endpoints (Nest DI, Basic auth, the
+  // publish-queue injection that approving needs) are exercised, not just the
+  // shared library behind them.
+  const apiPort = PORT_BASE + 7;
+  process.env["BULL_BOARD_PASSWORD"] = "fixture-pass";
+  const apiChild = startWorker({ name: "api", mainPath: "apps/api/src/main.ts", port: apiPort });
+  activeChildren.push(apiChild);
+  await waitForHealth(apiPort, 30_000);
+  const basic = `Basic ${Buffer.from("admin:fixture-pass").toString("base64")}`;
+  const api = (path: string, init: RequestInit = {}, authed = true) =>
+    fetch(`http://127.0.0.1:${apiPort}${path}`, {
+      ...init,
+      headers: authed ? { Authorization: basic } : {},
+    });
+
   try {
     const held: Array<{ event_key: string; document_id: string; title: string }> =
       await dataSource.query(
@@ -797,6 +813,26 @@ async function resolveHeldDuplicates(queues: Queue[]): Promise<void> {
     }
     const [approved, dismissed, autoResolved] = [held[0]!, held[1]!, auto[0]!];
 
+    // The admin panel's list: Basic auth required, then every held and auto-resolved
+    // item with its match and Jev's two probabilities.
+    if ((await api("/duplicates", {}, false)).status === 200) {
+      throw new Error("GET /duplicates without credentials must not succeed");
+    }
+    const listed = (await (await api("/duplicates")).json()) as {
+      data: Array<{ eventKey: string; status: string; pSame: number | null; pDistinct: number | null; match: { title: string } | null }>;
+    };
+    const statuses = listed.data.map((d) => d.status).sort().join(",");
+    if (statuses !== "auto-resolved,held,held") {
+      throw new Error(`GET /duplicates should list 2 held + 1 auto-resolved; got ${statuses}`);
+    }
+    const listedAuto = listed.data.find((d) => d.eventKey === autoResolved.event_key);
+    if (!listedAuto?.match || listedAuto.pSame !== 0.95 || listedAuto.pDistinct !== 0.03) {
+      throw new Error(`the auto-resolved item should carry its match and probabilities; got ${JSON.stringify(listedAuto)}`);
+    }
+    if ((await api("/duplicates/no-such-key/approve", { method: "POST" })).status !== 404) {
+      throw new Error("approving an unknown event key should be a 404");
+    }
+
     const review = (flag: string, key: string) =>
       execFileSync("npx", ["tsx", "scripts/duplicate-review.ts", `${flag}=${key}`], {
         cwd: REPO_ROOT,
@@ -804,8 +840,11 @@ async function resolveHeldDuplicates(queues: Queue[]): Promise<void> {
         stdio: "inherit",
       });
     console.log(`Approving "${approved.title}" and dismissing "${dismissed.title}"...`);
-    review("--approve", approved.event_key);
-    review("--dismiss", dismissed.event_key);
+    review("--approve", approved.event_key); // the CLI...
+    const dismissRes = await api(`/duplicates/${encodeURIComponent(dismissed.event_key)}/dismiss`, {
+      method: "POST", // ...and the admin panel's endpoint
+    });
+    if (!dismissRes.ok) throw new Error(`POST dismiss failed: ${dismissRes.status}`);
     await idle(QUEUE_NAMES.PUBLISH);
 
     const stateOf = async (eventKey: string) => {
@@ -871,11 +910,18 @@ async function resolveHeldDuplicates(queues: Queue[]): Promise<void> {
     if (!refused) throw new Error("--dismiss on an auto-resolved duplicate should be refused");
 
     // ...but approving it overturns the automatic call: it is published.
+    if ((await api(`/duplicates/${encodeURIComponent(autoResolved.event_key)}/dismiss`, { method: "POST" })).status !== 400) {
+      throw new Error("POST dismiss on an auto-resolved duplicate should be a 400");
+    }
     console.log(`Overturning the auto-resolved "${autoResolved.title}"...`);
-    review("--approve", autoResolved.event_key);
+    const overturnRes = await api(`/duplicates/${encodeURIComponent(autoResolved.event_key)}/approve`, {
+      method: "POST",
+    });
+    if (!overturnRes.ok) throw new Error(`POST approve (overturn) failed: ${overturnRes.status}`);
     await idle(QUEUE_NAMES.PUBLISH);
     await assertDecisions("overturning the auto-resolved duplicate", true);
   } finally {
+    killWorker(apiChild, "SIGTERM");
     await dataSource.destroy();
   }
 }

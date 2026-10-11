@@ -6,7 +6,8 @@ of [13-similarity-and-fusion.md](./13-similarity-and-fusion.md): _candidates are
 proposed, Jev disposes, a human arbitrates what Jev is unsure about._ Identity and
 merging stay out of scope ([11-identity-and-fusion.md](./11-identity-and-fusion.md)).
 
-**Status:** designed, not built.
+**Status:** built (PR #15). Candidates still come from location + date only; the vector
+source below is future work.
 
 ## What exists today
 
