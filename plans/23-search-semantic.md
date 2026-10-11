@@ -160,7 +160,7 @@ a row without a check is a bug in this plan.
 | 15  | **Filters run inside the vector CTE**, before ranking                                                                                                                       | hybrid spec "timeline pre-filter" (with distractors so an in-range hit sits beyond 50 unfiltered); the same for `sources`/`bbox` under "limit to view"                                                                                           |
 | 16  | **Fallback**: any embedder error → lexical results, `modes.semantic = false`, no retry, never a 5xx                                                                         | hybrid spec "embedder down" for throttling _and_ a validation error _and_ a timeout (the fake sleeps past the request budget)                                                                                                                    |
 | 17  | **Cost limits**: per-IP hybrid limit, daily Bedrock ceiling, query-length clamp, cache                                                                                      | hybrid specs "rate limit", "daily ceiling", "cache"; a 1,000-char hybrid query embeds at most 200 characters (the fake records the text it was given)                                                                                            |
-| 18  | **AWS Budgets alert** on Bedrock spend — the backstop the app can't provide                                                                                                 | `infra/budgets.tf` exists, and `tofu validate` plus `tofu plan -detailed-exitcode` run in CI (no credentials needed for validate; plan runs in the OIDC job)                                                                                     |
+| 18  | **AWS Budgets alert** on Bedrock spend — the backstop the app can't provide                                                                                                 | `infra/budgets.tf`; `tofu test` (Infra workflow) asserts it exists when `alert_email` is set, filters to Amazon Bedrock, and alerts at 80% actual / 100% forecast                                                                                |
 | 19  | **Live path works** — the real Bedrock engine, the IAM scope, and round-trip latency                                                                                        | `bedrock-live.yml` (nightly + relevant PRs): one query embeds, ‖v‖ = 1, dims = 256, latency printed to the job summary; a call to any other model is **denied** (proves the policy is one-model)                                                 |
 
 ## Query embedding at request time
@@ -316,9 +316,13 @@ granted, which must be denied.
   `SELECT extversion FROM pg_extension WHERE extname = 'vector'` (after
   `CREATE EXTENSION`) and fails unless it equals `db/pgvector-version`. The
   migration's own check (above) enforces the same file against RDS at deploy.
-- `tofu fmt -check` and `tofu validate` on `infra/` in the `E2E` workflow;
-  `tofu plan` in `bedrock-live.yml` (it has AWS credentials), failing on
-  drift so the declared infra and the real account can't quietly diverge.
+- `tofu fmt -check`, `tofu validate` and `tofu test` on `infra/` in the
+  `Infra` workflow, with no credentials: `infra/tests/` plans the stack
+  against mocked providers and asserts the one-model IAM policy, the
+  repository-scoped OIDC trust, the maintenance-window upgrade, the budget's
+  Bedrock filter and the full Vercel env set. **No real-account drift check**:
+  state is local, so CI has nothing to plan against — that arrives only with
+  the S3-backend change flagged above.
 - The existing `timeline.spec.ts` and every other e2e-real spec stay green
   on the new image. PostGIS behaviour must be unchanged by the rebuild.
 
@@ -346,7 +350,7 @@ isn't done until its checks pass:
 
 | Step | Done when                                                                                                                                                                                                                      |
 | ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 0    | `tofu validate` green in CI; after apply, the ingest migration's version check passes against RDS (it fails on 0.7)                                                                                                            |
+| 0    | `tofu validate` + `tofu test` green in the Infra workflow; after apply, the ingest migration's version check passes against RDS (it fails on 0.7)                                                                              |
 | 1    | CI's pgvector-version check is green, and every existing e2e-real spec stays green on the new image                                                                                                                            |
 | 2    | `embed:verify` green in CI, and `bedrock-live.yml` green under the OIDC role                                                                                                                                                   |
 | 3    | ingestion-fixture event + sequence bullets green (composition, staleness, unit length)                                                                                                                                         |

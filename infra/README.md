@@ -70,14 +70,61 @@ RDS takes ~7–8 minutes to come up; everything else is fast. **Martin's first
 task will crash-loop** until the database has PostGIS installed — see
 "Seed it once" below, which must run before the ECS service reports healthy.
 
-## Wire up Vercel
+## Wire up Vercel, GitHub and the budget
+
+Set these in `terraform.tfvars` (git-ignored) and the stack manages them —
+nothing to paste into a dashboard:
+
+```hcl
+vercel_project_id = "prj_…"          # → POSTGRES_URL, NEXT_PUBLIC_MARTIN_URL,
+                                      #   BEDROCK_REGION, EMBEDDING_MODEL and the
+                                      #   Bedrock key, on production + preview
+vercel_team_id    = "team_…"         # if the project belongs to a team
+alert_email       = "you@example.com" # Bedrock budget alert (plans/23)
+```
+
+The providers read their credentials from the environment: `VERCEL_API_TOKEN`
+and `GITHUB_TOKEN` (repo admin, to set Actions variables), alongside your AWS
+credentials. Leaving `vercel_project_id`/`alert_email` empty, or
+`github_repository = ""`, skips that integration.
+
+If `POSTGRES_URL`/`NEXT_PUBLIC_MARTIN_URL` were already set by hand on the
+project, import them once before the first apply, or the create conflicts:
 
 ```bash
-tofu output -raw postgres_url    # → Vercel env var POSTGRES_URL
-tofu output martin_url           # → Vercel env var NEXT_PUBLIC_MARTIN_URL
+tofu import 'vercel_project_environment_variable.app["POSTGRES_URL"]' prj_…/<env_var_id>
 ```
-Both are build-time env vars (`NEXT_PUBLIC_MARTIN_URL` is inlined into the
-client bundle) — set them in the Vercel project settings, then redeploy.
+
+`NEXT_PUBLIC_MARTIN_URL` is inlined at build time, so a change to it needs a
+Vercel redeploy to take effect.
+
+## Semantic-search pieces (plans/23-search-semantic.md)
+
+- **RDS version** follows the newest PostgreSQL 16 minor
+  (`data.aws_rds_engine_version`), not a hand pin. pgvector 0.8 needs ≥ 16.5;
+  the upgrade is applied in the instance's maintenance window
+  (`apply_immediately = false`), not on `tofu apply`. `tofu output
+  rds_engine_version` shows the target.
+- **Bedrock**: `bedrock.tf` creates a web-app IAM user allowed only
+  `bedrock:InvokeModel` on Titan Embed v2 in us-west-2; `github-oidc.tf` gives
+  this repository's workflows the same permission through a GitHub OIDC role
+  (no long-lived secret), published as the `AWS_EMBEDDINGS_ROLE_ARN` Actions
+  variable. An account allows one GitHub OIDC provider — if it already has
+  one, set `github_oidc_provider_arn` to reuse it.
+- **Budget**: `budgets.tf` emails `alert_email` at 80% of
+  `bedrock_monthly_budget_usd` actual and 100% forecast.
+
+## Checks
+
+`tofu fmt -check`, `tofu validate` and `tofu test` run in CI
+(`.github/workflows/infra.yml`) with no credentials: `tests/` plans the stack
+against mocked providers and asserts the properties that matter (one-model
+IAM policy, repository-scoped OIDC trust, maintenance-window upgrade, the
+Vercel env set). Run them locally the same way:
+
+```bash
+tofu init -backend=false && tofu validate && tofu test
+```
 
 ## Seed it once
 

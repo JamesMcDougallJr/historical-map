@@ -35,6 +35,16 @@ resource "aws_security_group" "rds" {
 # rds.force_ssl can't be set on the default parameter group, so a dedicated
 # one exists purely to enforce sslmode=require server-side, on top of the
 # client-side ?sslmode=require in the connection string.
+# The newest RDS PostgreSQL 16 minor version, rather than a hand-pinned one.
+# pgvector 0.8 (iterative index scans, which filtered vector search needs —
+# plans/23-search-semantic.md) ships only with RDS 16.5+; 16.4 has 0.7.3.
+# Major version stays 16, so the parameter group family below is unchanged.
+data "aws_rds_engine_version" "postgres" {
+  engine  = "postgres"
+  version = var.db_engine_major_version
+  latest  = true
+}
+
 resource "aws_db_parameter_group" "postgres" {
   name   = "${var.project_name}-pg16"
   family = "postgres16"
@@ -49,7 +59,10 @@ resource "aws_db_parameter_group" "postgres" {
 resource "aws_db_instance" "postgres" {
   identifier     = "${var.project_name}-db"
   engine         = "postgres"
-  engine_version = var.db_engine_version
+  engine_version = data.aws_rds_engine_version.postgres.version_actual
+  # A minor-version upgrade restarts the instance: let AWS do it in the
+  # maintenance window instead of on apply, so no one has to pick a time.
+  apply_immediately = false
 
   instance_class    = var.db_instance_class
   allocated_storage = var.db_allocated_storage

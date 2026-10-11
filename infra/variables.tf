@@ -34,9 +34,10 @@ variable "db_allocated_storage" {
   default = 20
 }
 
-variable "db_engine_version" {
-  type    = string
-  default = "16.4"
+variable "db_engine_major_version" {
+  description = "RDS PostgreSQL major version. rds.tf resolves the newest minor within it (≥ 16.5 is what pgvector 0.8 needs)."
+  type        = string
+  default     = "16"
 }
 
 variable "rds_allowed_cidr_blocks" {
@@ -82,4 +83,60 @@ variable "martin_memory" {
   description = "Fargate task memory in MiB. 512 is the minimum paired with 256 CPU units."
   type        = string
   default     = "512"
+}
+
+# ── Semantic search (plans/23-search-semantic.md) ───────────────────────────
+
+variable "bedrock_region" {
+  description = "Region for Bedrock embeddings — Titan Embed v2 was verified live in us-west-2 (plan 12), separate from aws_region."
+  type        = string
+  default     = "us-west-2"
+}
+
+variable "embedding_model" {
+  description = "The only Bedrock model the web app and CI may invoke."
+  type        = string
+  default     = "amazon.titan-embed-text-v2:0"
+}
+
+variable "bedrock_monthly_budget_usd" {
+  description = "Monthly Bedrock spend that triggers the budget alert. Embeddings are ~10–30 tokens per query, so any real spend here means abuse."
+  type        = number
+  default     = 10
+}
+
+variable "alert_email" {
+  description = "Where the Bedrock budget alert is emailed. Empty skips the budget."
+  type        = string
+  default     = ""
+}
+
+variable "vercel_project_id" {
+  description = "Vercel project to receive env vars (POSTGRES_URL, NEXT_PUBLIC_MARTIN_URL, Bedrock). Empty skips Vercel management."
+  type        = string
+  default     = ""
+}
+
+variable "vercel_team_id" {
+  description = "Vercel team owning the project, if not a personal account."
+  type        = string
+  default     = ""
+}
+
+variable "github_owner" {
+  description = "GitHub owner of the repository CI runs in."
+  type        = string
+  default     = "JamesMcDougallJr"
+}
+
+variable "github_repository" {
+  description = "Repository whose workflows may assume the Bedrock CI role. Empty skips the OIDC role."
+  type        = string
+  default     = "historical-map"
+}
+
+variable "github_oidc_provider_arn" {
+  description = "An existing token.actions.githubusercontent.com OIDC provider in this account (there can be only one). Empty creates it."
+  type        = string
+  default     = ""
 }
