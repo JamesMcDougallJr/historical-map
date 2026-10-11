@@ -1,11 +1,18 @@
 # Search — phase index
 
-**Status (2026-10-10): S1, S2, Stretch A and Stretch B are done** on branch
-`search-lexical`; each phase file says what was verified and where it
-deviated. **S3 (semantic) is not started** — it is blocked on two things only
-the owner can do: the RDS minor-version bump to ≥ 16.5 (pgvector 0.8, step 0
-in 23) and Bedrock credentials. Both are now declared in `infra/` (plan 23,
-"Infrastructure and automation"); what remains is one `tofu apply`. Five files, read in order.
+**Status (2026-10-11).** Five files, read in order; each says at its top what
+was verified and where the build deviated from the text.
+
+| Phase     | State                                                                                                                                                                                                                            |
+| --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| S1        | **Done** — `9777fda`, `0703f0c`                                                                                                                                                                                                  |
+| S2        | **Done** — `5462c74`                                                                                                                                                                                                             |
+| Stretch A | **Done**, Levels 1–2 — `748ef04`. The Groq "does the model fill `people`" gate still needs a live run with a key.                                                                                                                |
+| Stretch B | **Done**, including `show_map` focus — `68e29bd`                                                                                                                                                                                 |
+| S3        | **Step 0 of 6 written**: the infrastructure (`infra/`, `caa0a8d`) — validated and plan-tested, **not applied**. Steps 1–6 (pgvector image, `EmbeddingEngine`, embeddings, hybrid query, eval) not started. See 23's build order. |
+
+All of it is on branch `search-lexical`, verified locally; **none has run in
+CI yet** — that happens when the branch's PR is opened.
 
 One search bar on `/map` that finds **events**, **sequences** and **source
 documents**. Each result shows which kind it is, and clicking it does whatever
@@ -17,7 +24,14 @@ fits that kind. It runs in two modes:
   train in southern Utah") that should find the right event even when no word
   in the query appears in it.
 
-## What exists today
+## What existed before this track
+
+The starting point the phases were designed against — kept as written. For
+what each row looks like now, see the phase files' status notes (in short:
+ranked full-text search with stemming, accents and typos replaced `ILIKE`;
+`/map` has a search bar; `pg_trgm`/`unaccent` are created by `ensureSchema`;
+document text is indexed by paragraph in `document_passages`; people have an
+`event_entities` table; pgvector and embeddings are still S3's).
 
 | Piece                                                   | State                                                                                                                                                                                  |
 | ------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -32,6 +46,8 @@ fits that kind. It runs in two modes:
 | People / individuals                                    | **No model at all.** Names exist only as words inside `title`/`description`/`sourceText`.                                                                                              |
 
 ## Phases
+
+Status for each is in the table at the top.
 
 | #         | File                                             | Delivers                                                                                                                                                                                                         | Needs installed                                                                               |
 | --------- | ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
