@@ -199,3 +199,39 @@ export interface ValidationCheck {
    */
   data?: Record<string, unknown>;
 }
+
+/**
+ * An event `publish` did not put on the map because Jev judged it against one
+ * already there. `held`: not sure either way, waiting for a person. `auto-resolved`:
+ * confident it is the same event, so it was left off without one — shown so a wrong
+ * call can be overturned.
+ */
+export interface DuplicateItem {
+  eventKey: string;
+  documentId: string;
+  status: "held" | "auto-resolved";
+  event: {
+    title: string;
+    dateText: string;
+    placeName: string | null;
+    description: string;
+    sourceText: string;
+  };
+  /** `P(same)` with the best match and `P(distinct from all)`, as Jev answered. */
+  pSame: number | null;
+  pDistinct: number | null;
+  /** Jev's recorded reasoning (the check's `detail`). */
+  detail: string;
+  /** The published event it was compared with; null if it has since been deleted. */
+  match: {
+    id: string;
+    title: string;
+    date: string;
+    dateText: string | null;
+    placeName: string;
+    sourceId: string;
+    description: string;
+    quote: string | null;
+  } | null;
+  createdAt: string;
+}

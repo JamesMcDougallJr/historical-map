@@ -194,7 +194,20 @@ async function seedGeocodeCache(): Promise<void> {
 const DUPLICATE_PAIRS: Array<[string, string]> = [
   ["The Founding of Fixture Village", "Founding Day at Fixture Village"],
   ["The Autumn Harvest Fair", "Harvest Festival at Fixture Town"],
+  ["The Mill Opening", "Opening of the Village Mill"],
 ];
+/**
+ * Pair 0 is the one Jev is **sure** about (`P(same)` high, `P(distinct)` low): it is
+ * auto-resolved with no person. The other pairs are ones where Jev's two answers
+ * **disagree** (`P(same)` high AND `P(distinct)` high) — it is confused, so they are
+ * held for review, then approved/dismissed through the CLI.
+ */
+const CONFIDENT_PAIR = 0;
+
+/** Index of the pair `a` and `b` are the two halves of, or -1. */
+function pairIndexOf(a: string, b: string): number {
+  return DUPLICATE_PAIRS.findIndex(([x, y]) => (a === x && b === y) || (a === y && b === x));
+}
 
 interface FakeJevServer {
   port: number;
@@ -260,10 +273,20 @@ function startFakeJevServer(): Promise<FakeJevServer> {
             const index = Number(name.slice("same_".length));
             const a = String(body.state?.new_event?.title ?? "");
             const b = String(body.state?.existing?.[index]?.title ?? "");
-            const same = DUPLICATE_PAIRS.some(
-              ([x, y]) => (a === x && b === y) || (a === y && b === x),
-            );
-            answers[name] = { type: "noul", noul: same ? 0.95 : 0.02 };
+            answers[name] = { type: "noul", noul: pairIndexOf(a, b) >= 0 ? 0.95 : 0.02 };
+          } else if (q?.type === "noul" && name === "distinct") {
+            // "Is the new event distinct from EVERY listed existing event?" Not
+            // distinct (0.03) when one of them is its confident pair partner;
+            // contradicting the "same" answers (0.85) for the confused pairs,
+            // so those land in review; plainly distinct (0.96) otherwise.
+            const a = String(body.state?.new_event?.title ?? "");
+            const partner = (body.state?.existing ?? [])
+              .map((e: any) => pairIndexOf(a, String(e?.title ?? "")))
+              .find((i: number) => i >= 0);
+            answers[name] = {
+              type: "noul",
+              noul: partner === undefined ? 0.96 : partner === CONFIDENT_PAIR ? 0.03 : 0.85,
+            };
           } else if (q?.type === "noul") {
             answers[name] = { type: "noul", noul: 0.77 };
           } else if (q?.type === "choice" && q.criteria) {
@@ -458,7 +481,8 @@ async function main(): Promise<void> {
     // insert, so which of a duplicate pair gets held would be nondeterministic
     // (production has the same best-effort limit; see CLAUDE.md).
     process.env["JEV_PUBLISH_DEDUP_ENABLED"] = "true";
-    process.env["JEV_PUBLISH_DEDUP_HOLD_AT"] = "0.9";
+    process.env["JEV_PUBLISH_DEDUP_MATCH_AT"] = "0.9";
+    process.env["JEV_PUBLISH_DEDUP_NEW_AT"] = "0.8";
     process.env["PUBLISH_CONCURRENCY"] = "1";
     process.env["JEV_DEDUP_SCORING_ENABLED"] = "true";
     process.env["JEV_CONFIDENCE_RESCORE_ENABLED"] = "true";
@@ -605,10 +629,17 @@ async function assertJevChecksRecorded(
 ): Promise<void> {
   const rows: Array<{
     verdict: string;
+    resolved_at: string | null;
     event: { title: string };
-    checks: Array<{ name: string; passed: boolean; gating: boolean; detail?: string }>;
+    checks: Array<{
+      name: string;
+      passed: boolean;
+      gating: boolean;
+      detail?: string;
+      data?: { auto?: boolean; outcome?: string; matchedEventId?: string };
+    }>;
   }> = await dataSource.query(
-    `SELECT verdict, event, checks FROM ingest_event_candidates`,
+    `SELECT verdict, resolved_at, event, checks FROM ingest_event_candidates`,
   );
   const names = new Set(rows.flatMap((r) => r.checks.map((c) => c.name)));
 
@@ -654,25 +685,28 @@ async function assertJevChecksRecorded(
     throw new Error('"The Centennial Parade" quotes the document verbatim and must not be sent to Jev');
   }
 
-  // Cross-document duplicate: two documents describe the founding, under
-  // different titles. Exactly one may be on the map; the later-published one is
-  // held for review by a failed gating `duplicate-published` check that names
-  // the event it matched. Which of the pair is held depends on publish order,
-  // so the assertion is symmetric.
-  for (const pair of DUPLICATE_PAIRS) {
+  // Cross-document duplicates. Each pair is the same event described by two
+  // documents under different titles; exactly one may be on the map, and which
+  // one depends on publish order, so every assertion is symmetric.
+  //   - the confident pair (Jev: same, and NOT distinct) is auto-resolved: the
+  //     later one is off the map, `resolved_at` set, check data `auto: true`
+  //     naming the event it matched;
+  //   - the confused pairs (Jev: same AND distinct) are held for a person:
+  //     `review`, unresolved, a failed gating check.
+  DUPLICATE_PAIRS.forEach((pair, index) => {
     const onMap = pair.filter((t) => publishedTitles.includes(t));
     if (onMap.length !== 1) {
       throw new Error(
         `exactly one of ${JSON.stringify(pair)} should be on the map, got: ${onMap.join(", ") || "(none)"}`,
       );
     }
-    const heldTitle = pair.find((t) => !onMap.includes(t))!;
-    const held = byTitle(heldTitle);
-    const duplicate = held?.checks.find((c) => c.name === "duplicate-published");
-    if (!duplicate?.gating || duplicate.passed || held?.verdict !== "review") {
+    const setAside = pair.find((t) => !onMap.includes(t))!;
+    const row = byTitle(setAside);
+    const duplicate = row?.checks.find((c) => c.name === "duplicate-published");
+    if (!duplicate?.gating || duplicate.passed || row?.verdict !== "review") {
       throw new Error(
-        `"${heldTitle}" should be held for review by a failed gating duplicate-published ` +
-          `check; got ${JSON.stringify(held)}`,
+        `"${setAside}" should be set aside by a failed gating duplicate-published ` +
+          `check; got ${JSON.stringify(row)}`,
       );
     }
     if (!duplicate.detail?.includes(`"${onMap[0]}"`)) {
@@ -680,6 +714,42 @@ async function assertJevChecksRecorded(
         `the duplicate check should name "${onMap[0]}" as the match; got ${duplicate.detail}`,
       );
     }
+    const confident = index === CONFIDENT_PAIR;
+    if (confident) {
+      if (!row?.resolved_at || duplicate.data?.auto !== true || duplicate.data.outcome !== "duplicate") {
+        throw new Error(
+          `"${setAside}" is a confident duplicate: it should be auto-resolved ` +
+            `(resolved_at set, data.auto true); got ${JSON.stringify(row)}`,
+        );
+      }
+    } else if (row?.resolved_at || duplicate.data?.auto === true || duplicate.data?.outcome !== "review") {
+      throw new Error(
+        `"${setAside}" is a case where Jev's answers disagree: it should be held ` +
+          `for a person (unresolved, outcome review); got ${JSON.stringify(row)}`,
+      );
+    }
+  });
+
+  // A confidently-new event is published and carries the evidence. These two are
+  // different events, a few days and a few metres apart, from different documents:
+  // whichever publishes second is compared with the other, and Jev says it is
+  // distinct from it (so, either way round, exactly one carries the check).
+  const nearPair = ["The Schoolhouse Raised", "The Church Dedicated"];
+  const newChecks = nearPair
+    .map((t) => ({ t, check: byTitle(t)?.checks.find((c) => c.name === "duplicate-published") }))
+    .filter((x) => x.check);
+  const first = newChecks[0];
+  if (
+    newChecks.length !== 1 ||
+    first?.check?.data?.outcome !== "new" ||
+    !first.check.passed ||
+    !nearPair.every((t) => publishedTitles.includes(t))
+  ) {
+    throw new Error(
+      `of ${JSON.stringify(nearPair)} (distinct events, same place, days apart) both should ` +
+        `be published and exactly one should carry a passing duplicate-published check with ` +
+        `outcome "new"; got ${JSON.stringify(newChecks)}`,
+    );
   }
 }
 
@@ -710,10 +780,22 @@ async function resolveHeldDuplicates(queues: Queue[]): Promise<void> {
            AND checks @> '[{"name":"duplicate-published","passed":false}]'::jsonb
          ORDER BY event->>'title'`,
       );
-    if (held.length !== DUPLICATE_PAIRS.length) {
-      throw new Error(`expected ${DUPLICATE_PAIRS.length} held duplicates, found ${held.length}`);
+    const expectedHeld = DUPLICATE_PAIRS.length - 1; // all but the confident pair
+    if (held.length !== expectedHeld) {
+      throw new Error(`expected ${expectedHeld} held duplicates, found ${held.length}`);
     }
-    const [approved, dismissed] = [held[0]!, held[1]!];
+    // Resolved without a person: the confident pair's later half.
+    const auto: Array<{ event_key: string; document_id: string; title: string }> =
+      await dataSource.query(
+        `SELECT event_key, document_id, event->>'title' AS title
+         FROM ingest_event_candidates
+         WHERE verdict = 'review' AND resolved_at IS NOT NULL
+           AND checks @> '[{"name":"duplicate-published","data":{"auto":true}}]'::jsonb`,
+      );
+    if (auto.length !== 1) {
+      throw new Error(`expected 1 auto-resolved duplicate, found ${auto.length}`);
+    }
+    const [approved, dismissed, autoResolved] = [held[0]!, held[1]!, auto[0]!];
 
     const review = (flag: string, key: string) =>
       execFileSync("npx", ["tsx", "scripts/duplicate-review.ts", `${flag}=${key}`], {
@@ -734,7 +816,7 @@ async function resolveHeldDuplicates(queues: Queue[]): Promise<void> {
       const onMap = (await dataSource.query(`SELECT 1 FROM events WHERE id = $1`, [eventKey])).length;
       return { ...row, onMap };
     };
-    const assertDecisions = async (when: string): Promise<void> => {
+    const assertDecisions = async (when: string, overturned: boolean): Promise<void> => {
       const a = await stateOf(approved.event_key);
       if (a.verdict !== "publish" || !a.resolved_at || !a.published_at || a.onMap !== 1) {
         throw new Error(`after ${when}, approved "${approved.title}" should be published and on the map; got ${JSON.stringify(a)}`);
@@ -743,8 +825,18 @@ async function resolveHeldDuplicates(queues: Queue[]): Promise<void> {
       if (d.verdict !== "review" || !d.resolved_at || d.published_at || d.onMap !== 0) {
         throw new Error(`after ${when}, dismissed "${dismissed.title}" should stay in review and off the map; got ${JSON.stringify(d)}`);
       }
+      // The auto-resolved duplicate stays off the map until a person overturns it.
+      // Re-validating must not undo that (validate's upsert is WHERE resolved_at IS NULL).
+      const r = await stateOf(autoResolved.event_key);
+      if (overturned) {
+        if (r.verdict !== "publish" || !r.published_at || r.onMap !== 1) {
+          throw new Error(`after ${when}, overturned "${autoResolved.title}" should be published; got ${JSON.stringify(r)}`);
+        }
+      } else if (r.verdict !== "review" || !r.resolved_at || r.published_at || r.onMap !== 0) {
+        throw new Error(`after ${when}, auto-resolved "${autoResolved.title}" should stay off the map; got ${JSON.stringify(r)}`);
+      }
     };
-    await assertDecisions("the review decisions");
+    await assertDecisions("the review decisions", false);
 
     // Re-run the document the way an operator would (`queue:requeue`):
     // validate, then publish. Remove-then-add, because a finished job keeps its
@@ -758,12 +850,31 @@ async function resolveHeldDuplicates(queues: Queue[]): Promise<void> {
       await (await queue(name).getJob(jobId))?.remove();
       await queue(name).add(JOB_NAME_BY_QUEUE[name], { documentId }, { jobId, ...JOB_OPTIONS_BY_QUEUE[name] });
     };
-    const documentIds = [...new Set(held.map((h) => h.document_id))];
+    const documentIds = [...new Set([...held, autoResolved].map((h) => h.document_id))];
     for (const documentId of documentIds) await requeue(QUEUE_NAMES.VALIDATE, validateJobId, documentId);
     await idle(QUEUE_NAMES.VALIDATE);
     for (const documentId of documentIds) await requeue(QUEUE_NAMES.PUBLISH, publishJobId, documentId);
     await idle(QUEUE_NAMES.PUBLISH);
-    await assertDecisions("re-validating and re-publishing");
+    await assertDecisions("re-validating and re-publishing", false);
+
+    // Dismissing an already-auto-resolved duplicate has nothing to do: refused.
+    let refused = false;
+    try {
+      execFileSync("npx", ["tsx", "scripts/duplicate-review.ts", `--dismiss=${autoResolved.event_key}`], {
+        cwd: REPO_ROOT,
+        env: process.env,
+        stdio: "pipe",
+      });
+    } catch {
+      refused = true;
+    }
+    if (!refused) throw new Error("--dismiss on an auto-resolved duplicate should be refused");
+
+    // ...but approving it overturns the automatic call: it is published.
+    console.log(`Overturning the auto-resolved "${autoResolved.title}"...`);
+    review("--approve", autoResolved.event_key);
+    await idle(QUEUE_NAMES.PUBLISH);
+    await assertDecisions("overturning the auto-resolved duplicate", true);
   } finally {
     await dataSource.destroy();
   }

@@ -15,3 +15,11 @@ PARAPHRASE: contradicted
 TITLE: The Autumn Harvest Fair
 DATE: 1880-09-01
 PLACE: Fixture Town
+
+TITLE: Opening of the Village Mill
+DATE: 1860-04-10
+PLACE: Fixture Village
+
+TITLE: The Church Dedicated
+DATE: 1870-02-05
+PLACE: Fixture Village
