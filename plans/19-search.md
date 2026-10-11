@@ -4,8 +4,8 @@
 `search-lexical`; each phase file says what was verified and where it
 deviated. **S3 (semantic) is not started** — it is blocked on two things only
 the owner can do: the RDS minor-version bump to ≥ 16.5 (pgvector 0.8, step 0
-in 23) and a Bedrock-only IAM key to record the real Titan vectors the CI
-fake replays. Five files, read in order.
+in 23) and Bedrock credentials. Both are now declared in `infra/` (plan 23,
+"Infrastructure and automation"); what remains is one `tofu apply`. Five files, read in order.
 
 One search bar on `/map` that finds **events**, **sequences** and **source
 documents**. Each result shows which kind it is, and clicking it does whatever
@@ -158,8 +158,10 @@ the fake is **a lookup over recorded real vectors**:
   dims) for every fixture text and every semantic golden query. That's around
   40 vectors, a few hundred KB.
 - `npm run search:record-vectors` regenerates the file against live Bedrock.
-  It runs only by hand, when fixture texts or the model change, the same as
-  `extract:verify -- --live`.
+  It runs in CI, not by hand: the `bedrock-live.yml` workflow (plan 23,
+  "Infrastructure and automation") runs it on PRs that change fixture texts
+  or golden queries, under a Terraform-managed GitHub OIDC role, and pushes
+  the regenerated file to the PR branch.
 - The fake **throws on any text not in the file**, naming it, rather than
   returning a random vector. A fixture edit without re-recording then fails
   loudly instead of quietly testing nothing.
