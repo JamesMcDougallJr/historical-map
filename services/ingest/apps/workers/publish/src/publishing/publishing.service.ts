@@ -14,7 +14,11 @@ import { JevClient, isJevFeatureEnabled } from "@app/jev";
 import type { PublishJobData } from "@app/queue";
 import type { Job } from "bullmq";
 import { IsNull, Repository } from "typeorm";
-import { judgeDuplicateWithJev, selectCandidates } from "./jev-dedup";
+import {
+  judgeDuplicateWithJev,
+  selectCandidates,
+  type DuplicateJudgment,
+} from "./jev-dedup";
 import { MapWriterService } from "./map-writer.service";
 
 /**
@@ -81,6 +85,7 @@ export class PublishingService {
       let published = 0;
       let alreadyPresent = 0;
       let demoted = 0;
+      let autoDuplicates = 0;
 
       for (const candidate of candidates) {
         const event = candidate.event as ExtractedEvent;
@@ -108,15 +113,23 @@ export class PublishingService {
 
         // Opt-in: is this the same event as one a *different* document already
         // put on the map? The only point with a coordinate and nothing written.
-        const duplicate = await this.duplicateCheck(candidate, event, hit, documentId);
-        if (duplicate) {
-          if (duplicate.gating && !duplicate.passed) {
-            await this.hold(candidate, duplicate);
+        const judgment = await this.duplicateCheck(candidate, event, hit, documentId);
+        if (judgment) {
+          if (judgment.outcome === "duplicate") {
+            // Confidently the same event as one already on the map: resolved
+            // without a person, left off the map, and recorded so one can
+            // overturn it (`duplicate:review`, the admin panel).
+            await this.autoResolveDuplicate(candidate, judgment.check);
+            autoDuplicates++;
+            continue;
+          }
+          if (judgment.outcome === "review") {
+            await this.hold(candidate, judgment.check);
             demoted++;
             continue;
           }
-          // Not held (record-only, or distinct): keep the evidence on the row.
-          await this.recordCheck(candidate, duplicate);
+          // `new`, or nothing decided (record-only): keep the evidence on the row.
+          await this.recordCheck(candidate, judgment.check);
         }
 
         const locationId = await this.mapWriter.findOrCreateLocation(
@@ -155,7 +168,8 @@ export class PublishingService {
       await this.jobLogger.log(
         job,
         `candidates=${candidates.length} published=${published} ` +
-          `already-present=${alreadyPresent} demoted-to-review=${demoted}`,
+          `already-present=${alreadyPresent} demoted-to-review=${demoted} ` +
+          `auto-duplicates=${autoDuplicates}`,
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -179,7 +193,7 @@ export class PublishingService {
     event: ExtractedEvent,
     hit: { lon: number; lat: number },
     documentId: string,
-  ): Promise<ValidationCheck | null> {
+  ): Promise<DuplicateJudgment | null> {
     if (!isJevFeatureEnabled(this.config, this.jev, "JEV_PUBLISH_DEDUP_ENABLED")) return null;
     // A human approved or dismissed this one; do not second-guess them.
     if (candidate.resolvedAt) return null;
@@ -223,7 +237,23 @@ export class PublishingService {
     });
   }
 
-  /** Send a probable duplicate to review, with Jev's reasoning on the row. */
+  /**
+   * A confident duplicate: resolved (so `validate` cannot re-derive it to
+   * `publish` — its upsert is `WHERE resolved_at IS NULL`), kept out of the
+   * `publish` verdict, and carrying the matched event and probabilities.
+   */
+  private async autoResolveDuplicate(
+    candidate: IngestEventCandidate,
+    check: ValidationCheck,
+  ): Promise<void> {
+    await this.candidateRepo.update(candidate.id, {
+      verdict: "review",
+      resolvedAt: new Date(),
+      checks: jsonb(this.withCheck(candidate.checks, check)) as never,
+    });
+  }
+
+  /** Send an uncertain or probable-duplicate event to review, with Jev's reasoning on the row. */
   private async hold(
     candidate: IngestEventCandidate,
     check: ValidationCheck,

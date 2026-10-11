@@ -29,6 +29,7 @@ import {
   DEDUP_POOL_DAYS,
   type NearbyEvent,
   datesCompatible,
+  decideOutcome,
   judgeDuplicateWithJev,
   selectCandidates,
 } from "../apps/workers/publish/src/publishing/jev-dedup";
@@ -659,11 +660,43 @@ async function main(): Promise<void> {
     })(),
   );
 
-  // ── judgeDuplicateWithJev ─────────────────────────────────────────────
+  // ── decideOutcome / judgeDuplicateWithJev ────────────────────────────
+  // Rows: pSame, pDistinct, MATCH_AT, NEW_AT → outcome. Both signals must agree
+  // before anything is decided automatically; a knob of 0 switches its band off.
+  for (const [pSame, pDistinct, matchAt, newAt, expected, label] of [
+    [0.95, 0.05, 0.9, 0.8, "duplicate", "both signals say duplicate"],
+    [0.9, 0.1, 0.9, 0, "duplicate", "exactly at both bars is inclusive (float-safe)"],
+    [0.95, 0.8, 0.9, 0.8, "review", "P(same) high but P(distinct) also high: Jev is confused"],
+    [0.1, 0.1, 0.9, 0.8, "review", "P(same) low but P(distinct) low too: Jev is confused"],
+    [0.05, 0.95, 0.9, 0.8, "new", "both signals say new"],
+    [0.2, 0.8, 0, 0.8, "new", "exactly at the new bar is inclusive"],
+    [0.5, 0.5, 0.9, 0.8, "review", "neither confident"],
+    [0.95, 0.05, 0, 0.8, "review", "MATCH_AT 0 never auto-duplicates; not confidently new, so review"],
+    [0.95, 0.05, 0.9, 0, "duplicate", "NEW_AT 0 still allows an auto-duplicate"],
+    [0.3, 0.7, 0.9, 0, "record", "NEW_AT 0 has no review band: anything not a duplicate publishes"],
+    [0.95, 0.05, 0, 0, "record", "both knobs 0 decide nothing"],
+  ] as const) {
+    check(
+      `decideOutcome(same=${pSame}, distinct=${pDistinct}, match=${matchAt}, new=${newAt}) → ${expected}: ${label}`,
+      decideOutcome(pSame, pDistinct, matchAt, newAt) === expected,
+      decideOutcome(pSame, pDistinct, matchAt, newAt),
+    );
+  }
+
   const DEDUP_PUB_ON = fakeConfig({ JEV_PUBLISH_DEDUP_ENABLED: true });
-  const holdAt = (n: number) => fakeConfig({ JEV_PUBLISH_DEDUP_ENABLED: true, JEV_PUBLISH_DEDUP_HOLD_AT: n });
+  const bands = (matchAt: number, newAt: number) =>
+    fakeConfig({
+      JEV_PUBLISH_DEDUP_ENABLED: true,
+      JEV_PUBLISH_DEDUP_MATCH_AT: matchAt,
+      JEV_PUBLISH_DEDUP_NEW_AT: newAt,
+    });
   const THREE = [nearby("ev-0", "Zero"), nearby("ev-1", "Founding Day"), nearby("ev-2", "Two")];
-  const sames = (...ps: number[]) => ok(Object.fromEntries(ps.map((p, i) => [`same_${i}`, noulAnswer(p)])));
+  /** One answer per candidate plus the "distinct from all" question. */
+  const answersFor = (sames: number[], distinct: number) =>
+    ok({
+      ...Object.fromEntries(sames.map((p, i) => [`same_${i}`, noulAnswer(p)])),
+      distinct: noulAnswer(distinct),
+    });
 
   {
     const mock = installFetchMock([]);
@@ -678,41 +711,53 @@ async function main(): Promise<void> {
   }
 
   {
-    const mock = installFetchMock([sames(0.2, 0.95, 0.1)]);
+    const mock = installFetchMock([answersFor([0.2, 0.95, 0.1], 0.04)]);
     const result = await judgeDuplicateWithJev(client(), DEDUP_PUB_ON, SAMPLE_EVENT, THREE);
     const body = bodyOf(mock.calls[0]);
     check(
-      "all candidates go in ONE request, one noul question each, with their quotes in state",
+      "all candidates go in ONE request: a noul per candidate plus one 'distinct' noul, quotes in state",
       mock.calls.length === 1 &&
-        Object.keys(body.questions).join(",") === "same_0,same_1,same_2" &&
+        Object.keys(body.questions).join(",") === "same_0,same_1,same_2,distinct" &&
         Object.values<any>(body.questions).every((q) => q.type === "noul") &&
         body.state?.existing?.length === 3 &&
         body.state.existing[1].quote === "A quote about Founding Day.",
       JSON.stringify(Object.keys(body.questions ?? {})),
     );
     check(
-      "the best match is reported by title and id; default knob 0 records without gating",
-      result?.name === "duplicate-published" &&
-        result.passed === false &&
-        result.gating === false &&
-        result.detail?.includes('"Founding Day"') === true &&
-        result.detail.includes("matched=ev-1"),
+      "default knobs 0: the best match is recorded by title and id, nothing is decided, and it does not gate",
+      result?.outcome === "record" &&
+        result.check.name === "duplicate-published" &&
+        result.check.passed === false &&
+        result.check.gating === false &&
+        result.check.detail?.includes('"Founding Day"') === true &&
+        result.check.detail.includes("matched=ev-1") &&
+        result.matchedEventId === "ev-1" &&
+        result.pSame === 0.95 &&
+        result.pDistinct === 0.04,
       JSON.stringify(result),
     );
     mock.restore();
   }
 
-  for (const [knob, p, passed, gating, label] of [
-    [0.9, 0.95, false, true, "at or above the knob holds"],
-    [0.95, 0.95, false, true, "exactly at the knob holds (inclusive)"],
-    [0.97, 0.95, true, true, "below the knob does not hold"],
-    [0, 0.3, true, false, "a low match with knob 0 is recorded as distinct"],
+  // End to end through the client: the outcome, and what is recorded on the check.
+  for (const [matchAt, newAt, sames, distinct, outcome, passed, auto, label] of [
+    [0.9, 0.8, [0.1, 0.97, 0.05], 0.03, "duplicate", false, true, "confident duplicate is auto-resolved"],
+    [0.9, 0.8, [0.05, 0.1, 0.02], 0.96, "new", true, false, "confident new publishes"],
+    [0.9, 0.8, [0.1, 0.95, 0.05], 0.85, "review", false, false, "the two answers disagree → review"],
+    [0.9, 0.8, [0.3, 0.55, 0.2], 0.5, "review", false, false, "neither confident → review"],
+    [0, 0, [0.1, 0.95, 0.05], 0.04, "record", false, false, "both knobs 0 decide nothing"],
   ] as const) {
-    const mock = installFetchMock([sames(0.1, p, 0.05)]);
-    const result = await judgeDuplicateWithJev(client(), holdAt(knob), SAMPLE_EVENT, THREE);
+    const mock = installFetchMock([answersFor([...sames], distinct)]);
+    const result = await judgeDuplicateWithJev(client(), bands(matchAt, newAt), SAMPLE_EVENT, THREE);
+    const data = result?.check.data as { auto?: boolean; outcome?: string; matchedEventId?: string } | undefined;
     check(
-      `publish dedup knob ${knob}, P(same)=${p}: ${label}`,
-      result?.passed === passed && result.gating === gating,
+      `publish dedup (match ${matchAt}, new ${newAt}): ${label}`,
+      result?.outcome === outcome &&
+        result.check.passed === passed &&
+        result.check.gating === (matchAt > 0 || newAt > 0) &&
+        data?.auto === auto &&
+        data?.outcome === outcome &&
+        data?.matchedEventId === result.matchedEventId,
       JSON.stringify(result),
     );
     mock.restore();
@@ -720,8 +765,16 @@ async function main(): Promise<void> {
 
   {
     const mock = installFetchMock([{ status: 500, body: {} }]);
-    const result = await judgeDuplicateWithJev(client(), holdAt(0.5), SAMPLE_EVENT, THREE);
-    check("publish dedup returns null on a Jev outage even with the gate active (never newly holds)", result === null);
+    const result = await judgeDuplicateWithJev(client(), bands(0.9, 0.8), SAMPLE_EVENT, THREE);
+    check("publish dedup returns null on a Jev outage even with both bands active (never newly holds or drops)", result === null);
+    mock.restore();
+  }
+
+  {
+    // The SDK types answers from the questions but does not check the server sent them.
+    const mock = installFetchMock([ok(Object.fromEntries([0, 1, 2].map((i) => [`same_${i}`, noulAnswer(0.95)])))]);
+    const result = await judgeDuplicateWithJev(client(), bands(0.9, 0.8), SAMPLE_EVENT, THREE);
+    check("a response missing the 'distinct' answer decides nothing (null), so it cannot auto-resolve", result === null);
     mock.restore();
   }
 

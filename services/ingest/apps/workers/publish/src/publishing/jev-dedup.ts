@@ -111,23 +111,70 @@ export function selectCandidates(
 export const DUPLICATE_PUBLISHED_CHECK = "duplicate-published";
 
 /**
- * One request, one yes/no question per candidate. TypeSafe's reranking
- * cookbook scores each candidate independently rather than asking for a pick
- * from a list, which yields a calibrated probability per pair to threshold on;
- * independent questions over shared state run in parallel server-side.
+ * What to do with an event, given Jev's two readings of it.
  *
- * `JEV_PUBLISH_DEDUP_HOLD_AT` (0–1, default `0`) is the `P(same)` at or above
- * which the event is held for review. `0` never holds: the check is still
- * recorded (reported at the natural 0.5 bar), which is also the bypass. Returns
- * `null` — no check, no hold — when the flag is off, there is nothing to compare
- * against, or the call fails: an outage can never newly hold an event.
+ * - `duplicate` — confidently the same as an existing event: auto-resolved, left
+ *   off the map, recorded so a person can overturn it.
+ * - `new` — confidently distinct from every existing event: publish.
+ * - `review` — neither, including the two answers disagreeing: held for a person.
+ * - `record` — both knobs are `0`: nothing is decided, the evidence is recorded and
+ *   the event publishes (the bypass).
+ */
+export type DuplicateOutcome = "duplicate" | "new" | "review" | "record";
+
+/**
+ * Both signals must agree before anything is decided automatically: `P(same)` and
+ * `P(distinct)` are independent readings of one situation, so `P(same)` 0.9 with
+ * `P(distinct)` 0.8 means Jev is confused — not that the event is a duplicate, and
+ * not that it is new. That case lands in review.
+ *
+ * A knob of `0` switches its band off (never auto-duplicate / no review band).
+ */
+/** `1 − 0.9` is `0.0999…`, so "at the bar" comparisons need a hair of tolerance. */
+const EPS = 1e-9;
+
+export function decideOutcome(
+  pSame: number,
+  pDistinct: number,
+  matchAt: number,
+  newAt: number,
+): DuplicateOutcome {
+  if (matchAt > 0 && pSame >= matchAt - EPS && pDistinct <= 1 - matchAt + EPS) return "duplicate";
+  if (newAt > 0) {
+    return pDistinct >= newAt - EPS && pSame <= 1 - newAt + EPS ? "new" : "review";
+  }
+  return "record";
+}
+
+export interface DuplicateJudgment {
+  outcome: DuplicateOutcome;
+  /** The recorded `duplicate-published` check (also carries the structured `data`). */
+  check: ValidationCheck;
+  matchedEventId: string;
+  pSame: number;
+  pDistinct: number;
+}
+
+/**
+ * One request: a yes/no question per candidate ("same as existing event _i_?")
+ * plus one over all of them ("distinct from every one?"). TypeSafe's reranking
+ * cookbook scores each candidate independently rather than asking for a pick
+ * from a list, which yields a calibrated probability per pair; independent
+ * questions over shared state run in parallel server-side, so the extra question
+ * costs little.
+ *
+ * `JEV_PUBLISH_DEDUP_MATCH_AT` / `JEV_PUBLISH_DEDUP_NEW_AT` (0–1, default `0`)
+ * set the bands; see `decideOutcome`. Both `0` decides nothing: the check is
+ * still recorded (at the natural 0.5 bar) and the event publishes. Returns `null`
+ * — no check, no decision — when the flag is off, there is nothing to compare
+ * against, or the call fails: an outage can never newly hold or drop an event.
  */
 export async function judgeDuplicateWithJev(
   client: JevClient,
   config: ConfigService,
   event: ExtractedEvent,
   candidates: NearbyEvent[],
-): Promise<ValidationCheck | null> {
+): Promise<DuplicateJudgment | null> {
   if (!isJevFeatureEnabled(config, client, "JEV_PUBLISH_DEDUP_ENABLED")) return null;
   if (candidates.length === 0) return null;
 
@@ -161,6 +208,15 @@ export async function judgeDuplicateWithJev(
       },
     );
   });
+  questions["distinct"] = noul(
+    "Is the new event a different real-world historical event from EVERY one of the " +
+      "existing events listed — that is, it is not the same as any of them? " +
+      "Sharing a year or a place with one of them does not make it the same.",
+    {
+      true: "It is a separate occurrence from all of the listed events.",
+      false: "It is the same occurrence as at least one of the listed events.",
+    },
+  );
 
   const answers = await client.tryAsk(state, questions);
   if (!answers) return null;
@@ -170,22 +226,46 @@ export async function judgeDuplicateWithJev(
     const answer = answers[`same_${i}`];
     if (answer?.type === "noul" && answer.noul > best.p) best = { index: i, p: answer.noul };
   }
+  const distinct = answers["distinct"];
   const match = candidates[best.index];
-  if (!match) return null;
+  if (!match || distinct?.type !== "noul") return null;
 
-  const holdAt = config.get<number>("JEV_PUBLISH_DEDUP_HOLD_AT") ?? 0;
-  const gating = holdAt > 0;
-  const bar = gating ? holdAt : 0.5;
-  const passed = best.p < bar;
+  const pSame = best.p;
+  const pDistinct = distinct.noul;
+  const matchAt = config.get<number>("JEV_PUBLISH_DEDUP_MATCH_AT") ?? 0;
+  const newAt = config.get<number>("JEV_PUBLISH_DEDUP_NEW_AT") ?? 0;
+  const outcome = decideOutcome(pSame, pDistinct, matchAt, newAt);
+  const gating = matchAt > 0 || newAt > 0;
+  // Un-decided (record): the natural 0.5 bar, as before the bands existed.
+  const passed = outcome === "record" ? pSame < 0.5 : outcome === "new";
+
+  const verdictText: Record<DuplicateOutcome, string> = {
+    duplicate: "confident duplicate — auto-resolved, not published",
+    new: "confident new event",
+    review: "uncertain — held for review",
+    record: passed ? "kept as distinct" : "probable duplicate",
+  };
 
   return {
-    name: DUPLICATE_PUBLISHED_CHECK,
-    passed,
-    gating,
-    detail:
-      `jev p(same)=${best.p.toFixed(2)} with "${match.title}" ` +
-      `(matched=${match.id}, source ${match.sourceId}, ${match.dateText ?? match.date})` +
-      (passed ? " — kept as distinct" : " — probable duplicate") +
-      (gating ? `; hold at ${holdAt}` : ""),
+    outcome,
+    matchedEventId: match.id,
+    pSame,
+    pDistinct,
+    check: {
+      name: DUPLICATE_PUBLISHED_CHECK,
+      passed,
+      gating,
+      detail:
+        `jev p(same)=${pSame.toFixed(2)} p(distinct)=${pDistinct.toFixed(2)} with "${match.title}" ` +
+        `(matched=${match.id}, source ${match.sourceId}, ${match.dateText ?? match.date}) — ` +
+        verdictText[outcome],
+      data: {
+        outcome,
+        auto: outcome === "duplicate",
+        matchedEventId: match.id,
+        pSame,
+        pDistinct,
+      },
+    },
   };
 }

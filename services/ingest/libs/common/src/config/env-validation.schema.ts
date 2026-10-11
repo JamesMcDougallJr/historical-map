@@ -207,16 +207,29 @@ export const envSchema = z.object({
   JEV_PUBLISH_DEDUP_ENABLED: boolFlag(),
 
   /**
-   * Hold an event for review when Jev's `P(same event)` with an existing one
-   * is at least this. `0` (default) **never holds** — the match and its
-   * probability are still recorded on the candidate, and the event publishes,
-   * so this is also the bypass. Direction: HIGHER holds fewer events. Tune it
-   * from the recorded probabilities before raising it; a false positive
-   * withholds a real event. Held events are released with
-   * `npm run duplicate:review -- --approve=<eventKey>`. No effect unless
+   * Auto-resolve an event as a duplicate when Jev is this sure of it: `P(same)`
+   * with an existing event is at least this AND `P(distinct from all of them)`
+   * is at most `1 − this`. Both signals must agree. `0` (default) **never
+   * auto-decides** — the evidence is still recorded and the event publishes, so
+   * this is also the bypass. Direction: HIGHER resolves fewer events as
+   * duplicates. A confident duplicate is left off the map but recorded (matched
+   * event, probabilities, `auto`) and can be overturned from the admin panel or
+   * `duplicate:review`. Tune from recorded probabilities before raising it — a
+   * false positive withholds a real event. No effect unless
    * `JEV_PUBLISH_DEDUP_ENABLED` is on.
    */
-  JEV_PUBLISH_DEDUP_HOLD_AT: z.coerce.number().min(0).max(1).default(0),
+  JEV_PUBLISH_DEDUP_MATCH_AT: z.coerce.number().min(0).max(1).default(0),
+
+  /**
+   * Publish an event automatically when Jev is this sure it is new:
+   * `P(distinct from every existing event)` is at least this AND `P(same)` with
+   * the best match is at most `1 − this`. An event that is neither a confident
+   * duplicate nor confidently new — including the two answers disagreeing — is
+   * held for review. `0` (default) switches the review band off: anything not
+   * auto-resolved as a duplicate publishes, as before. Direction: HIGHER holds
+   * MORE events for review. No effect unless `JEV_PUBLISH_DEDUP_ENABLED` is on.
+   */
+  JEV_PUBLISH_DEDUP_NEW_AT: z.coerce.number().min(0).max(1).default(0),
 });
 
 export type Env = z.infer<typeof envSchema>;

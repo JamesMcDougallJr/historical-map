@@ -192,4 +192,10 @@ export interface ValidationCheck {
   /** Whether failing this check forces `review`, or is merely recorded. */
   gating: boolean;
   detail?: string;
+  /**
+   * Structured evidence for checks a program (not just a person) has to read
+   * back — currently the cross-document duplicate decision: the matched event
+   * id, both probabilities, the outcome and whether it was decided automatically.
+   */
+  data?: Record<string, unknown>;
 }
