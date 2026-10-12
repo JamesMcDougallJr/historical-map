@@ -231,11 +231,24 @@ export async function listSources(): Promise<EventSource[]> {
       homepage_url: string | null;
       attribution: string | null;
       color: string | null;
+      location_count: number;
+      event_count: number;
     }[]
-  >`SELECT * FROM sources ORDER BY name ASC`;
+  >`SELECT s.*,
+           COUNT(DISTINCT e.location_id)::int AS location_count,
+           COUNT(e.id)::int AS event_count
+    FROM sources s
+    LEFT JOIN events e ON e.source_id = s.id
+    GROUP BY s.id
+    ORDER BY s.name ASC`;
 
   return rows.map((r) => {
-    const s: EventSource = { id: r.id, name: r.name };
+    const s: EventSource = {
+      id: r.id,
+      name: r.name,
+      locationCount: r.location_count,
+      eventCount: r.event_count,
+    };
     if (r.description) s.description = r.description;
     if (r.homepage_url) s.homepageUrl = r.homepage_url;
     if (r.attribution) s.attribution = r.attribution;

@@ -10,6 +10,7 @@ import { DOCUMENT_STATUSES } from "@historical-map/domain";
 import type { QueryRunner } from "typeorm";
 import { createDataSource } from "../libs/database/src/data-source";
 import { IngestDocument, IngestSource } from "../libs/database/src/entities";
+import { relocatePublishedPins } from "../libs/geocoding/src/relocate";
 
 const UNIQUE_VIOLATION = "23505";
 const CHECK_VIOLATION = "23514";
@@ -148,6 +149,34 @@ async function main(): Promise<void> {
       "map tables still exist (not clobbered by synchronize)",
       ownedTables.length === 3,
     ]);
+
+    // 8. Correcting a geocode moves the pins it placed — and only those. A pin
+    //    merely *near* the old spot belongs to some other place.
+    if (ownedTables.length === 3) {
+      const old = { lon: 0.123456, lat: -0.654321 };
+      await runner.query(
+        `INSERT INTO locations (id, name, lon, lat) VALUES
+           ('vfy-exact', 'Exact', $1, $2),
+           ('vfy-near', 'Near', $3, $2)`,
+        [old.lon, old.lat, old.lon + 0.001],
+      );
+      const moved = await relocatePublishedPins(runner, old, {
+        lon: 10.5,
+        lat: 20.5,
+      });
+      const after: Array<{ id: string; lon: number }> = await runner.query(
+        `SELECT id, lon FROM locations WHERE id IN ('vfy-exact','vfy-near')`,
+      );
+      const lonOf = (id: string): number | undefined =>
+        after.find((r) => r.id === id)?.lon;
+      checks.push([
+        "relocatePublishedPins moves the exact-match pin and leaves a near one",
+        moved.length === 1 &&
+          moved[0]?.id === "vfy-exact" &&
+          lonOf("vfy-exact") === 10.5 &&
+          lonOf("vfy-near") === old.lon + 0.001,
+      ]);
+    }
   } finally {
     await runner.rollbackTransaction();
     await runner.release();

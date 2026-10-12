@@ -91,6 +91,7 @@ type DebugMap = {
     opts: { layerFilter: (l: DebugLayer) => boolean },
   ) => unknown;
   renderSync(): void;
+  getPixelFromCoordinate(coordinate: number[]): number[] | null;
 };
 type DebugLayer = {
   get(key: string): unknown;

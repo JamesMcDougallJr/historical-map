@@ -13,11 +13,13 @@
  * Correction is cheap precisely because of the cache: a place is resolved once
  * and reused for every event that names it, so fixing one row fixes the whole
  * corpus — past and future. `--set` marks the row as manually confirmed so a
- * later run cannot overwrite it.
+ * later run cannot overwrite it, and also moves any already-published pin that
+ * sits at the row's old coordinates.
  */
 import { createDataSource } from "../libs/database/src/data-source";
 import { GeocodeCache } from "../libs/database/src/entities";
 import { normalizePlaceName } from "../libs/geocoding/src/geocoder.interface";
+import { relocatePublishedPins } from "../libs/geocoding/src/relocate";
 
 function arg(name: string): string | undefined {
   return process.argv.find((a) => a.startsWith(`--${name}=`))?.split("=")[1];
@@ -45,6 +47,13 @@ async function main(): Promise<void> {
         where: { normalizedName: normalized },
       });
 
+      // Captured before the update: the old coordinates are how published pins
+      // are found (see relocatePublishedPins).
+      const previous =
+        existing?.found && existing.lat != null && existing.lon != null
+          ? { lat: existing.lat, lon: existing.lon }
+          : null;
+
       if (existing) {
         await repo.update(existing.id, {
           lat,
@@ -69,11 +78,25 @@ async function main(): Promise<void> {
         console.log(`created "${normalized}" -> ${lat}, ${lon}`);
       }
 
-      console.log(
-        "Note: events already published keep the old coordinates — their " +
-          "location row does not move. Re-publish affected documents to " +
-          "re-place them.",
-      );
+      if (previous) {
+        const moved = await relocatePublishedPins(dataSource, previous, {
+          lat,
+          lon,
+        });
+        if (moved.length === 0) {
+          console.log("no published pins were at the old coordinates");
+        }
+        for (const pin of moved) {
+          console.log(
+            `moved pin "${pin.name}" (${pin.id}) ` +
+              `${previous.lat}, ${previous.lon} -> ${lat}, ${lon}`,
+          );
+        }
+      } else {
+        console.log(
+          "no previous coordinates cached, so no published pin was moved",
+        );
+      }
       return;
     }
 

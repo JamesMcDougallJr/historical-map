@@ -15,7 +15,7 @@ import {
   IngestSource,
   jsonb,
 } from "@app/database";
-import { artifactText, parseArtifact } from "@app/parsers";
+import { artifactText, parseArtifact, type TextSegment } from "@app/parsers";
 import {
   PUBLISH_JOB_OPTIONS,
   QUEUE_NAMES,
@@ -24,9 +24,11 @@ import {
   publishJobId,
 } from "@app/queue";
 import { STORAGE_SERVICE, type StorageService } from "@app/storage";
+import { JevClient } from "@app/jev";
 import type { Job, Queue } from "bullmq";
 import { Repository } from "typeorm";
 import { eventKeyFor } from "./event-key";
+import { judgeEventWithJev, scoreDuplicateWithJev } from "./jev-checks";
 import {
   type ValidationContext,
   checkConfidence,
@@ -66,6 +68,7 @@ export class ValidationService {
     // Explicit @Inject — see HealthController for why bare constructor-param-type
     // injection of a cross-file class silently resolves to undefined under tsx.
     @Inject(ConfigService) private readonly config: ConfigService,
+    @Inject(JevClient) private readonly jev: JevClient,
   ) {}
 
   async validate(job: Job<ValidateJobData>): Promise<void> {
@@ -98,12 +101,13 @@ export class ValidationService {
         return;
       }
 
+      // Parsed once; `segments` also feed the Jev grounding check, which
+      // shows Jev the section a quote came from rather than the whole text.
+      const artifact = document.textKey
+        ? parseArtifact(await this.storage.getObject(document.textKey))
+        : undefined;
       const context: ValidationContext = {
-        documentText: document.textKey
-          ? artifactText(
-              parseArtifact(await this.storage.getObject(document.textKey)),
-            )
-          : "",
+        documentText: artifact ? artifactText(artifact) : "",
         confidenceMin: this.config.get<number>("PUBLISH_CONFIDENCE_MIN") ?? 0.6,
         seen: new Set(),
       };
@@ -111,9 +115,18 @@ export class ValidationService {
       let toPublish = 0;
       let toReview = 0;
       const reasons: Record<string, number> = {};
+      // Separate from `context.seen` (exact-key `Set` for `checkDuplicate`):
+      // the Jev dedup check needs full event bodies to judge, not just a key.
+      const seenEvents: ExtractedEvent[] = [];
 
       for (const raw of events) {
-        const { event, checks } = this.runChecks(raw, context);
+        const { event, checks } = await this.runChecks(
+          raw,
+          context,
+          seenEvents,
+          artifact?.segments,
+        );
+        seenEvents.push(event);
 
         const failedGate = checks.find((c) => c.gating && !c.passed);
         const verdict: EventVerdict = failedGate ? "review" : "publish";
@@ -161,26 +174,51 @@ export class ValidationService {
   /**
    * Runs every check, in an order where corrections happen before the checks
    * that depend on them — precision downgrades feed the date checks.
+   *
+   * Async because the opt-in Jev checks are real HTTP calls; the original
+   * deterministic checks stay synchronous pure functions in `validators.ts`
+   * and are simply awaited-for-free alongside them.
    */
-  private runChecks(
+  private async runChecks(
     raw: ExtractedEvent,
     context: ValidationContext,
-  ): { event: ExtractedEvent; checks: ValidationCheck[] } {
+    seenEvents: ExtractedEvent[],
+    segments: TextSegment[] | undefined,
+  ): Promise<{ event: ExtractedEvent; checks: ValidationCheck[] }> {
     const precision = checkPrecision(raw);
     const event = precision.corrected ?? raw;
 
-    return {
-      event,
-      checks: [
-        checkGrounding(event, context),
-        checkConfidence(event, context),
-        checkDatePresent(event),
-        checkDatePlausible(event),
-        precision.check,
-        checkPlace(event),
-        checkDuplicate(event, context),
-      ],
-    };
+    const substring = checkGrounding(event, context);
+    const checks: ValidationCheck[] = [
+      substring,
+      checkConfidence(event, context),
+      checkDatePresent(event),
+      checkDatePlausible(event),
+      precision.check,
+      checkPlace(event),
+      checkDuplicate(event, context),
+    ];
+
+    // Each of these is independently flagged (see `jev-checks.ts`):
+    // disabled, uncredentialed, or a failed call all resolve to `null` and
+    // are simply not appended, reproducing pre-Jev behaviour exactly. Only
+    // `grounding-jev` can gate, and only once JEV_GROUNDING_MIN_SUPPORT is
+    // raised above 0.
+    // Grounding and confidence share one request (`judgeEventWithJev`);
+    // duplicate detection has different state and is its own.
+    const [{ grounding, confidence }, duplicate] = await Promise.all([
+      judgeEventWithJev(this.jev, this.config, event, {
+        documentText: context.documentText,
+        segments,
+        substringGrounded: substring.passed,
+      }),
+      scoreDuplicateWithJev(this.jev, this.config, event, seenEvents),
+    ]);
+    if (grounding) checks.push(grounding);
+    if (duplicate) checks.push(duplicate);
+    if (confidence) checks.push(confidence);
+
+    return { event, checks };
   }
 
   private async finish(
@@ -267,7 +305,18 @@ export class ValidationService {
         checks: jsonb(checks),
         event: jsonb(event),
       })
-      .orUpdate(["verdict", "checks", "event", "model_run"], ["event_key"])
+      // `WHERE resolved_at IS NULL`: a reviewer's decision (see
+      // `scripts/duplicate-review.ts`) must survive re-validation. The case it
+      // protects is **dismiss**: a dismissed duplicate is `verdict='review'`
+      // with `resolved_at` set, and this upsert would re-derive
+      // `verdict='publish'` from the deterministic checks — after which
+      // publish, which skips resolved candidates, puts the duplicate on the
+      // map. (Approve survives either way.) Unresolved rows update as before.
+      .orUpdate(["verdict", "checks", "event", "model_run"], ["event_key"], {
+        overwriteCondition: {
+          where: '"ingest_event_candidates"."resolved_at" IS NULL',
+        },
+      })
       .execute();
   }
 }
