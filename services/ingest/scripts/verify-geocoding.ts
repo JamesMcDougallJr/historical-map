@@ -12,7 +12,11 @@
 import { ConfigService } from "@nestjs/config";
 import type { RateLimiterService } from "../libs/common/src";
 import type { JevClient } from "../libs/jev/src";
-import type { GeocodeHit, Geocoder } from "../libs/geocoding/src";
+import type {
+  GeocodeHints,
+  GeocodeHit,
+  Geocoder,
+} from "../libs/geocoding/src";
 import {
   FallbackGeocoder,
   NominatimGeocoder,
@@ -166,9 +170,10 @@ function installFetchMock(responses: MockResponse[]): {
 // Shaped after a real `/reconcile` response for "Sutters Mill" (captured
 // 2026-09-14): repr_point is [lon, lat], and — the case that matters — a tie
 // at score 100 between a match in California and an unrelated same-named
-// place in Virginia, plus a `match: false` candidate scoring as high as
-// genuine non-matches, so score alone can't be the accept signal.
-const RECONCILE_HIT_BODY = {
+// place in Virginia, both from modern gazetteers, plus a `match: false`
+// candidate scoring as high as genuine non-matches, so score alone can't be
+// the accept signal.
+const RECONCILE_TIE_BODY = {
   q0: {
     result: [
       {
@@ -176,6 +181,7 @@ const RECONCILE_HIT_BODY = {
         name: "Sutters Mill",
         score: 100,
         match: true,
+        namespace: "gn",
         description: "Country: US",
         repr_point: [-120.89188, 38.80296],
       },
@@ -184,6 +190,7 @@ const RECONCILE_HIT_BODY = {
         name: "Sutters Mill",
         score: 100,
         match: true,
+        namespace: "osm",
         description: "Country: US",
         repr_point: [-77.656355, 37.45198],
       },
@@ -192,8 +199,124 @@ const RECONCILE_HIT_BODY = {
         name: "Sutter's Mill",
         score: 40,
         match: false,
+        namespace: "wd",
         description: "Country: US",
         repr_point: [-120.892361, 38.803472],
+      },
+    ],
+  },
+};
+
+// "Sutter's Mill" as documents actually spell it (captured 2026-10-14): one
+// Wikidata match, so there is nothing to disambiguate.
+const RECONCILE_HIT_BODY = {
+  q0: {
+    result: [
+      {
+        id: "place:gn:5285192",
+        name: "Sutters Mill",
+        score: 100,
+        match: false,
+        namespace: "gn",
+        description: "Country: US",
+        repr_point: [-120.89188, 38.80296],
+      },
+      {
+        id: "place:wd:Q1973789",
+        name: "Sutter's Mill",
+        score: 99,
+        match: true,
+        namespace: "wd",
+        description: "Country: US",
+        repr_point: [-120.892361, 38.803472],
+      },
+    ],
+  },
+};
+
+// "New Mexico" (captured 2026-10-14): GeoNames ranks a hamlet in Québec first,
+// but the only historical-source match is the territory itself.
+const RECONCILE_HISTORICAL_TIEBREAK_BODY = {
+  q0: {
+    result: [
+      {
+        id: "place:gn:6077243",
+        name: "New Mexico",
+        score: 100,
+        match: true,
+        namespace: "gn",
+        description: "Country: CA",
+        repr_point: [-71.45703, 45.35977],
+      },
+      {
+        id: "place:ohm:r2750913",
+        name: "New Mexico",
+        score: 100,
+        match: true,
+        namespace: "ohm",
+        description: "Country: US, MX",
+        repr_point: [-106.045316, 34.167167],
+      },
+      {
+        id: "place:gn:890299",
+        name: "New Mexico",
+        score: 100,
+        match: true,
+        namespace: "gn",
+        description: "Country: ZW",
+        repr_point: [31.18333, -17.93333],
+      },
+    ],
+  },
+};
+
+// "Promontory Summit" (captured 2026-10-14): two sources, one place.
+const RECONCILE_AGREEING_BODY = {
+  q0: {
+    result: [
+      {
+        id: "place:gn:5779349",
+        name: "Promontory Summit",
+        score: 100,
+        match: true,
+        namespace: "gn",
+        description: "Country: US",
+        repr_point: [-112.5483, 41.61854],
+      },
+      {
+        id: "place:wd:Q2112513",
+        name: "Promontory Summit",
+        score: 99,
+        match: true,
+        namespace: "wd",
+        description: "Country: US",
+        repr_point: [-112.548304, 41.618537],
+      },
+    ],
+  },
+};
+
+// WHG can return a matched record it could not locate (observed on "Mexico"
+// and "Lago de Texcoco"). Destructuring it used to throw.
+const RECONCILE_NULL_POINT_BODY = {
+  q0: {
+    result: [
+      {
+        id: "place:ohm:r1",
+        name: "Lago de Texcoco",
+        score: 100,
+        match: true,
+        namespace: "ohm",
+        repr_point: null,
+      },
+      {
+        id: "place:wd:Q1056282",
+        name: "Lake Texcoco",
+        score: 99,
+        match: true,
+        namespace: "wd",
+        description: "Country: MX",
+        repr_point: [-98.99, 19.5],
       },
     ],
   },
@@ -322,24 +445,17 @@ async function main(): Promise<void> {
     if (hit !== undefined) {
       check(
         "repr_point [lon, lat] maps to hit.lon/hit.lat, not swapped",
-        hit?.lon === -120.89188 && hit?.lat === 38.80296,
+        hit?.lon === -120.892361 && hit?.lat === 38.803472,
         JSON.stringify(hit),
       );
       check(
-        "tied top-score matches: the first candidate wins (documented limitation)",
-        hit?.displayName?.startsWith("Sutters Mill") ?? false,
+        "a match:false candidate is never picked, even when it scores higher",
+        hit?.displayName?.startsWith("Sutter's Mill") ?? false,
         hit?.displayName,
       );
       check(
-        "the tied Virginia candidate is stored as an alternate, not silently dropped",
-        hit?.alternates?.length === 1 &&
-          hit.alternates[0]?.lon === -77.656355 &&
-          hit.alternates[0]?.lat === 37.45198,
-        JSON.stringify(hit?.alternates),
-      );
-      check(
-        "the match:false Wikidata candidate never appears as an alternate",
-        !hit?.alternates?.some((a) => a.lon === -120.892361),
+        "a match:false candidate never appears as an alternate",
+        !hit?.alternates?.length,
         JSON.stringify(hit?.alternates),
       );
     }
@@ -371,6 +487,100 @@ async function main(): Promise<void> {
         };
         return parsed.queries["q0"]?.query === "Sutters Mill";
       })(),
+    );
+    mock.restore();
+  }
+
+  {
+    const mock = installFetchMock([{ status: 200, body: RECONCILE_TIE_BODY }]);
+    const geocoder = new WhgGeocoder(
+      fakeConfig({ WHG_API_TOKEN: "test-token", WHG_MIN_INTERVAL_MS: 0 }),
+      fakeRateLimiter(),
+    );
+    const hit = await safeGeocode(
+      geocoder,
+      "Sutters Mill",
+      "tied modern homonyms resolve without throwing",
+    );
+    check(
+      "tied matches in different places, none historical: null, so Nominatim decides",
+      hit === null,
+      JSON.stringify(hit),
+    );
+    mock.restore();
+  }
+
+  {
+    const mock = installFetchMock([
+      { status: 200, body: RECONCILE_HISTORICAL_TIEBREAK_BODY },
+    ]);
+    const geocoder = new WhgGeocoder(
+      fakeConfig({ WHG_API_TOKEN: "test-token", WHG_MIN_INTERVAL_MS: 0 }),
+      fakeRateLimiter(),
+    );
+    const hit = await safeGeocode(
+      geocoder,
+      "New Mexico",
+      "a historical tie-break resolves without throwing",
+    );
+    check(
+      "the historical source's answer wins over modern homonyms ranked above it",
+      hit?.lon === -106.045316 && hit?.lat === 34.167167,
+      JSON.stringify(hit),
+    );
+    check(
+      "the tied modern homonyms are kept as alternates, not silently dropped",
+      hit?.alternates?.length === 2 &&
+        hit.alternates.some((a) => a.lon === -71.45703) &&
+        hit.alternates.some((a) => a.lon === 31.18333),
+      JSON.stringify(hit?.alternates),
+    );
+    mock.restore();
+  }
+
+  {
+    const mock = installFetchMock([
+      { status: 200, body: RECONCILE_AGREEING_BODY },
+    ]);
+    const geocoder = new WhgGeocoder(
+      fakeConfig({ WHG_API_TOKEN: "test-token", WHG_MIN_INTERVAL_MS: 0 }),
+      fakeRateLimiter(),
+    );
+    const hit = await safeGeocode(
+      geocoder,
+      "Promontory Summit",
+      "agreeing matches resolve without throwing",
+    );
+    check(
+      "matches from several sources at one place: the top one is taken",
+      hit?.lon === -112.5483 && hit?.lat === 41.61854,
+      JSON.stringify(hit),
+    );
+    check(
+      "a second source agreeing on the same place is not an alternate",
+      !hit?.alternates?.length,
+      JSON.stringify(hit?.alternates),
+    );
+    mock.restore();
+  }
+
+  {
+    const mock = installFetchMock([
+      { status: 200, body: RECONCILE_NULL_POINT_BODY },
+    ]);
+    const geocoder = new WhgGeocoder(
+      fakeConfig({ WHG_API_TOKEN: "test-token", WHG_MIN_INTERVAL_MS: 0 }),
+      fakeRateLimiter(),
+    );
+    const hit = await safeGeocode(
+      geocoder,
+      "Lake Texcoco",
+      "a matched candidate with a null repr_point does not throw",
+    );
+    check(
+      "a matched candidate with no point is skipped; the located one is used",
+      hit?.lon === -98.99 && hit?.lat === 19.5,
+      JSON.stringify(hit),
     );
     mock.restore();
   }
@@ -466,6 +676,7 @@ async function main(): Promise<void> {
           {
             lon: "-111.8910",
             lat: "40.7608",
+            name: "Salt Lake Valley",
             display_name: "Salt Lake Valley, Utah, USA",
             category: "natural",
             importance: 0.55,
@@ -473,6 +684,7 @@ async function main(): Promise<void> {
           {
             lon: "-111.9",
             lat: "40.75",
+            name: "Levoy Drive",
             display_name: "Levoy Drive",
             category: "highway",
             importance: 0.9, // higher, but rejected category — must not win
@@ -480,6 +692,7 @@ async function main(): Promise<void> {
           {
             lon: "-112.05",
             lat: "40.7",
+            name: "Salt Lake Valley",
             display_name: "Salt Lake Valley (alt)",
             category: "natural",
             importance: 0.55, // tied with the chosen result
@@ -520,6 +733,7 @@ async function main(): Promise<void> {
           {
             lon: "-111.8910",
             lat: "40.7608",
+            name: "Salt Lake Valley",
             display_name: "Salt Lake Valley, Utah, USA",
             category: "natural",
             // No `importance` field at all — some Nominatim responses omit it.
@@ -545,6 +759,154 @@ async function main(): Promise<void> {
     mock.restore();
   }
 
+  // ── NominatimGeocoder confidence gate ───────────────────────────────────
+  // Each case is a real response (captured 2026-10-14) from the first
+  // production corpus, trimmed to the fields the gate reads.
+  const gateCases: Array<{
+    name: string;
+    place: string;
+    body: unknown[];
+    hints?: GeocodeHints;
+    /** Expected hit longitude, or the start of the decline reason. */
+    expect: { lon: number } | { declined: string };
+  }> = [
+    {
+      name: "a result not called that at all is declined (New Spain → Spain Reserve)",
+      place: "New Spain",
+      body: [
+        { lon: "151.0088", lat: "-33.7204", name: "Spain Reserve", display_name: "Spain Reserve, Castle Hill, Sydney", category: "leisure", importance: 0.08 },
+      ],
+      expect: { declined: "name mismatch" },
+    },
+    {
+      name: "a hamlet that merely shares the name is declined (low importance)",
+      place: "Santiago Tlatelolco",
+      body: [
+        { lon: "-103.2505", lat: "22.1399", name: "Santiago Tlatelolco", display_name: "Santiago Tlatelolco, Colotlán, Jalisco", category: "place", importance: 0.133 },
+      ],
+      expect: { declined: "low importance" },
+    },
+    {
+      name: "equally prominent same-named places far apart are declined (tie)",
+      place: "Vera Cruz",
+      body: [
+        { lon: "-52.5007", lat: "-29.7157", name: "Vera Cruz", display_name: "Vera Cruz, Rio Grande do Sul", category: "boundary", importance: 0.526 },
+        { lon: "-50.0", lat: "-22.2", name: "Vera Cruz", display_name: "Vera Cruz, São Paulo", category: "boundary", importance: 0.524 },
+        { lon: "-38.6", lat: "-12.9", name: "Vera Cruz", display_name: "Vera Cruz, Bahia", category: "boundary", importance: 0.522 },
+      ],
+      expect: { declined: "tie" },
+    },
+    {
+      name: "a modern namesake far from every historical record is declined",
+      place: "Tenochtitlan",
+      body: [
+        { lon: "-96.9420", lat: "19.8251", name: "Tenochtitlán", display_name: "Tenochtitlán, Veracruz, México", category: "boundary", importance: 0.373, boundingbox: ["19.75", "19.90", "-97.00", "-96.88"] },
+      ],
+      hints: { historical: [{ lon: -99.1314, lat: 19.435, displayName: "Tenochtitlan (TGN)" }] },
+      expect: { declined: "contradicts historical gazetteers" },
+    },
+    {
+      name: "a country is held to its extent, not its centroid (Peru, 360 km off-centre)",
+      place: "Peru",
+      body: [
+        { lon: "-75.0459", lat: "-6.8700", name: "Perú", display_name: "Perú", category: "boundary", importance: 0.83, boundingbox: ["-18.35", "-0.04", "-81.33", "-68.65"], namedetails: { name: "Perú", "name:en": "Peru" } },
+      ],
+      hints: { historical: [{ lon: -76.0, lat: -10.0, displayName: "Peru (TGN)" }] },
+      expect: { lon: -75.0459 },
+    },
+    {
+      name: "a region within reach of its historical record is accepted",
+      place: "New Mexico",
+      body: [
+        { lon: "-105.9960", lat: "34.5802", name: "New Mexico", display_name: "New Mexico, United States", category: "boundary", importance: 0.75 },
+      ],
+      hints: { historical: [{ lon: -106.045316, lat: 34.167167, displayName: "New Mexico (OHM)" }] },
+      expect: { lon: -105.996 },
+    },
+    {
+      name: "another language's name matches via namedetails (Mexico City → Ciudad de México)",
+      place: "Mexico City",
+      body: [
+        { lon: "-99.1332", lat: "19.4326", name: "Ciudad de México", display_name: "Ciudad de México, México", category: "boundary", importance: 0.782, namedetails: { name: "Ciudad de México", "name:en": "Mexico City" } },
+      ],
+      expect: { lon: -99.1332 },
+    },
+    {
+      name: "accents don't break the name match, and a 0.03 gap is not a tie (Yucatán)",
+      place: "Yucatan",
+      body: [
+        { lon: "-88.8756", lat: "20.6846", name: "Yucatán", display_name: "Yucatán, México", category: "boundary", importance: 0.624 },
+        { lon: "-89.0", lat: "19.5", name: "Península de Yucatán", display_name: "Península de Yucatán, México", category: "natural", importance: 0.594 },
+      ],
+      expect: { lon: -88.8756 },
+    },
+  ];
+  for (const c of gateCases) {
+    const mock = installFetchMock([{ status: 200, body: c.body }]);
+    const geocoder = new NominatimGeocoder(
+      fakeConfig({ GEOCODER_MIN_INTERVAL_MS: 0 }),
+      fakeRateLimiter(),
+      fakeJevClient(),
+    );
+    const outcome = await geocoder.lookup(c.place, c.hints);
+    check(
+      c.name,
+      "lon" in c.expect
+        ? outcome.hit?.lon === c.expect.lon
+        : outcome.hit === null &&
+            (outcome.declined?.reason.startsWith(c.expect.declined) ?? false),
+      outcome.hit
+        ? JSON.stringify(outcome.hit)
+        : (outcome.declined?.reason ?? "plain miss"),
+    );
+    mock.restore();
+  }
+
+  {
+    // End to end through the tiers: WHG is ambiguous but knows where the
+    // historical place is; Nominatim's confident-looking modern namesake
+    // contradicts it; nothing is pinned and both reasons are kept.
+    const mock = installFetchMock([
+      {
+        status: 200,
+        body: {
+          q0: {
+            result: [
+              { id: "place:tgn:7005077", name: "Tenochtitlan", score: 100, match: true, namespace: "tgn", description: "Country: MX", repr_point: [-99.1314, 19.435] },
+              { id: "place:clio:1", name: "Tenochtitlan", score: 100, match: true, namespace: "clio", description: "Country: MX", repr_point: [-98.628, 19.186228] },
+            ],
+          },
+        },
+      },
+      {
+        status: 200,
+        body: [
+          { lon: "-96.9420", lat: "19.8251", name: "Tenochtitlán", display_name: "Tenochtitlán, Veracruz, México", category: "boundary", importance: 0.373 },
+        ],
+      },
+    ]);
+    const config = fakeConfig({
+      WHG_API_TOKEN: "test-token",
+      WHG_MIN_INTERVAL_MS: 0,
+      GEOCODER_MIN_INTERVAL_MS: 0,
+    });
+    const tiers = new FallbackGeocoder([
+      new WhgGeocoder(config, fakeRateLimiter()),
+      new NominatimGeocoder(config, fakeRateLimiter(), fakeJevClient()),
+    ]);
+    const outcome = await tiers.lookup("Tenochtitlan");
+    check(
+      "WHG's historical hints reach Nominatim, which then declines its namesake",
+      outcome.hit === null &&
+        /whg: ambiguous/.test(outcome.declined?.reason ?? "") &&
+        /nominatim: contradicts historical gazetteers/.test(
+          outcome.declined?.reason ?? "",
+        ),
+      outcome.declined?.reason,
+    );
+    mock.restore();
+  }
+
   // ── JEV_GEOCODE_RERANK_ENABLED ──────────────────────────────────────────
   // Three usable candidates, none tied on importance — without reranking,
   // `usable[0]` ("Old Fort Hamlet") always wins. These prove the flag
@@ -555,6 +917,7 @@ async function main(): Promise<void> {
     {
       lon: "-111.1",
       lat: "40.1",
+      name: "Old Fort Hamlet",
       display_name: "Old Fort Hamlet",
       category: "natural",
       importance: 0.5,
@@ -562,6 +925,7 @@ async function main(): Promise<void> {
     {
       lon: "-111.2",
       lat: "40.2",
+      name: "Fort Hamlet",
       display_name: "Fort Hamlet (historic site)",
       category: "historic",
       importance: 0.4,
@@ -569,6 +933,7 @@ async function main(): Promise<void> {
     {
       lon: "-111.3",
       lat: "40.3",
+      name: "New Fort Hamlet Estates",
       display_name: "New Fort Hamlet Estates",
       category: "natural",
       importance: 0.3,
