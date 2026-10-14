@@ -9,11 +9,15 @@ import { ConfigService } from "@nestjs/config";
 import type { StorageService } from "./storage-service.interface";
 
 /**
- * S3-compatible storage. MinIO locally, any S3 in production — only
- * `S3_ENDPOINT` differs between them.
+ * S3-compatible storage. MinIO locally, AWS S3 in production (infra/s3.tf) —
+ * `S3_ENDPOINT` set means MinIO; unset *or empty* means AWS. Empty has to
+ * count: docker compose hands an `S3_ENDPOINT=` line through as `""`, and an
+ * empty endpoint string makes the SDK fail on every request rather than fall
+ * back to AWS. AWS also rejects the `auto` region MinIO accepts, so production
+ * sets `S3_REGION`.
  *
  * `forcePathStyle` is required for MinIO: virtual-host addressing needs
- * per-bucket DNS, which a local container does not have.
+ * per-bucket DNS, which a local container does not have. Harmless on AWS.
  */
 @Injectable()
 export class S3StorageService implements StorageService {
@@ -25,7 +29,7 @@ export class S3StorageService implements StorageService {
   constructor(@Inject(ConfigService) config: ConfigService) {
     this.bucket = config.getOrThrow<string>("S3_BUCKET");
     this.client = new S3Client({
-      endpoint: config.get<string>("S3_ENDPOINT"),
+      endpoint: config.get<string>("S3_ENDPOINT") || undefined,
       region: config.get<string>("S3_REGION") ?? "auto",
       forcePathStyle: true,
       credentials: {

@@ -267,13 +267,21 @@ export async function listSources(): Promise<EventSource[]> {
  */
 export async function getIngestedDocument(
   documentId: string,
-): Promise<{ title: string | null; originalKey: string | null } | null> {
+): Promise<{
+  title: string | null;
+  originalKey: string | null;
+  contentType: string | null;
+} | null> {
   const rows = await sql()<
-    { title: string | null; original_key: string | null }[]
-  >`SELECT title, original_key FROM ingest_documents WHERE id = ${documentId}`;
+    { title: string | null; original_key: string | null; content_type: string | null }[]
+  >`SELECT title, original_key, content_type FROM ingest_documents WHERE id = ${documentId}`;
   const row = rows[0];
   if (!row) return null;
-  return { title: row.title, originalKey: row.original_key };
+  return {
+    title: row.title,
+    originalKey: row.original_key,
+    contentType: row.content_type,
+  };
 }
 
 export async function upsertSource(source: EventSource): Promise<void> {
