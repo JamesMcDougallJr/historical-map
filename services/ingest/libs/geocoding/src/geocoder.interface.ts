@@ -57,6 +57,13 @@ export interface GeocodeOutcome {
   hit: GeocodeHit | null;
   hints?: GeocodeHints;
   declined?: GeocodeDecline;
+  /**
+   * Every plausible place a tier looked at, including ones it would never
+   * pick on its own — WHG's `match: false` records among them. "Tepeyacac"'s
+   * right answer, Tepeyac Hill, only ever appears here. This is the pool a
+   * context-aware step chooses from.
+   */
+  considered?: GeocodeCandidate[];
 }
 
 /**

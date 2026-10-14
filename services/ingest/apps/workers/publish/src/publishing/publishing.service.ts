@@ -101,7 +101,12 @@ export class PublishingService {
           continue;
         }
 
-        const hit = await this.geocoding.resolve(event.placeName);
+        // The event itself, so a same-named place can be told from the one
+        // it happened at (the Jev context tier — see GeocodingService).
+        const hit = await this.geocoding.resolve(event.placeName, {
+          title: event.title,
+          description: event.description,
+        });
         if (!hit) {
           // A good event we cannot place. Back to review with its reason, not
           // discarded — `locations` requires coordinates, so it has nowhere

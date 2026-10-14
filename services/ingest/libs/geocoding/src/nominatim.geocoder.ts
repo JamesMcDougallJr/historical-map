@@ -236,11 +236,17 @@ export class NominatimGeocoder implements Geocoder {
     // credentials, or a failed call all fall back to that unchanged.
     const reranked = await this.rerank(placeName, usable);
     const best = reranked ?? usable[0];
-    if (!best?.lon || !best?.lat) return { hit: null };
+    const considered = usable
+      .slice(0, MAX_RERANK_CANDIDATES)
+      .map(toCandidate)
+      .filter((c) => Number.isFinite(c.lon) && Number.isFinite(c.lat));
+    if (!best?.lon || !best?.lat) return { hit: null, considered };
 
     const lon = Number(best.lon);
     const lat = Number(best.lat);
-    if (!Number.isFinite(lon) || !Number.isFinite(lat)) return { hit: null };
+    if (!Number.isFinite(lon) || !Number.isFinite(lat)) {
+      return { hit: null, considered };
+    }
 
     const problem = this.confidenceProblem(placeName, best, usable, hints, {
       // A confident Jev pick is a deliberate choice among the results, so a
@@ -250,10 +256,11 @@ export class NominatimGeocoder implements Geocoder {
     if (problem) {
       return {
         hit: null,
+        considered,
         declined: {
           provider: this.providerName,
           reason: problem,
-          candidates: usable.slice(0, MAX_RERANK_CANDIDATES).map(toCandidate),
+          candidates: considered,
         },
       };
     }
@@ -289,6 +296,7 @@ export class NominatimGeocoder implements Geocoder {
         displayName: best.display_name ?? placeName,
         ...(alternates.length ? { alternates } : {}),
       },
+      considered,
     };
   }
 

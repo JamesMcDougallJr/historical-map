@@ -1,3 +1,4 @@
+export * from "./context";
 export * from "./fallback.geocoder";
 export * from "./geocoder.interface";
 export * from "./geocoding.module";

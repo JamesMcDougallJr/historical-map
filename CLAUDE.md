@@ -376,6 +376,28 @@ cache key, so it moves any pin sitting exactly at the cache row's *old* coordina
 snaps nearby places onto one shared pin, so a radius would drag unrelated pins along. A
 cache row that had no coordinates yet moves nothing.
 
+Geocoding runs in **confidence tiers**, and an unconfident place gets no pin — its event goes
+to review with the reason cached (`geocode:review` shows it):
+
+1. **WHG**, only when its matches (or its historical sources — anything but `gn`/`osm`)
+   agree on one place. WHG marks every same-named modern place `score 100, match: true`,
+   so taking the first was a coin flip (Yucatán → Iowa).
+2. **Nominatim**, only when confident: a name matches, importance ≥ 0.2, no equally
+   prominent namesake far away, and it agrees with WHG's historical records when there are
+   any. Knobs: `GEOCODER_MIN_IMPORTANCE`, `GEOCODER_TIE_MARGIN`, `GEOCODER_CORROBORATION_KM`.
+3. **Jev context** (`JEV_GEOCODE_CONTEXT_ENABLED`, off by default): judges the candidates
+   — WHG's `match: false` records included — against the event that names the place, and
+   overrides the tiers when its confidence clears the `geocode.jev_context` row of
+   **`confidence_thresholds`** (read per decision; editable on the admin `/geocodes` page).
+   "Tepeyacac" is why: WHG's single record is a Puebla village; the event means Tepeyac
+   hill in Mexico City.
+
+Every Jev decision is stored on its `geocode_cache` row (`confidence`, `decision`) and is
+reversible: `geocode:review --reject="<place>"` (or the admin page) makes the place a miss
+nothing re-pins and sends its events back to review; `--confirm` locks a pin. The cache is
+resolve-once, so `geocode:refresh` re-runs unreviewed rows through the current tiers (dry run
+by default; `--place=` for one row).
+
 Invariants that are easy to break and fail silently:
 
 - **`nest-cli.json` must keep `deleteOutDir: false`.** The flag is

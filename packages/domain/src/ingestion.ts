@@ -235,3 +235,29 @@ export interface DuplicateItem {
   } | null;
   createdAt: string;
 }
+
+/**
+ * A place whose pin a model chose (or a person has reviewed), with what it
+ * would take back. `auto`: decided without a person — shown so a wrong call
+ * can be rejected. `confirmed`/`rejected`: a person's verdict, which no
+ * refresh overrides.
+ */
+export interface GeocodeReviewItem {
+  id: string;
+  placeName: string;
+  status: "auto" | "confirmed" | "rejected";
+  /** Where the place is pinned now; null once rejected. */
+  pinned: { lon: number; lat: number; displayName: string } | null;
+  provider: string | null;
+  confidence: number | null;
+  /** The minimum the decision was held to, when a model made it. */
+  threshold: number | null;
+  /** The gazetteer tiers' own answer, before the model overrode or confirmed it. */
+  tierAnswer: { lon: number; lat: number; displayName: string } | null;
+  /** The event text the model judged the place against. */
+  context: { title: string; description?: string } | null;
+  /** Published events currently pinned from this place — what a rejection removes. */
+  publishedEvents: number;
+  reviewedAt: string | null;
+  createdAt: string;
+}
