@@ -1,25 +1,33 @@
 /**
- * Re-resolve cached places through the current geocoder chain (WHG first).
+ * Re-resolve cached places through the current geocoder tiers.
  *
  *   npm run geocode:refresh --workspace=services/ingest                  # dry run
  *   npm run geocode:refresh --workspace=services/ingest -- --apply
  *   npm run geocode:refresh --workspace=services/ingest -- --provider=nominatim --apply
  *
- * Exists because the cache is resolve-once: a row written before WHG was added
- * keeps its Nominatim answer forever, and WHG is never asked. Observed in
+ * Exists because the cache is resolve-once: a row keeps whatever the geocoder
+ * said when it was written, however the tiers have improved since. Observed in
  * production: "New Spain" was cached on 2026-09-10 as "Spain Reserve, Castle
  * Hill, Sydney" — six days before the WHG geocoder merged — and every event
  * naming it was pinned in Australia.
  *
  * Only rows from `--provider` (default `nominatim`) are touched, so `manual`
- * corrections made with `geocode:review --set` always survive. A place that
- * had a hit and now gets none keeps its old coordinates: losing a pin is worse
- * than keeping a questionable one, and `geocode:review` is where that is judged.
+ * corrections made with `geocode:review --set` always survive.
  *
- * Published pins move with their row via `relocatePublishedPins`, the same path
- * `geocode:review --set` uses.
+ * What `--apply` does with each answer:
+ *
+ * - **a confident hit elsewhere** → the row is updated and its published pins
+ *   move with it, via `relocatePublishedPins` (the path `geocode:review --set`
+ *   uses).
+ * - **declined** (found, but not confidently) → the row becomes a miss holding
+ *   the reason, and every event published from that place leaves the map and
+ *   goes back to review — a wrong pin is worse than none (plans/09: "record
+ *   it rather than silently picking the first hit").
+ * - **a plain miss for a place that had a hit** → kept as it is; nothing was
+ *   learned that says the old answer is wrong.
  */
 import type { ConfigService } from "@nestjs/config";
+import type { DataSource, EntityManager } from "typeorm";
 import type { RateLimiterService } from "../libs/common/src";
 import { createDataSource } from "../libs/database/src/data-source";
 import { GeocodeCache } from "../libs/database/src/entities";
@@ -27,7 +35,8 @@ import {
   FallbackGeocoder,
   NominatimGeocoder,
   WhgGeocoder,
-  type GeocodeHit,
+  normalizePlaceName,
+  type GeocodeOutcome,
 } from "../libs/geocoding/src";
 import { relocatePublishedPins } from "../libs/geocoding/src/relocate";
 import { JevClient } from "../libs/jev/src";
@@ -65,6 +74,65 @@ function describe(lat: number | null, lon: number | null): string {
     : "NOT FOUND";
 }
 
+/** Published candidates whose event names this cache row's place. */
+async function publishedFrom(
+  db: DataSource | EntityManager,
+  normalizedName: string,
+): Promise<Array<{ id: string; eventKey: string }>> {
+  const rows: Array<{ id: string; event_key: string; place: string | null }> =
+    await db.query(
+      `SELECT id, event_key, event->>'placeName' AS place
+         FROM ingest_event_candidates
+        WHERE published_at IS NOT NULL`,
+    );
+  return rows
+    .filter((r) => r.place && normalizePlaceName(r.place) === normalizedName)
+    .map((r) => ({ id: r.id, eventKey: r.event_key }));
+}
+
+/**
+ * Takes a place's events off the map and back to review, the way `publish`
+ * demotes an event it cannot place. Locations left with no events go too.
+ */
+async function demote(
+  tx: EntityManager,
+  normalizedName: string,
+  reason: string,
+): Promise<number> {
+  const published = await publishedFrom(tx, normalizedName);
+  if (published.length === 0) return 0;
+
+  const removed: Array<{ location_id: string }> = await tx.query(
+    `DELETE FROM events WHERE id = ANY($1) RETURNING location_id`,
+    [published.map((p) => p.eventKey)],
+  );
+  await tx.query(
+    `UPDATE ingest_event_candidates
+        SET verdict = 'review',
+            published_at = NULL,
+            checks = checks || $2::jsonb
+      WHERE id = ANY($1)`,
+    [
+      published.map((p) => p.id),
+      JSON.stringify([
+        {
+          name: "publish",
+          passed: false,
+          gating: true,
+          detail: `geocode not confident: ${reason}`,
+        },
+      ]),
+    ],
+  );
+  await tx.query(
+    `DELETE FROM locations l
+      WHERE l.id = ANY($1)
+        AND NOT EXISTS (SELECT 1 FROM events e WHERE e.location_id = l.id)`,
+    [[...new Set(removed.map((r) => r.location_id))]],
+  );
+  return removed.length;
+}
+
 async function main(): Promise<void> {
   const apply = process.argv.includes("--apply");
   const provider = arg("provider") ?? "nominatim";
@@ -91,31 +159,72 @@ async function main(): Promise<void> {
         "\n",
     );
 
-    const tally = { moved: 0, unchanged: 0, newlyFound: 0, kept: 0, failed: 0 };
+    const tally = {
+      moved: 0,
+      newlyFound: 0,
+      unchanged: 0,
+      demoted: 0,
+      kept: 0,
+      failed: 0,
+    };
 
     for (const row of rows) {
-      let hit: GeocodeHit | null;
+      let outcome: GeocodeOutcome;
       try {
-        hit = await geocoder.geocode(row.rawName);
+        outcome = await geocoder.lookup(row.rawName);
       } catch (error) {
         tally.failed++;
         console.log(`  ${row.rawName}\n    ERROR ${String(error)}\n`);
         continue;
       }
+      const { hit, declined } = outcome;
 
-      const before = describe(row.lat, row.lon);
       console.log(`  ${row.rawName}`);
-      console.log(`    was ${before}  [${row.provider}] ${row.displayName ?? ""}`);
+      console.log(
+        `    was ${describe(row.lat, row.lon)}  [${row.provider}] ${row.displayName ?? ""}`,
+      );
 
       if (!hit) {
-        if (row.found) {
+        const pins = row.found
+          ? (await publishedFrom(dataSource, row.normalizedName)).length
+          : 0;
+        if (declined) {
+          console.log(`    now NOT CONFIDENT — ${declined.reason}`);
+        } else {
+          console.log("    now NOT FOUND");
+        }
+
+        if (row.found && !declined) {
           tally.kept++;
-          console.log("    now NOT FOUND — keeping the old coordinates\n");
+          console.log("    keeping the old coordinates: nothing says they are wrong\n");
+          continue;
+        }
+        if (row.found) {
+          tally.demoted++;
+          console.log(`    ${pins} published event(s) go back to review`);
         } else {
           tally.unchanged++;
-          console.log("    still NOT FOUND\n");
-          if (apply) await repo.update(row.id, { provider: geocoder.providerName });
         }
+
+        if (apply) {
+          const demoted = await dataSource.transaction(async (tx) => {
+            await tx.getRepository(GeocodeCache).update(row.id, {
+              lon: null,
+              lat: null,
+              found: false,
+              provider: geocoder.providerName,
+              displayName: declined?.reason ?? null,
+              candidates: declined?.candidates.length
+                ? declined.candidates
+                : null,
+            });
+            return row.found && declined
+              ? demote(tx, row.normalizedName, declined.reason)
+              : 0;
+          });
+          if (demoted) console.log(`    demoted ${demoted} event(s)`);
+        }
+        console.log();
         continue;
       }
 
@@ -138,21 +247,20 @@ async function main(): Promise<void> {
         continue;
       }
 
-      const resolved = hit;
       await dataSource.transaction(async (tx) => {
         await tx.getRepository(GeocodeCache).update(row.id, {
-          lon: resolved.lon,
-          lat: resolved.lat,
+          lon: hit.lon,
+          lat: hit.lat,
           found: true,
-          provider: resolved.provider ?? geocoder.providerName,
-          displayName: resolved.displayName,
-          candidates: resolved.alternates ?? null,
+          provider: hit.provider ?? geocoder.providerName,
+          displayName: hit.displayName,
+          candidates: hit.alternates ?? null,
         });
         if (row.found && row.lat != null && row.lon != null && !sameSpot) {
           const pins = await relocatePublishedPins(
             tx,
             { lat: row.lat, lon: row.lon },
-            { lat: resolved.lat, lon: resolved.lon },
+            { lat: hit.lat, lon: hit.lon },
           );
           for (const pin of pins) console.log(`    moved pin "${pin.name}" (${pin.id})`);
         }
@@ -162,7 +270,8 @@ async function main(): Promise<void> {
 
     console.log(
       `moved=${tally.moved} newly-found=${tally.newlyFound} ` +
-        `unchanged=${tally.unchanged} kept-old=${tally.kept} errors=${tally.failed}`,
+        `demoted=${tally.demoted} unchanged=${tally.unchanged} ` +
+        `kept-old=${tally.kept} errors=${tally.failed}`,
     );
     if (tally.newlyFound > 0) {
       console.log(

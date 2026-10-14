@@ -12,7 +12,11 @@
 import { ConfigService } from "@nestjs/config";
 import type { RateLimiterService } from "../libs/common/src";
 import type { JevClient } from "../libs/jev/src";
-import type { GeocodeHit, Geocoder } from "../libs/geocoding/src";
+import type {
+  GeocodeHints,
+  GeocodeHit,
+  Geocoder,
+} from "../libs/geocoding/src";
 import {
   FallbackGeocoder,
   NominatimGeocoder,
@@ -672,6 +676,7 @@ async function main(): Promise<void> {
           {
             lon: "-111.8910",
             lat: "40.7608",
+            name: "Salt Lake Valley",
             display_name: "Salt Lake Valley, Utah, USA",
             category: "natural",
             importance: 0.55,
@@ -679,6 +684,7 @@ async function main(): Promise<void> {
           {
             lon: "-111.9",
             lat: "40.75",
+            name: "Levoy Drive",
             display_name: "Levoy Drive",
             category: "highway",
             importance: 0.9, // higher, but rejected category — must not win
@@ -686,6 +692,7 @@ async function main(): Promise<void> {
           {
             lon: "-112.05",
             lat: "40.7",
+            name: "Salt Lake Valley",
             display_name: "Salt Lake Valley (alt)",
             category: "natural",
             importance: 0.55, // tied with the chosen result
@@ -726,6 +733,7 @@ async function main(): Promise<void> {
           {
             lon: "-111.8910",
             lat: "40.7608",
+            name: "Salt Lake Valley",
             display_name: "Salt Lake Valley, Utah, USA",
             category: "natural",
             // No `importance` field at all — some Nominatim responses omit it.
@@ -751,6 +759,154 @@ async function main(): Promise<void> {
     mock.restore();
   }
 
+  // ── NominatimGeocoder confidence gate ───────────────────────────────────
+  // Each case is a real response (captured 2026-10-14) from the first
+  // production corpus, trimmed to the fields the gate reads.
+  const gateCases: Array<{
+    name: string;
+    place: string;
+    body: unknown[];
+    hints?: GeocodeHints;
+    /** Expected hit longitude, or the start of the decline reason. */
+    expect: { lon: number } | { declined: string };
+  }> = [
+    {
+      name: "a result not called that at all is declined (New Spain → Spain Reserve)",
+      place: "New Spain",
+      body: [
+        { lon: "151.0088", lat: "-33.7204", name: "Spain Reserve", display_name: "Spain Reserve, Castle Hill, Sydney", category: "leisure", importance: 0.08 },
+      ],
+      expect: { declined: "name mismatch" },
+    },
+    {
+      name: "a hamlet that merely shares the name is declined (low importance)",
+      place: "Santiago Tlatelolco",
+      body: [
+        { lon: "-103.2505", lat: "22.1399", name: "Santiago Tlatelolco", display_name: "Santiago Tlatelolco, Colotlán, Jalisco", category: "place", importance: 0.133 },
+      ],
+      expect: { declined: "low importance" },
+    },
+    {
+      name: "equally prominent same-named places far apart are declined (tie)",
+      place: "Vera Cruz",
+      body: [
+        { lon: "-52.5007", lat: "-29.7157", name: "Vera Cruz", display_name: "Vera Cruz, Rio Grande do Sul", category: "boundary", importance: 0.526 },
+        { lon: "-50.0", lat: "-22.2", name: "Vera Cruz", display_name: "Vera Cruz, São Paulo", category: "boundary", importance: 0.524 },
+        { lon: "-38.6", lat: "-12.9", name: "Vera Cruz", display_name: "Vera Cruz, Bahia", category: "boundary", importance: 0.522 },
+      ],
+      expect: { declined: "tie" },
+    },
+    {
+      name: "a modern namesake far from every historical record is declined",
+      place: "Tenochtitlan",
+      body: [
+        { lon: "-96.9420", lat: "19.8251", name: "Tenochtitlán", display_name: "Tenochtitlán, Veracruz, México", category: "boundary", importance: 0.373, boundingbox: ["19.75", "19.90", "-97.00", "-96.88"] },
+      ],
+      hints: { historical: [{ lon: -99.1314, lat: 19.435, displayName: "Tenochtitlan (TGN)" }] },
+      expect: { declined: "contradicts historical gazetteers" },
+    },
+    {
+      name: "a country is held to its extent, not its centroid (Peru, 360 km off-centre)",
+      place: "Peru",
+      body: [
+        { lon: "-75.0459", lat: "-6.8700", name: "Perú", display_name: "Perú", category: "boundary", importance: 0.83, boundingbox: ["-18.35", "-0.04", "-81.33", "-68.65"], namedetails: { name: "Perú", "name:en": "Peru" } },
+      ],
+      hints: { historical: [{ lon: -76.0, lat: -10.0, displayName: "Peru (TGN)" }] },
+      expect: { lon: -75.0459 },
+    },
+    {
+      name: "a region within reach of its historical record is accepted",
+      place: "New Mexico",
+      body: [
+        { lon: "-105.9960", lat: "34.5802", name: "New Mexico", display_name: "New Mexico, United States", category: "boundary", importance: 0.75 },
+      ],
+      hints: { historical: [{ lon: -106.045316, lat: 34.167167, displayName: "New Mexico (OHM)" }] },
+      expect: { lon: -105.996 },
+    },
+    {
+      name: "another language's name matches via namedetails (Mexico City → Ciudad de México)",
+      place: "Mexico City",
+      body: [
+        { lon: "-99.1332", lat: "19.4326", name: "Ciudad de México", display_name: "Ciudad de México, México", category: "boundary", importance: 0.782, namedetails: { name: "Ciudad de México", "name:en": "Mexico City" } },
+      ],
+      expect: { lon: -99.1332 },
+    },
+    {
+      name: "accents don't break the name match, and a 0.03 gap is not a tie (Yucatán)",
+      place: "Yucatan",
+      body: [
+        { lon: "-88.8756", lat: "20.6846", name: "Yucatán", display_name: "Yucatán, México", category: "boundary", importance: 0.624 },
+        { lon: "-89.0", lat: "19.5", name: "Península de Yucatán", display_name: "Península de Yucatán, México", category: "natural", importance: 0.594 },
+      ],
+      expect: { lon: -88.8756 },
+    },
+  ];
+  for (const c of gateCases) {
+    const mock = installFetchMock([{ status: 200, body: c.body }]);
+    const geocoder = new NominatimGeocoder(
+      fakeConfig({ GEOCODER_MIN_INTERVAL_MS: 0 }),
+      fakeRateLimiter(),
+      fakeJevClient(),
+    );
+    const outcome = await geocoder.lookup(c.place, c.hints);
+    check(
+      c.name,
+      "lon" in c.expect
+        ? outcome.hit?.lon === c.expect.lon
+        : outcome.hit === null &&
+            (outcome.declined?.reason.startsWith(c.expect.declined) ?? false),
+      outcome.hit
+        ? JSON.stringify(outcome.hit)
+        : (outcome.declined?.reason ?? "plain miss"),
+    );
+    mock.restore();
+  }
+
+  {
+    // End to end through the tiers: WHG is ambiguous but knows where the
+    // historical place is; Nominatim's confident-looking modern namesake
+    // contradicts it; nothing is pinned and both reasons are kept.
+    const mock = installFetchMock([
+      {
+        status: 200,
+        body: {
+          q0: {
+            result: [
+              { id: "place:tgn:7005077", name: "Tenochtitlan", score: 100, match: true, namespace: "tgn", description: "Country: MX", repr_point: [-99.1314, 19.435] },
+              { id: "place:clio:1", name: "Tenochtitlan", score: 100, match: true, namespace: "clio", description: "Country: MX", repr_point: [-98.628, 19.186228] },
+            ],
+          },
+        },
+      },
+      {
+        status: 200,
+        body: [
+          { lon: "-96.9420", lat: "19.8251", name: "Tenochtitlán", display_name: "Tenochtitlán, Veracruz, México", category: "boundary", importance: 0.373 },
+        ],
+      },
+    ]);
+    const config = fakeConfig({
+      WHG_API_TOKEN: "test-token",
+      WHG_MIN_INTERVAL_MS: 0,
+      GEOCODER_MIN_INTERVAL_MS: 0,
+    });
+    const tiers = new FallbackGeocoder([
+      new WhgGeocoder(config, fakeRateLimiter()),
+      new NominatimGeocoder(config, fakeRateLimiter(), fakeJevClient()),
+    ]);
+    const outcome = await tiers.lookup("Tenochtitlan");
+    check(
+      "WHG's historical hints reach Nominatim, which then declines its namesake",
+      outcome.hit === null &&
+        /whg: ambiguous/.test(outcome.declined?.reason ?? "") &&
+        /nominatim: contradicts historical gazetteers/.test(
+          outcome.declined?.reason ?? "",
+        ),
+      outcome.declined?.reason,
+    );
+    mock.restore();
+  }
+
   // ── JEV_GEOCODE_RERANK_ENABLED ──────────────────────────────────────────
   // Three usable candidates, none tied on importance — without reranking,
   // `usable[0]` ("Old Fort Hamlet") always wins. These prove the flag
@@ -761,6 +917,7 @@ async function main(): Promise<void> {
     {
       lon: "-111.1",
       lat: "40.1",
+      name: "Old Fort Hamlet",
       display_name: "Old Fort Hamlet",
       category: "natural",
       importance: 0.5,
@@ -768,6 +925,7 @@ async function main(): Promise<void> {
     {
       lon: "-111.2",
       lat: "40.2",
+      name: "Fort Hamlet",
       display_name: "Fort Hamlet (historic site)",
       category: "historic",
       importance: 0.4,
@@ -775,6 +933,7 @@ async function main(): Promise<void> {
     {
       lon: "-111.3",
       lat: "40.3",
+      name: "New Fort Hamlet Estates",
       display_name: "New Fort Hamlet Estates",
       category: "natural",
       importance: 0.3,

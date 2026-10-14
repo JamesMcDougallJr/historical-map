@@ -1,9 +1,11 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import type {
-  GeocodeCandidate,
-  GeocodeHit,
-  Geocoder,
+import {
+  distanceKm,
+  type GeocodeCandidate,
+  type GeocodeHit,
+  type GeocodeOutcome,
+  type Geocoder,
 } from "./geocoder.interface";
 import { RateLimiterService } from "@app/common/ratelimit/rate-limiter.service";
 
@@ -71,16 +73,27 @@ function hasPoint(c: WhgCandidate): c is LocatedCandidate {
   );
 }
 
+function toCandidate(c: LocatedCandidate): GeocodeCandidate {
+  return {
+    lon: c.repr_point[0],
+    lat: c.repr_point[1],
+    displayName: c.description ? `${c.name} (${c.description})` : c.name,
+  };
+}
+
 function samePlace(a: LocatedCandidate, b: LocatedCandidate): boolean {
-  const [lon1, lat1] = a.repr_point;
-  const [lon2, lat2] = b.repr_point;
-  const rad = Math.PI / 180;
-  const dLat = (lat2 - lat1) * rad;
-  const dLon = (lon2 - lon1) * rad;
-  const h =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(lat1 * rad) * Math.cos(lat2 * rad) * Math.sin(dLon / 2) ** 2;
-  return 2 * 6371 * Math.asin(Math.sqrt(h)) <= SAME_PLACE_KM;
+  return distanceKm(toCandidate(a), toCandidate(b)) <= SAME_PLACE_KM;
+}
+
+/** One candidate per distinct place — gazetteers repeat each other's records. */
+function distinctPlaces(pool: LocatedCandidate[]): LocatedCandidate[] {
+  const kept: LocatedCandidate[] = [];
+  for (const c of pool) if (!kept.some((k) => samePlace(k, c))) kept.push(c);
+  return kept;
+}
+
+function isHistorical(c: WhgCandidate): boolean {
+  return !MODERN_NAMESPACES.has(c.namespace ?? "");
 }
 
 /**
@@ -110,12 +123,7 @@ function agreed(pool: LocatedCandidate[]): LocatedCandidate | null {
  * by importance, was right in all of them.
  */
 function pickUnambiguous(accepted: LocatedCandidate[]): LocatedCandidate | null {
-  return (
-    agreed(accepted) ??
-    agreed(
-      accepted.filter((c) => !MODERN_NAMESPACES.has(c.namespace ?? "")),
-    )
-  );
+  return agreed(accepted) ?? agreed(accepted.filter(isHistorical));
 }
 
 /**
@@ -168,6 +176,15 @@ export class WhgGeocoder implements Geocoder {
   }
 
   async geocode(placeName: string): Promise<GeocodeHit | null> {
+    return (await this.lookup(placeName)).hit;
+  }
+
+  /**
+   * Tier 1. Besides a hit, always reports where WHG's *historical* sources put
+   * the name, so Nominatim can be held to it when WHG itself declines — see
+   * `GeocodeHints.historical`.
+   */
+  async lookup(placeName: string): Promise<GeocodeOutcome> {
     if (!this.token) {
       // Config error, not "no match" — fail loudly rather than silently
       // never trying WHG (which would look identical to a corpus with no
@@ -189,8 +206,28 @@ export class WhgGeocoder implements Geocoder {
       .filter((c) => c.match && c.score >= this.minScore)
       .sort((a, b) => b.score - a.score);
 
+    const historical = distinctPlaces(accepted.filter(isHistorical)).map(
+      toCandidate,
+    );
+    const hints = historical.length ? { historical } : undefined;
+
     const best = pickUnambiguous(accepted);
-    if (!best) return null;
+    if (!best) {
+      const places = distinctPlaces(accepted);
+      return {
+        hit: null,
+        ...(hints ? { hints } : {}),
+        ...(places.length
+          ? {
+              declined: {
+                provider: this.providerName,
+                reason: `ambiguous: ${places.length} matched places disagree`,
+                candidates: places.map(toCandidate),
+              },
+            }
+          : {}),
+      };
+    }
     const [lon, lat] = best.repr_point;
 
     // Tied top-score matches that are a *different place* from the pick are
@@ -201,24 +238,20 @@ export class WhgGeocoder implements Geocoder {
     const alternates: GeocodeCandidate[] = [];
     for (const c of accepted) {
       if (c.score !== best.score || samePlace(c, best)) continue;
-      const [altLon, altLat] = c.repr_point;
-      const key = `${altLon},${altLat}`;
+      const key = `${c.repr_point[0]},${c.repr_point[1]}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      alternates.push({
-        lon: altLon,
-        lat: altLat,
-        displayName: c.description ? `${c.name} (${c.description})` : c.name,
-      });
+      alternates.push(toCandidate(c));
     }
 
     return {
-      lon,
-      lat,
-      displayName: best.description
-        ? `${best.name} (${best.description})`
-        : best.name,
-      ...(alternates.length ? { alternates } : {}),
+      hit: {
+        lon,
+        lat,
+        displayName: toCandidate(best).displayName,
+        ...(alternates.length ? { alternates } : {}),
+      },
+      ...(hints ? { hints } : {}),
     };
   }
 

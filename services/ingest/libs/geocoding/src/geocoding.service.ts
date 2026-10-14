@@ -46,7 +46,9 @@ export class GeocodingService {
 
     // A throw here propagates: the provider failed, so the job should retry
     // rather than poison the cache with a miss that was never a miss.
-    const hit = await this.geocoder.geocode(placeName);
+    const { hit, declined } = this.geocoder.lookup
+      ? await this.geocoder.lookup(placeName)
+      : { hit: await this.geocoder.geocode(placeName), declined: undefined };
 
     await this.cacheRepo
       .createQueryBuilder()
@@ -59,15 +61,27 @@ export class GeocodingService {
         lat: hit?.lat ?? null,
         found: hit !== null,
         provider: hit?.provider ?? this.geocoder.providerName,
-        displayName: hit?.displayName ?? null,
-        candidates: hit?.alternates?.length ? hit.alternates : null,
+        // On a decline, why — and what was considered — is the whole review
+        // item: `geocode:review` shows it, and `--set` is the human's answer.
+        displayName: hit?.displayName ?? declined?.reason ?? null,
+        candidates: hit
+          ? hit.alternates?.length
+            ? hit.alternates
+            : null
+          : declined?.candidates.length
+            ? declined.candidates
+            : null,
       })
       // A concurrent worker may have just cached the same place.
       .orIgnore()
       .execute();
 
     if (!hit) {
-      this.logger.debug(`no match for "${placeName}"`);
+      this.logger.debug(
+        declined
+          ? `not confident about "${placeName}": ${declined.reason}`
+          : `no match for "${placeName}"`,
+      );
     }
     return hit;
   }

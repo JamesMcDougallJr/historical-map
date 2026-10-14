@@ -28,6 +28,38 @@ export interface GeocodeHit {
 }
 
 /**
+ * What one tier learned that a later tier should use, even when it declined
+ * to answer.
+ */
+export interface GeocodeHints {
+  /**
+   * Where historical gazetteers put this name. When present, a modern match
+   * must lie near one of them — a modern place far from every historical
+   * record of the name is its modern namesake ("Tenochtitlan" → a town in
+   * Veracruz), the failure a historical gazetteer exists to catch.
+   */
+  historical?: GeocodeCandidate[];
+}
+
+/** A tier found candidates but did not trust any of them enough to pin. */
+export interface GeocodeDecline {
+  provider: string;
+  reason: string;
+  candidates: GeocodeCandidate[];
+}
+
+/**
+ * The full answer from one tier. `hit: null` with a `declined` means "found
+ * something, not confident" — distinct from a plain miss — and it is what
+ * sends an event to review instead of onto the wrong spot on the map.
+ */
+export interface GeocodeOutcome {
+  hit: GeocodeHit | null;
+  hints?: GeocodeHints;
+  declined?: GeocodeDecline;
+}
+
+/**
  * Resolves a place name to coordinates.
  *
  * Returning `null` means "asked and found nothing" — a normal outcome that
@@ -37,10 +69,30 @@ export interface GeocodeHit {
  */
 export interface Geocoder {
   readonly providerName: string;
-  geocode(placeName: string): Promise<GeocodeHit | null>;
+  geocode(placeName: string, hints?: GeocodeHints): Promise<GeocodeHit | null>;
+  /**
+   * The same lookup, keeping what `geocode` throws away: hints for later
+   * tiers and the reason for a decline. Optional — `FallbackGeocoder` uses it
+   * when present and `geocode` otherwise.
+   */
+  lookup?(placeName: string, hints?: GeocodeHints): Promise<GeocodeOutcome>;
 }
 
 export const GEOCODER = "GEOCODER";
+
+/** Great-circle distance in km between two points. */
+export function distanceKm(
+  a: { lon: number; lat: number },
+  b: { lon: number; lat: number },
+): number {
+  const rad = Math.PI / 180;
+  const dLat = (b.lat - a.lat) * rad;
+  const dLon = (b.lon - a.lon) * rad;
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(dLon / 2) ** 2;
+  return 2 * 6371 * Math.asin(Math.sqrt(h));
+}
 
 /**
  * Cache key for a place name. Aggressive on purpose: the same place is written
