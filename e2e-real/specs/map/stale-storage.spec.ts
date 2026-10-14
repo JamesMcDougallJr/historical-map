@@ -1,12 +1,12 @@
 import { test, expect } from "@playwright/test";
-import { PIN_LAT, PIN_LON } from "../../../e2e/fixtures";
+import { PIN_LAT, PIN_LON, PIN_SPACING_DEG } from "../../../e2e/fixtures";
 import { deleteLocation, upsertLocation } from "../../../lib/postgres-storage";
 import { waitForRealMapReady } from "../../fixtures/map-ready";
 
 test.use({ viewport: { width: 1280, height: 800 } });
 
 const ID = "fx-stale-loc";
-const COORDS: [number, number] = [PIN_LON + 0.3, PIN_LAT];
+const COORDS: [number, number] = [PIN_LON + PIN_SPACING_DEG, PIN_LAT];
 
 test.describe("stale browser storage (real backend)", () => {
   test.afterEach(async () => {

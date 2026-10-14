@@ -578,9 +578,11 @@ export function MapView({
         ...pinLayers,
       ],
       overlays: [overlay],
+      // Whole world: sources now span several continents, so the old
+      // Salt Lake City default hid most of the map.
       view: new View({
-        center: fromLonLat([-111.8881, 40.7606]),
-        zoom: 8,
+        center: fromLonLat([0, 20]),
+        zoom: 2,
       }),
       // Drop OL's zoom/rotate buttons. The attribution stays: OSM's ODbL
       // requires it, and ol/source/OSM sets attributionsCollapsible:false so

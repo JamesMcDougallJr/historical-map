@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { PIN_LAT, PIN_LON } from "../../../e2e/fixtures";
+import { PIN_LAT, PIN_LON, PIN_SPACING_DEG } from "../../../e2e/fixtures";
 import { deleteLocation, upsertLocation } from "../../../lib/postgres-storage";
 import { waitForRealMapReady } from "../../fixtures/map-ready";
 
@@ -9,8 +9,8 @@ import { waitForRealMapReady } from "../../fixtures/map-ready";
 test.use({ viewport: { width: 1280, height: 800 } });
 
 const FRESH_ID = "fx-freshness-loc";
-// Far enough east of the default view centre to be a separate pin at zoom 8.
-const FRESH_COORDS: [number, number] = [PIN_LON + 0.3, PIN_LAT];
+// Far enough east of the default view centre to be a separate pin at the default zoom.
+const FRESH_COORDS: [number, number] = [PIN_LON + PIN_SPACING_DEG, PIN_LAT];
 
 /** Is any pin drawn within a few pixels of this map coordinate? */
 async function pinNear(page: Page, [lon, lat]: [number, number]): Promise<boolean> {

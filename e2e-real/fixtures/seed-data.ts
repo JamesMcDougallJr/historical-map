@@ -4,7 +4,7 @@
 // for assertions. Every id here is a fixed literal that specs assert against
 // directly.
 import type { EventGroup, EventSource, HistoricalLocation } from "../../app/map/types";
-import { PIN_LON, PIN_LAT } from "../../e2e/fixtures";
+import { PIN_LON, PIN_LAT, PIN_SPACING_DEG } from "../../e2e/fixtures";
 
 export const FX_SOURCES: EventSource[] = [
   {
@@ -52,7 +52,7 @@ export const FX_LOCATIONS: HistoricalLocation[] = [
   {
     id: "fx-loc-2",
     name: "Fixture Location Two",
-    coordinates: [PIN_LON + 2, PIN_LAT + 1],
+    coordinates: [PIN_LON + 2 * PIN_SPACING_DEG, PIN_LAT + PIN_SPACING_DEG],
     events: [
       {
         id: "fx-event-3",
@@ -74,7 +74,7 @@ export const FX_LOCATIONS: HistoricalLocation[] = [
   {
     id: "fx-loc-3",
     name: "Fixture Location Three",
-    coordinates: [PIN_LON - 2, PIN_LAT - 1],
+    coordinates: [PIN_LON - 2 * PIN_SPACING_DEG, PIN_LAT - PIN_SPACING_DEG],
     events: [
       {
         id: "fx-event-5",
