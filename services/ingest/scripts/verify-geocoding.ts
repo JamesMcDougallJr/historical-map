@@ -15,12 +15,14 @@ import type { JevClient } from "../libs/jev/src";
 import type {
   GeocodeHints,
   GeocodeHit,
+  GeocodeOutcome,
   Geocoder,
 } from "../libs/geocoding/src";
 import {
   FallbackGeocoder,
   NominatimGeocoder,
   WhgGeocoder,
+  decideWithContext,
 } from "../libs/geocoding/src";
 
 const checks: Array<[string, boolean, string?]> = [];
@@ -1091,6 +1093,146 @@ async function main(): Promise<void> {
     const hit = await safeGeocode(geocoder, "Fort Hamlet", `${c.name} (resolves)`);
     check(c.name, hit?.displayName === c.expect, hit?.displayName);
     mock.restore();
+  }
+
+  // ── Jev context tier (decideWithContext) ────────────────────────────────
+  // "Tepeyacac" as the tiers saw it on 2026-10-14: WHG's single match is a
+  // village in Puebla; the hill of Tepeyac in Mexico City is in the pool only
+  // as an unmatched record. The event is the Virgin of Guadalupe apparition.
+  const PUEBLA = { lon: -96.99966, lat: 18.31575, displayName: "Tepeyacac (Country: MX)" };
+  const TEPEYAC_HILL = { lon: -99.115782, lat: 19.486832, displayName: "Tepeyac Hill (Country: MX)" };
+  const tepeyacac: GeocodeOutcome = {
+    hit: { ...PUEBLA, provider: "whg" },
+    considered: [PUEBLA, TEPEYAC_HILL],
+  };
+  const apparition = {
+    title: "Apparition of the Virgin of Guadalupe",
+    description: "Juan Diego reports the Virgin appearing on the hill of Tepeyacac, north of the city.",
+  };
+  /** A Jev that answers the `place` question with `choice` at `confidence`; null = failed call. */
+  const contextJev = (choice: string | null, confidence = 0.9): JevClient =>
+    ({
+      enabled: true,
+      tryAsk: async () =>
+        choice === null ? null : { place: { type: "choice", choice, confidence } },
+    }) as unknown as JevClient;
+
+  {
+    const decided = await decideWithContext(contextJev("place_1", 0.9), {
+      placeName: "Tepeyacac",
+      outcome: tepeyacac,
+      context: apparition,
+      threshold: 0.8,
+    });
+    check(
+      "a confident pick of a different place replaces the tiers' answer (Tepeyacac → Tepeyac Hill)",
+      decided?.hit?.lon === TEPEYAC_HILL.lon &&
+        decided.hit.provider === "jev" &&
+        decided.confidence === 0.9 &&
+        decided.decision.applied === true,
+      JSON.stringify(decided?.hit),
+    );
+    check(
+      "the decision records the tiers' answer, the pick, the threshold and the event",
+      decided?.decision.tierHit?.lon === PUEBLA.lon &&
+        decided.decision.picked?.lon === TEPEYAC_HILL.lon &&
+        decided.decision.threshold === 0.8 &&
+        decided.decision.context.title === apparition.title &&
+        decided.decision.candidates.length === 2,
+      JSON.stringify(decided?.decision),
+    );
+  }
+
+  {
+    const decided = await decideWithContext(contextJev("place_1", 0.6), {
+      placeName: "Tepeyacac",
+      outcome: tepeyacac,
+      context: apparition,
+      threshold: 0.8,
+    });
+    check(
+      "a pick below the threshold keeps the tiers' answer, but is still recorded",
+      decided?.hit?.lon === PUEBLA.lon &&
+        decided.confidence === null &&
+        decided.decision.applied === false &&
+        decided.decision.picked?.lon === TEPEYAC_HILL.lon,
+      JSON.stringify(decided?.decision),
+    );
+  }
+
+  {
+    const decided = await decideWithContext(contextJev("place_1", 0.6), {
+      placeName: "Tepeyacac",
+      outcome: tepeyacac,
+      context: apparition,
+      threshold: 0.5,
+    });
+    check(
+      "the threshold is the caller's (confidence_thresholds), not a constant",
+      decided?.hit?.lon === TEPEYAC_HILL.lon && decided.decision.threshold === 0.5,
+      JSON.stringify(decided?.decision),
+    );
+  }
+
+  {
+    const decided = await decideWithContext(contextJev("place_0", 0.95), {
+      placeName: "Tepeyacac",
+      outcome: tepeyacac,
+      context: apparition,
+      threshold: 0.8,
+    });
+    check(
+      "agreeing with the tiers keeps their pin and records Jev's confidence in it",
+      decided?.hit?.lon === PUEBLA.lon &&
+        decided.hit.provider === "whg" &&
+        decided.confidence === 0.95 &&
+        decided.decision.applied === false,
+      JSON.stringify(decided?.decision),
+    );
+  }
+
+  {
+    const declined: GeocodeOutcome = {
+      hit: null,
+      declined: { provider: "fallback", reason: "whg: ambiguous", candidates: [PUEBLA, TEPEYAC_HILL] },
+    };
+    const decided = await decideWithContext(contextJev("place_1", 0.85), {
+      placeName: "Tepeyacac",
+      outcome: declined,
+      context: apparition,
+      threshold: 0.8,
+    });
+    check(
+      "a confident pick places an event the tiers declined",
+      decided?.hit?.lon === TEPEYAC_HILL.lon && decided.decision.tierHit === null,
+      JSON.stringify(decided?.hit),
+    );
+  }
+
+  {
+    const decided = await decideWithContext(contextJev("none", 0.99), {
+      placeName: "Tepeyacac",
+      outcome: tepeyacac,
+      context: apparition,
+      threshold: 0.8,
+    });
+    check(
+      '"none of these" never invents a pin — the tiers\' answer stands',
+      decided?.hit?.lon === PUEBLA.lon &&
+        decided.decision.picked === null &&
+        decided.confidence === null,
+      JSON.stringify(decided?.decision),
+    );
+  }
+
+  {
+    const decided = await decideWithContext(contextJev(null), {
+      placeName: "Tepeyacac",
+      outcome: tepeyacac,
+      context: apparition,
+      threshold: 0.8,
+    });
+    check("a failed Jev call returns null, leaving the tiers' outcome untouched", decided === null);
   }
 
   // ── Optional live call ────────────────────────────────────────────────────

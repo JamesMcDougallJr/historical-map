@@ -3,6 +3,14 @@
  *
  *   npm run geocode:review --workspace=services/ingest
  *   npm run geocode:review --workspace=services/ingest -- --set="sutters mill" --lat=38.8007 --lon=-120.8919
+ *   npm run geocode:review --workspace=services/ingest -- --reject="tepeyacac"
+ *   npm run geocode:review --workspace=services/ingest -- --confirm="tepeyacac"
+ *
+ * `--reject` is for a pin that is wrong and has no better answer to hand —
+ * typically a Jev context decision (see `decideWithContext`): the place
+ * becomes a miss nothing re-pins, and its events go back to review.
+ * `--confirm` marks a pin right, so `geocode:refresh` leaves it alone. Both
+ * share their logic with the admin panel (`@app/database`'s `reviewGeocode`).
  *
  * This exists because **Nominatim is a modern gazetteer and gets historical
  * places wrong in ways that look plausible.** Observed on the first real run:
@@ -18,6 +26,7 @@
  */
 import { createDataSource } from "../libs/database/src/data-source";
 import { GeocodeCache } from "../libs/database/src/entities";
+import { reviewGeocode } from "../libs/database/src/geocodes";
 import { normalizePlaceName } from "../libs/geocoding/src/geocoder.interface";
 import { relocatePublishedPins } from "../libs/geocoding/src/relocate";
 
@@ -32,6 +41,33 @@ async function main(): Promise<void> {
   try {
     const repo = dataSource.getRepository(GeocodeCache);
     const target = arg("set");
+
+    for (const action of ["reject", "confirm"] as const) {
+      const place = arg(action);
+      if (!place) continue;
+      const row = await repo.findOne({
+        where: { normalizedName: normalizePlaceName(place) },
+      });
+      if (!row) {
+        console.error(`no cached geocode for "${place}"`);
+        process.exitCode = 1;
+        return;
+      }
+      const result = await dataSource.transaction((tx) =>
+        reviewGeocode(tx, row.id, action, normalizePlaceName),
+      );
+      if (!result.ok) {
+        console.error(result.reason);
+        process.exitCode = 1;
+        return;
+      }
+      console.log(
+        action === "reject"
+          ? `rejected "${result.placeName}": ${result.demoted} event(s) back to review`
+          : `confirmed "${result.placeName}"`,
+      );
+      return;
+    }
 
     if (target) {
       const lat = Number(arg("lat"));
@@ -61,6 +97,9 @@ async function main(): Promise<void> {
           found: true,
           provider: "manual",
           displayName: `${target} (manually corrected)`,
+          confidence: null,
+          reviewStatus: "confirmed",
+          reviewedAt: new Date(),
         });
         console.log(`updated "${normalized}" -> ${lat}, ${lon}`);
       } else {
@@ -73,6 +112,8 @@ async function main(): Promise<void> {
             found: true,
             provider: "manual",
             displayName: `${target} (manually set)`,
+            reviewStatus: "confirmed",
+            reviewedAt: new Date(),
           }),
         );
         console.log(`created "${normalized}" -> ${lat}, ${lon}`);
@@ -115,13 +156,28 @@ async function main(): Promise<void> {
         row.found && row.lat != null && row.lon != null
           ? `${row.lat.toFixed(4)}, ${row.lon.toFixed(4)}`
           : "NOT FOUND";
+      const confidence =
+        row.confidence != null ? ` confidence=${row.confidence.toFixed(2)}` : "";
+      const status = row.reviewStatus !== "auto" ? ` ${row.reviewStatus.toUpperCase()}` : "";
       console.log(`  ${row.rawName}`);
-      console.log(`    -> ${coords}  [${row.provider ?? "?"}]`);
+      console.log(`    -> ${coords}  [${row.provider ?? "?"}]${confidence}${status}`);
       if (row.displayName) console.log(`    matched: ${row.displayName}`);
+      const d = row.decision;
+      if (d) {
+        const tier = d.tierHit ? d.tierHit.displayName : "no confident answer";
+        const pick = d.picked ? d.picked.displayName : "none of these";
+        console.log(
+          `    ${d.method}: tiers said ${tier}; Jev picked ${pick} ` +
+            `at ${d.confidence.toFixed(2)} (threshold ${d.threshold}) — ` +
+            (d.applied ? "applied" : "not applied"),
+        );
+      }
     }
     console.log(
       `\nTo correct one:\n  npm run geocode:review --workspace=services/ingest -- \\\n` +
-        `    --set="<place>" --lat=<lat> --lon=<lon>`,
+        `    --set="<place>" --lat=<lat> --lon=<lon>\n` +
+        `To reject a wrong pin (its events go back to review):\n` +
+        `  npm run geocode:review --workspace=services/ingest -- --reject="<place>"`,
     );
   } finally {
     await dataSource.destroy();

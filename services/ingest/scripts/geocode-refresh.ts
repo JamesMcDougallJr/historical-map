@@ -4,6 +4,7 @@
  *   npm run geocode:refresh --workspace=services/ingest                  # dry run
  *   npm run geocode:refresh --workspace=services/ingest -- --apply
  *   npm run geocode:refresh --workspace=services/ingest -- --provider=nominatim --apply
+ *   npm run geocode:refresh --workspace=services/ingest -- --place="tepeyacac" --apply
  *
  * Exists because the cache is resolve-once: a row keeps whatever the geocoder
  * said when it was written, however the tiers have improved since. Observed in
@@ -11,8 +12,14 @@
  * Hill, Sydney" — six days before the WHG geocoder merged — and every event
  * naming it was pinned in Australia.
  *
- * Only rows from `--provider` (default `nominatim`) are touched, so `manual`
- * corrections made with `geocode:review --set` always survive.
+ * Only unreviewed rows are touched — from `--provider` (default `nominatim`),
+ * or the one `--place` — so a person's `--set`, `--confirm` or `--reject`
+ * always survives.
+ *
+ * With `JEV_GEOCODE_CONTEXT_ENABLED` and a `JEV_API_KEY`, each place is also
+ * judged by the Jev context tier against an event that names it, held to the
+ * `geocode.jev_context` row of `confidence_thresholds`; the decision is stored
+ * for review like any made while publishing.
  *
  * What `--apply` does with each answer:
  *
@@ -27,19 +34,31 @@
  *   learned that says the old answer is wrong.
  */
 import type { ConfigService } from "@nestjs/config";
-import type { DataSource, EntityManager } from "typeorm";
+import type { DataSource } from "typeorm";
 import type { RateLimiterService } from "../libs/common/src";
 import { createDataSource } from "../libs/database/src/data-source";
-import { GeocodeCache } from "../libs/database/src/entities";
+import {
+  GeocodeCache,
+  type GeocodeDecision,
+} from "../libs/database/src/entities";
+import {
+  JEV_CONTEXT_GEOCODE,
+  demotePlace,
+  getConfidenceThreshold,
+  publishedFromPlace,
+} from "../libs/database/src/geocodes";
 import {
   FallbackGeocoder,
   NominatimGeocoder,
   WhgGeocoder,
+  decideWithContext,
   normalizePlaceName,
+  type GeocodeContext,
+  type GeocodeHit,
   type GeocodeOutcome,
 } from "../libs/geocoding/src";
 import { relocatePublishedPins } from "../libs/geocoding/src/relocate";
-import { JevClient } from "../libs/jev/src";
+import { JevClient, isJevFeatureEnabled } from "../libs/jev/src";
 
 function arg(name: string): string | undefined {
   return process.argv.find((a) => a.startsWith(`--${name}=`))?.split("=")[1];
@@ -51,6 +70,8 @@ function envConfig(): ConfigService {
     get: (key: string) => {
       const value = process.env[key];
       if (value === undefined || value === "") return undefined;
+      if (value === "true") return true;
+      if (value === "false") return false;
       const n = Number(value);
       return Number.isFinite(n) && /^\d+$/.test(value) ? n : value;
     },
@@ -74,75 +95,39 @@ function describe(lat: number | null, lon: number | null): string {
     : "NOT FOUND";
 }
 
-/** Published candidates whose event names this cache row's place. */
-async function publishedFrom(
-  db: DataSource | EntityManager,
+/** An event naming the place, published ones first — the context Jev judges in. */
+async function contextFor(
+  db: DataSource,
   normalizedName: string,
-): Promise<Array<{ id: string; eventKey: string }>> {
-  const rows: Array<{ id: string; event_key: string; place: string | null }> =
+): Promise<GeocodeContext | undefined> {
+  const rows: Array<{ title: string; description: string | null; place: string | null }> =
     await db.query(
-      `SELECT id, event_key, event->>'placeName' AS place
+      `SELECT event->>'title' AS title, event->>'description' AS description,
+              event->>'placeName' AS place
          FROM ingest_event_candidates
-        WHERE published_at IS NOT NULL`,
+        ORDER BY published_at IS NULL, created_at`,
     );
-  return rows
-    .filter((r) => r.place && normalizePlaceName(r.place) === normalizedName)
-    .map((r) => ({ id: r.id, eventKey: r.event_key }));
-}
-
-/**
- * Takes a place's events off the map and back to review, the way `publish`
- * demotes an event it cannot place. Locations left with no events go too.
- */
-async function demote(
-  tx: EntityManager,
-  normalizedName: string,
-  reason: string,
-): Promise<number> {
-  const published = await publishedFrom(tx, normalizedName);
-  if (published.length === 0) return 0;
-
-  const removed: Array<{ location_id: string }> = await tx.query(
-    `DELETE FROM events WHERE id = ANY($1) RETURNING location_id`,
-    [published.map((p) => p.eventKey)],
+  const row = rows.find(
+    (r) => r.place && normalizePlaceName(r.place) === normalizedName,
   );
-  await tx.query(
-    `UPDATE ingest_event_candidates
-        SET verdict = 'review',
-            published_at = NULL,
-            checks = checks || $2::jsonb
-      WHERE id = ANY($1)`,
-    [
-      published.map((p) => p.id),
-      JSON.stringify([
-        {
-          name: "publish",
-          passed: false,
-          gating: true,
-          detail: `geocode not confident: ${reason}`,
-        },
-      ]),
-    ],
-  );
-  await tx.query(
-    `DELETE FROM locations l
-      WHERE l.id = ANY($1)
-        AND NOT EXISTS (SELECT 1 FROM events e WHERE e.location_id = l.id)`,
-    [[...new Set(removed.map((r) => r.location_id))]],
-  );
-  return removed.length;
+  return row
+    ? { title: row.title, ...(row.description ? { description: row.description } : {}) }
+    : undefined;
 }
 
 async function main(): Promise<void> {
   const apply = process.argv.includes("--apply");
   const provider = arg("provider") ?? "nominatim";
+  const place = arg("place");
 
   const config = envConfig();
   const rateLimiter = intervalOnlyRateLimiter();
+  const jev = new JevClient(config);
   const geocoder = new FallbackGeocoder([
     new WhgGeocoder(config, rateLimiter),
-    new NominatimGeocoder(config, rateLimiter, new JevClient(config)),
+    new NominatimGeocoder(config, rateLimiter, jev),
   ]);
+  const useContext = isJevFeatureEnabled(config, jev, "JEV_GEOCODE_CONTEXT_ENABLED");
 
   const dataSource = createDataSource();
   await dataSource.initialize();
@@ -150,11 +135,15 @@ async function main(): Promise<void> {
   try {
     const repo = dataSource.getRepository(GeocodeCache);
     const rows = await repo.find({
-      where: { provider },
+      where: place
+        ? { normalizedName: normalizePlaceName(place), reviewStatus: "auto" }
+        : { provider, reviewStatus: "auto" },
       order: { createdAt: "ASC" },
     });
+    const threshold = await getConfidenceThreshold(dataSource, JEV_CONTEXT_GEOCODE, 0.8);
     console.log(
-      `${rows.length} "${provider}" row(s) to re-resolve` +
+      `${rows.length} unreviewed ${place ? `"${place}"` : `"${provider}"`} row(s) to re-resolve` +
+        (useContext ? `, with the Jev context tier at ≥ ${threshold}` : "") +
         (apply ? "" : " (dry run — pass --apply to write)") +
         "\n",
     );
@@ -177,22 +166,42 @@ async function main(): Promise<void> {
         console.log(`  ${row.rawName}\n    ERROR ${String(error)}\n`);
         continue;
       }
-      const { hit, declined } = outcome;
+
+      let hit: GeocodeHit | null = outcome.hit;
+      let confidence: number | null = null;
+      let decision: GeocodeDecision | null = null;
+      if (useContext) {
+        const context = await contextFor(dataSource, row.normalizedName);
+        const decided = context
+          ? await decideWithContext(jev, {
+              placeName: row.rawName,
+              outcome,
+              context,
+              threshold,
+            })
+          : null;
+        if (decided) ({ hit, confidence, decision } = decided);
+      }
+      const { declined } = outcome;
 
       console.log(`  ${row.rawName}`);
       console.log(
         `    was ${describe(row.lat, row.lon)}  [${row.provider}] ${row.displayName ?? ""}`,
       );
+      if (decision) {
+        console.log(
+          `    jev: picked ${decision.picked?.displayName ?? "none of these"} at ` +
+            `${decision.confidence.toFixed(2)} — ${decision.applied ? "applied" : "not applied"}`,
+        );
+      }
 
       if (!hit) {
         const pins = row.found
-          ? (await publishedFrom(dataSource, row.normalizedName)).length
+          ? (await publishedFromPlace(dataSource, row.normalizedName, normalizePlaceName)).length
           : 0;
-        if (declined) {
-          console.log(`    now NOT CONFIDENT — ${declined.reason}`);
-        } else {
-          console.log("    now NOT FOUND");
-        }
+        console.log(
+          declined ? `    now NOT CONFIDENT — ${declined.reason}` : "    now NOT FOUND",
+        );
 
         if (row.found && !declined) {
           tally.kept++;
@@ -214,12 +223,17 @@ async function main(): Promise<void> {
               found: false,
               provider: geocoder.providerName,
               displayName: declined?.reason ?? null,
-              candidates: declined?.candidates.length
-                ? declined.candidates
-                : null,
+              candidates: declined?.candidates.length ? declined.candidates : null,
+              confidence: null,
+              decision,
             });
             return row.found && declined
-              ? demote(tx, row.normalizedName, declined.reason)
+              ? demotePlace(
+                  tx,
+                  row.normalizedName,
+                  normalizePlaceName,
+                  `geocode not confident: ${declined.reason}`,
+                )
               : 0;
           });
           if (demoted) console.log(`    demoted ${demoted} event(s)`);
@@ -228,14 +242,15 @@ async function main(): Promise<void> {
         continue;
       }
 
+      const resolved = hit;
       const sameSpot =
         row.found &&
         row.lat != null &&
         row.lon != null &&
-        Math.abs(row.lat - hit.lat) < 1e-6 &&
-        Math.abs(row.lon - hit.lon) < 1e-6;
+        Math.abs(row.lat - resolved.lat) < 1e-6 &&
+        Math.abs(row.lon - resolved.lon) < 1e-6;
       console.log(
-        `    now ${describe(hit.lat, hit.lon)}  [${hit.provider ?? "?"}] ${hit.displayName}`,
+        `    now ${describe(resolved.lat, resolved.lon)}  [${resolved.provider ?? "?"}] ${resolved.displayName}`,
       );
 
       if (sameSpot) tally.unchanged++;
@@ -249,18 +264,20 @@ async function main(): Promise<void> {
 
       await dataSource.transaction(async (tx) => {
         await tx.getRepository(GeocodeCache).update(row.id, {
-          lon: hit.lon,
-          lat: hit.lat,
+          lon: resolved.lon,
+          lat: resolved.lat,
           found: true,
-          provider: hit.provider ?? geocoder.providerName,
-          displayName: hit.displayName,
-          candidates: hit.alternates ?? null,
+          provider: resolved.provider ?? geocoder.providerName,
+          displayName: resolved.displayName,
+          candidates: resolved.alternates ?? null,
+          confidence,
+          decision,
         });
         if (row.found && row.lat != null && row.lon != null && !sameSpot) {
           const pins = await relocatePublishedPins(
             tx,
             { lat: row.lat, lon: row.lon },
-            { lat: hit.lat, lon: hit.lon },
+            { lat: resolved.lat, lon: resolved.lon },
           );
           for (const pin of pins) console.log(`    moved pin "${pin.name}" (${pin.id})`);
         }

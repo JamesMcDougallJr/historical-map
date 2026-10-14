@@ -1,5 +1,6 @@
 import { Logger } from "@nestjs/common";
 import type {
+  GeocodeCandidate,
   GeocodeDecline,
   GeocodeHints,
   GeocodeHit,
@@ -43,18 +44,21 @@ export class FallbackGeocoder implements Geocoder {
     let lastError: unknown;
     let hints: GeocodeHints = {};
     const declines: GeocodeDecline[] = [];
+    const considered: GeocodeCandidate[] = [];
 
     for (const provider of this.providers) {
       try {
-        const outcome = provider.lookup
+        const outcome: GeocodeOutcome = provider.lookup
           ? await provider.lookup(placeName, hints)
           : { hit: await provider.geocode(placeName, hints) };
+        considered.push(...(outcome.considered ?? []));
         if (outcome.hit) {
           return {
             hit: {
               ...outcome.hit,
               provider: outcome.hit.provider ?? provider.providerName,
             },
+            considered,
           };
         }
         if (outcome.hints?.historical?.length) {
@@ -79,9 +83,10 @@ export class FallbackGeocoder implements Geocoder {
     }
 
     if (lastError !== undefined) throw lastError;
-    if (declines.length === 0) return { hit: null };
+    if (declines.length === 0) return { hit: null, considered };
     return {
       hit: null,
+      considered,
       declined: {
         provider: this.providerName,
         reason: declines.map((d) => `${d.provider}: ${d.reason}`).join("; "),

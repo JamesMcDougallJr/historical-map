@@ -65,6 +65,9 @@ const MODERN_NAMESPACES = new Set(["gn", "osm"]);
  */
 const SAME_PLACE_KM = 25;
 
+/** Distinct places reported in `GeocodeOutcome.considered` — bounds a Jev prompt. */
+const MAX_CONSIDERED = 8;
+
 function hasPoint(c: WhgCandidate): c is LocatedCandidate {
   return (
     Array.isArray(c.repr_point) &&
@@ -211,11 +214,23 @@ export class WhgGeocoder implements Geocoder {
     );
     const hints = historical.length ? { historical } : undefined;
 
+    // `match: false` included on purpose: never picked by this tier, but
+    // exactly what a reader with the event's context can recognise.
+    const considered = distinctPlaces(
+      candidates
+        .filter(hasPoint)
+        .filter((c) => c.score >= this.minScore)
+        .sort((a, b) => b.score - a.score),
+    )
+      .slice(0, MAX_CONSIDERED)
+      .map(toCandidate);
+
     const best = pickUnambiguous(accepted);
     if (!best) {
       const places = distinctPlaces(accepted);
       return {
         hit: null,
+        considered,
         ...(hints ? { hints } : {}),
         ...(places.length
           ? {
@@ -251,6 +266,7 @@ export class WhgGeocoder implements Geocoder {
         displayName: toCandidate(best).displayName,
         ...(alternates.length ? { alternates } : {}),
       },
+      considered,
       ...(hints ? { hints } : {}),
     };
   }

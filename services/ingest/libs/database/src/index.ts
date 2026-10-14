@@ -5,3 +5,4 @@ export * from "./entities";
 export * from "./jsonb";
 export * from "./migrations";
 export * from "./duplicates";
+export * from "./geocodes";

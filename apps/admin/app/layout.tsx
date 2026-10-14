@@ -25,6 +25,7 @@ export default function RootLayout({
           <Link href="/">Locations</Link>
           <Link href="/sequences">Sequences</Link>
           <Link href="/duplicates">Duplicates</Link>
+          <Link href="/geocodes">Geocodes</Link>
         </nav>
         {children}
       </body>

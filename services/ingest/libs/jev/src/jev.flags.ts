@@ -10,6 +10,7 @@ import type { JevClient } from "./jev.client";
 export type JevFeatureFlag =
   | "JEV_GROUNDING_ENABLED"
   | "JEV_GEOCODE_RERANK_ENABLED"
+  | "JEV_GEOCODE_CONTEXT_ENABLED"
   | "JEV_DEDUP_SCORING_ENABLED"
   | "JEV_CONFIDENCE_RESCORE_ENABLED"
   | "JEV_PUBLISH_DEDUP_ENABLED";
