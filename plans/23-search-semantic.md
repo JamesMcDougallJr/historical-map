@@ -5,18 +5,20 @@ Part of [19-search.md](./19-search.md). Builds on the substrate in
 first**: provider, model, dimensions and the `EmbeddingEngine` interface are
 settled there, and this file does not reopen them.
 
-> **Status (2026-10-11): step 0 of 6 written, not applied; nothing else
-> started.** `infra/` now declares everything in "Infrastructure and
-> automation" that lives in Terraform — the RDS engine-version lookup
-> (newest 16.x, maintenance-window upgrade), the Bedrock web-app IAM user and
-> key, the GitHub OIDC provider and CI role, the Vercel env vars and the
-> Bedrock budget (`caa0a8d`). Verified with `tofu fmt -check`, `tofu
-validate` and `tofu test` (7 mocked-provider plan tests, mutation-checked),
-> which the new `Infra` workflow runs. **Not done:** the `tofu apply`, and
-> everything outside `infra/` in step 0's row of "Infrastructure and
-> automation" — `db/pgvector-version`, the migration's version check, and
-> the `bedrock-live.yml` workflow belong to steps 1–2. The build order below
-> carries a status per step.
+> **Status (2026-10-15): step 0 applied; steps 1–6 not started.** `infra/`
+> declares everything in "Infrastructure and automation" that lives in
+> Terraform (`caa0a8d`, verified by `tofu validate`/`tofu test` in the
+> `Infra` workflow), and it was applied to production on 2026-10-15 — 13
+> added, 1 changed, 0 destroyed: the Bedrock web-app IAM user and key, the
+> GitHub OIDC provider and CI role, the `AWS_EMBEDDINGS_ROLE_ARN` and
+> `BEDROCK_REGION` Actions variables, the four Vercel production env vars
+> (they reach the app on the next production deploy) and the Bedrock budget.
+> RDS is queued for 16.4 → 16.15 in its maintenance window
+> (`apply_immediately = false`), **not yet upgraded**. Everything outside
+> `infra/` in step 0's row — `db/pgvector-version`, the migration's version
+> check, and `bedrock-live.yml` — belongs to steps 1–2; step 0's "done when"
+> (the version check passing against RDS) can only pass after that window.
+> The build order below carries a status per step.
 
 ## What semantic search is for
 
@@ -350,7 +352,7 @@ granted, which must be denied.
 
 | Step | Work                                                                                                            | Status (2026-10-11)                                                                                                                                                                              |
 | ---- | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 0    | `infra/`: engine-version data source, Bedrock IAM user + OIDC role, Vercel env vars, Budgets — one `tofu apply` | **Written and tested** (`caa0a8d`); **not applied**                                                                                                                                              |
+| 0    | `infra/`: engine-version data source, Bedrock IAM user + OIDC role, Vercel env vars, Budgets — one `tofu apply` | **Applied 2026-10-15**; RDS 16.15 pending its maintenance window                                                                                                                                 |
 | 1    | pgvector image pinned by `db/pgvector-version`, plus the CI and migration version checks                        | Not started                                                                                                                                                                                      |
 | 2    | `EmbeddingEngine` + Bedrock implementation (plan 12, shared with 13), `embed:verify`, `bedrock-live.yml`        | Not started                                                                                                                                                                                      |
 | 3    | Event and sequence embedding + `content_hash` sweep in the `embed` worker                                       | Not started                                                                                                                                                                                      |
