@@ -17,6 +17,9 @@ RUN npm ci
 
 COPY packages/domain packages/domain
 COPY services/ingest services/ingest
+# Read by the pgvector migration when docker-compose.prod.yml's `migrate`
+# service runs from this stage (libs/database/src/pgvector-version.ts).
+COPY db/pgvector-version db/
 
 WORKDIR /repo/services/ingest
 RUN npx nest build api

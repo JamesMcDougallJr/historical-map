@@ -37,7 +37,8 @@ resource "aws_security_group" "rds" {
 # client-side ?sslmode=require in the connection string.
 # The newest RDS PostgreSQL 16 minor version, rather than a hand-pinned one.
 # pgvector 0.8 (iterative index scans, which filtered vector search needs —
-# plans/23-search-semantic.md) ships only with RDS 16.5+; 16.4 has 0.7.3.
+# plans/23-search-semantic.md) ships only with RDS 16.7+; 16.4 has 0.6.2.
+# db/pgvector-version must match what the resolved minor ships (16.15: 0.8.2).
 # Major version stays 16, so the parameter group family below is unchanged.
 data "aws_rds_engine_version" "postgres" {
   engine  = "postgres"

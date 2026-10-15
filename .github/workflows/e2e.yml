@@ -56,6 +56,17 @@ jobs:
           timeout 60 bash -c 'until docker compose exec -T redis redis-cli ping; do sleep 2; done'
           timeout 60 bash -c 'until aws --endpoint-url http://localhost:9000 s3 ls; do sleep 2; done'
 
+      # The db image builds pgvector from db/pgvector-version (db/Dockerfile),
+      # which pins what production RDS ships. Fail here, with both versions
+      # named, rather than later in a migration or a search spec.
+      - name: Check pgvector matches db/pgvector-version
+        run: |
+          want="$(tr -d '[:space:]' < db/pgvector-version)"
+          got="$(docker compose exec -T db psql -U postgres -d db -tAc \
+            "CREATE EXTENSION IF NOT EXISTS vector; SELECT extversion FROM pg_extension WHERE extname = 'vector'" | tail -n1 | tr -d '[:space:]')"
+          echo "pgvector: image has '$got', db/pgvector-version pins '$want'"
+          test "$got" = "$want"
+
       # Must run before `martin` starts, not just before ingest migrations:
       # Martin discovers SQL functions from the Postgres catalog once at
       # boot and never picks up ones created later, so starting it ahead of

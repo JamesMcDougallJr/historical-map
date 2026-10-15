@@ -5,6 +5,7 @@ import { AddEventAnchor1760140800000 } from "./1760140800000-add-event-anchor";
 import { AddGeocodeCandidates1760227200000 } from "./1760227200000-add-geocode-candidates";
 import { AddGeocodeReview1760313600000 } from "./1760313600000-add-geocode-review";
 import { AddDocumentPassages1760400000000 } from "./1760400000000-add-document-passages";
+import { AddPgvector1760486400000 } from "./1760486400000-add-pgvector";
 
 /**
  * Explicit imports, in order. **Do not replace this with a glob.**
@@ -26,4 +27,5 @@ export const INGEST_MIGRATIONS = [
   AddGeocodeCandidates1760227200000,
   AddGeocodeReview1760313600000,
   AddDocumentPassages1760400000000,
+  AddPgvector1760486400000,
 ];
