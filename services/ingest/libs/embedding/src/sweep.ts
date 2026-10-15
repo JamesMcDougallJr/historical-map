@@ -1,6 +1,10 @@
 import type { DatePrecision } from "@historical-map/domain";
-import { composeEventText, composeGroupText, contentHash } from "./compose";
-import type { EmbeddingEngine } from "./embedding-engine.interface";
+import {
+  composeEventText,
+  composeGroupText,
+  contentHash,
+  type EmbeddingEngine,
+} from "@historical-map/embedding";
 
 /** Anything with TypeORM's `query(sql, params)` — a DataSource or QueryRunner. */
 export interface SqlRunner {

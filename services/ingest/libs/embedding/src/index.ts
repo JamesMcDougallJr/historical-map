@@ -1,9 +1,7 @@
-export * from "./bedrock/bedrock.engine";
-export * from "./compose";
-export * from "./embedding-engine.interface";
+// The engines and composed texts live in @historical-map/embedding, shared
+// with the web app; this lib adds what only the workers need: the Nest
+// binding and the sweep over the corpus.
+export * from "@historical-map/embedding";
 export * from "./embedding.module";
-export * from "./engine-from-env";
-export * from "./fake/fake.engine";
-export * from "./fake/recording.engine";
 export * from "./sweep";
 export * from "./tokens";

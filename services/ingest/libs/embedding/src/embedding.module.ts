@@ -1,5 +1,5 @@
 import { Module } from "@nestjs/common";
-import { embeddingEngineFromEnv } from "./engine-from-env";
+import { embeddingEngineFromEnv } from "@historical-map/embedding";
 import { EMBEDDING_ENGINE } from "./tokens";
 
 /**

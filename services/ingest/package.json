@@ -45,6 +45,7 @@
     "@bull-board/express": "^6.5.0",
     "@bull-board/nestjs": "^6.5.0",
     "@historical-map/domain": "*",
+    "@historical-map/embedding": "*",
     "@nestjs/bullmq": "^11.0.1",
     "@nestjs/common": "^11.0.1",
     "@nestjs/config": "^4.0.0",

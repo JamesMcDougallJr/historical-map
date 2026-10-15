@@ -44,10 +44,7 @@ export class FakeEmbeddingEngine implements EmbeddingEngine {
     this.dims = recorded.dims;
   }
 
-  /**
-   * `EMBEDDING_VECTORS_FILE`, else `e2e-real/fixtures/search-vectors.json`
-   * found by walking up from here.
-   */
+  /** Reads the file `recordedVectorsPath()` finds. */
   static fromFile(path = recordedVectorsPath()): FakeEmbeddingEngine {
     return new FakeEmbeddingEngine(
       JSON.parse(readFileSync(path, "utf8")) as RecordedVectors,
@@ -74,8 +71,10 @@ export class FakeEmbeddingEngine implements EmbeddingEngine {
 
 /**
  * `EMBEDDING_VECTORS_FILE`, else `e2e-real/fixtures/search-vectors.json`
- * found by walking up from here. `mustExist: false` is for recording, which
- * may be creating the file.
+ * found by walking up from the working directory (the repo root for the web
+ * app, `services/ingest` for the workers' scripts — and not `__dirname`, which
+ * this ES module package doesn't have). `mustExist: false` is for recording,
+ * which may be creating the file.
  */
 export function recordedVectorsPath(mustExist = true): string {
   const fromEnv = process.env["EMBEDDING_VECTORS_FILE"];
@@ -88,7 +87,7 @@ export function recordedVectorsPath(mustExist = true): string {
   }
 }
 
-function findUp(relative: string, start = __dirname): string {
+function findUp(relative: string, start = process.cwd()): string {
   for (let dir = start; ; dir = dirname(dir)) {
     const candidate = join(dir, relative);
     if (existsSync(candidate)) return candidate;

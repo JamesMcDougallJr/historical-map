@@ -91,7 +91,7 @@ export class BedrockEmbeddingEngine implements EmbeddingEngine {
     const worker = async (): Promise<void> => {
       while (next < texts.length) {
         const i = next++;
-        results[i] = await this.embedOneWithRetry(texts[i]);
+        results[i] = await this.embedOneWithRetry(texts[i]!);
       }
     };
     await Promise.all(

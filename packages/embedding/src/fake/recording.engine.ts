@@ -30,13 +30,13 @@ export class RecordingEmbeddingEngine implements EmbeddingEngine {
 
   async embed(texts: string[]): Promise<number[][]> {
     const file = this.load();
-    const missing = [...new Set(texts.filter((t) => !file.vectors[t]))];
+    const missing = Array.from(new Set(texts.filter((t) => !file.vectors[t])));
     if (missing.length > 0) {
       const vectors = await this.live.embed(missing);
       // Re-read: another process may have recorded meanwhile.
       const latest = this.load();
       missing.forEach((text, i) => {
-        latest.vectors[text] = vectors[i];
+        latest.vectors[text] = vectors[i]!;
       });
       const sorted = Object.fromEntries(
         Object.entries(latest.vectors).sort(([a], [b]) => a.localeCompare(b)),
@@ -47,7 +47,7 @@ export class RecordingEmbeddingEngine implements EmbeddingEngine {
       );
       Object.assign(file.vectors, latest.vectors);
     }
-    return texts.map((t) => file.vectors[t]);
+    return texts.map((t) => file.vectors[t]!);
   }
 
   private load(): RecordedVectors {
