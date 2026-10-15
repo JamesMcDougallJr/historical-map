@@ -358,6 +358,7 @@ export function LayerControl({
                     Source Type
                   </label>
                   <select
+                    aria-label="Source Type"
                     value={newOverlaySource}
                     onChange={(e) =>
                       setNewOverlaySource(e.target.value as OverlaySource)

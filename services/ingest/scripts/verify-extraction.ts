@@ -7,6 +7,7 @@
  * way to prove the schema is accepted rather than merely well-formed:
  *
  *   GROQ_API_KEY=... npm run extract:verify --workspace=services/ingest -- --live
+ *   GROQ_API_KEY=... npm run extract:verify --workspace=services/ingest -- --live --live-file chapter.txt
  */
 import { findDates } from "../../../packages/domain/src/dates";
 import {
@@ -120,6 +121,7 @@ async function main(): Promise<void> {
         placeName: "Promontory Summit",
         confidence: 0.95,
         sourceText: "The rails met at Promontory Summit on May 10, 1869.",
+        people: ["Leland Stanford"],
       },
     ],
   });
@@ -138,6 +140,7 @@ async function main(): Promise<void> {
           placeName: null,
           confidence: 0.4,
           sourceText: "Settlers arrived in the spring.",
+          people: [],
         },
       ],
     }).success,
@@ -156,6 +159,7 @@ async function main(): Promise<void> {
           placeName: null,
           confidence: 0.5,
           sourceText: "x",
+          people: [],
         },
       ],
     }).success,
@@ -174,6 +178,7 @@ async function main(): Promise<void> {
           placeName: null,
           confidence: 4,
           sourceText: "x",
+          people: [],
         },
       ],
     }).success,
@@ -262,18 +267,42 @@ async function main(): Promise<void> {
         },
       } as never);
 
+      // `--live-file <path>` runs a real chapter instead of the one-liner —
+      // the plans/22 gate for `people`: does the model actually fill it, or
+      // satisfy the strict schema with [] every time?
+      const fileIdx = process.argv.indexOf("--live-file");
+      const filePath = fileIdx >= 0 ? process.argv[fileIdx + 1] : undefined;
+      const text = filePath
+        ? (await import("node:fs"))
+            .readFileSync(filePath, "utf8")
+            .slice(0, 6000)
+        : "The transcontinental railroad was completed at Promontory Summit on May 10, 1869, when Leland Stanford drove the last spike. In the spring of 1847, Brigham Young led Mormon pioneers into the Salt Lake Valley.";
       const events = await engine.extractChunk({
         index: 0,
         anchors: ["p.1"],
-        text: "The transcontinental railroad was completed at Promontory Summit on May 10, 1869. In the spring of 1847, Mormon pioneers entered the Salt Lake Valley.",
+        text,
       });
       check(
         `live call returned ${events.length} event(s)`,
         events.length >= 1,
         JSON.stringify(
-          events.map((e) => [e.title, e.dateText, e.datePrecision]),
+          events.map((e) => [e.title, e.dateText, e.datePrecision, e.people]),
         ),
       );
+      const withPeople = events.filter(
+        (e) => (e.people ?? []).length > 0,
+      ).length;
+      console.log(
+        `people: ${withPeople}/${events.length} events name at least one person ` +
+          `(${events.length ? Math.round((100 * withPeople) / events.length) : 0}%)`,
+      );
+      if (!filePath) {
+        check(
+          "live call names people where the text does",
+          withPeople >= 1,
+          "the sample text names Leland Stanford and Brigham Young",
+        );
+      }
     }
   }
 

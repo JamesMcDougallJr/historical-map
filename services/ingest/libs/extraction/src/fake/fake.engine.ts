@@ -34,6 +34,13 @@ export class FakeExtractionEngine implements ExtractionEngine {
       const title = block.match(/^TITLE:\s*(.+)$/m)?.[1]?.trim();
       const date = block.match(/^DATE:\s*(.+)$/m)?.[1]?.trim();
       const place = block.match(/^PLACE:\s*(.+)$/m)?.[1]?.trim();
+      // "PEOPLE: Brigham Young; President Young" — absent means nobody named.
+      const people =
+        block
+          .match(/^PEOPLE:\s*(.+)$/m)?.[1]
+          ?.split(";")
+          .map((n) => n.trim())
+          .filter(Boolean) ?? [];
       // `PARAPHRASE: yes|contradicted` makes the quote one that is NOT in the
       // document verbatim, so the exact-match grounding check misses and the
       // opt-in Jev grounding check has something to judge. `contradicted`
@@ -62,6 +69,7 @@ export class FakeExtractionEngine implements ExtractionEngine {
         dateIso: date,
         datePrecision: "day",
         placeName: place ?? null,
+        people,
         anchor: chunk.anchors[0] ?? null,
       });
     }

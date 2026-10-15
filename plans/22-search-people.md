@@ -1,5 +1,20 @@
 # Stretch A — Individuals: from words in a description to a searchable field
 
+> **Status: done (2026-10-10), Levels 1 and 2**, on branch `search-lexical`.
+> Answers to the questions at the bottom: **the general `event_entities`
+> table** (only `type = 'person'` so far), and **no backfill** — existing
+> events gain people when re-extracted. Verified locally: the e2e-real
+> `search-people` spec and the mocked person-row specs pass; the ingestion
+> fixture's people assertions run in CI (they need Redis + MinIO). **Still to
+> do by hand:** the Groq gate — `extract:verify -- --live --live-file
+> <chapter.txt>` prints the share of events with non-empty `people`; run it
+> (needs `GROQ_API_KEY`) before relying on the field. Normalisation strips a
+> leading honorific only while two words remain, which reconciles the two
+> rules below ("President Brigham Young" → `brigham young`, while "President
+> Young" stays its own person hit). Re-running publish is idempotent by
+> construction (`ON CONFLICT DO NOTHING`, like the event insert); the fixture
+> doesn't re-run it.
+
 Part of [19-search.md](./19-search.md). **A stretch goal** (19, decision 4).
 It depends on S1 only, and S1 already gives "events that mention X" for free.
 

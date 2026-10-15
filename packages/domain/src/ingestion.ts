@@ -161,6 +161,15 @@ export interface ExtractedEvent extends ParsedEvent {
    * the event row, and the deep link parses the page number back out of it.
    */
   anchor: string | null;
+
+  /**
+   * People named in the event, exactly as the source wrote them — "President
+   * Young", not a resolved identity. The same verbatim discipline as
+   * `dateText` and `placeName`: who these refer to is identity work for
+   * later (plans/22-search-people.md, Level 3), not the model's call.
+   * Absent on events extracted before the field existed.
+   */
+  people?: string[];
 }
 
 /**

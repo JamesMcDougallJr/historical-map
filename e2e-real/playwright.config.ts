@@ -13,9 +13,20 @@ import { defineConfig, devices } from "@playwright/test";
 // of the shared dev stack it would otherwise truncate (set both E2E_* here AND
 // POSTGRES_URL for the test process itself — global-setup reads that one).
 const POSTGRES_URL =
-  process.env["E2E_POSTGRES_URL"] ?? "postgres://postgres:password@localhost:5433/db";
+  process.env["E2E_POSTGRES_URL"] ??
+  "postgres://postgres:password@localhost:5433/db";
 const MARTIN_URL = process.env["E2E_MARTIN_URL"] ?? "http://localhost:3001";
 const API_KEY = "test-api-key";
+// Recorded vectors, never live Bedrock (plans/19, "No Bedrock in CI") — for
+// both the global setup's fixture embedding and the web app's query
+// embedding. `EMBEDDING_ENGINE=record` (with BEDROCK_REGION) re-records them.
+process.env["EMBEDDING_ENGINE"] ??= "fake";
+const EMBEDDING_ENV = {
+  EMBEDDING_ENGINE: process.env["EMBEDDING_ENGINE"],
+  ...(process.env["BEDROCK_REGION"]
+    ? { BEDROCK_REGION: process.env["BEDROCK_REGION"] }
+    : {}),
+};
 const ADMIN_PORT = 3011;
 
 export default defineConfig({
@@ -53,6 +64,7 @@ export default defineConfig({
       reuseExistingServer: false,
       timeout: 120_000,
       env: {
+        ...EMBEDDING_ENV,
         POSTGRES_URL,
         NEXT_PUBLIC_MARTIN_URL: MARTIN_URL,
         MAP_API_KEY: API_KEY,

@@ -1,0 +1,448 @@
+// The search fixture corpus (plans/19-search.md, "Testing strategy").
+//
+// seed-data.ts was built for pins and popups; ranking needs data designed for
+// it, small enough that every expected hit can be asserted by id. Each fixture
+// exists to test one thing — the comment on it says what.
+//
+// All of it lives under its own source, away from the map specs' hover
+// target (fx-loc-1). fx-loc-slc is named "Salt Lake City" but deliberately
+// not placed exactly there, so it can never share a pixel with a pin the map
+// specs target.
+import type {
+  EventGroup,
+  EventSource,
+  HistoricalLocation,
+} from "../../app/map/types";
+
+export const SEARCH_SOURCE: EventSource = {
+  id: "fx-source-search",
+  name: "Fixture Search Corpus",
+  description: "Ranking fixtures for the search specs.",
+  color: "#16a34a",
+};
+
+const src = SEARCH_SOURCE.id;
+
+export const SEARCH_LOCATIONS: HistoricalLocation[] = [
+  {
+    id: "fx-loc-meadows",
+    name: "Mountain Meadows",
+    coordinates: [-113.62, 37.48],
+    events: [
+      {
+        // Stemming ("massacred", "massacres"), title-over-body ranking, and a
+        // word ("Fancher") found only in its source quote.
+        id: "fx-ev-massacre",
+        title: "Massacre at the Meadows",
+        description:
+          "A party of emigrants bound for California was killed in southern Utah Territory.",
+        source: "the Fancher train was set upon while camped in the valley",
+        date: "1857-09-11",
+        datePrecision: "day",
+        sourceId: src,
+      },
+      {
+        // A sequence member whose title word ("siege") the sequence itself
+        // never uses — "match through a member title".
+        id: "fx-ev-siege",
+        title: "Siege of the Corralled Wagons",
+        description:
+          "The emigrants circled their wagons and held out for five days.",
+        date: "1857-09-07",
+        datePrecision: "day",
+        sourceId: src,
+      },
+      {
+        // Semantic search (plans/23): found by "emigrant wagon train ambushed
+        // in southern Utah", with which neither its title nor its description
+        // shares a word — so only the vector arm can find it. (The plan's
+        // "Baker–Fancher party attacked" would have taken the lexical
+        // "fancher" query's top spot.)
+        id: "fx-ev-baker-fancher",
+        title: "Arkansas Company Attacked at the Springs",
+        description:
+          "Militia and Paiute allies fell on a California-bound company resting at a spring.",
+        date: "1857-09-08",
+        datePrecision: "day",
+        sourceId: src,
+      },
+      {
+        id: "fx-ev-burial",
+        title: "Burial of the Remains",
+        description:
+          "An army detachment buried the remains and raised a cairn.",
+        date: "1859-05-01",
+        datePrecision: "month",
+        sourceId: src,
+      },
+    ],
+  },
+  {
+    id: "fx-loc-cedar",
+    name: "Cedar City",
+    coordinates: [-113.06, 37.68],
+    events: [
+      {
+        // "meadows" in the body only — ranks below the title match.
+        // Also the exact phrase "emigrant camp".
+        id: "fx-ev-meadows-body",
+        title: "Emigrant Camp Established",
+        description:
+          "The party rested its cattle on the meadows before the final push west.",
+        date: "1857-01-01",
+        datePrecision: "year",
+        sourceId: src,
+      },
+      {
+        // Has "emigrant" and "camp", but not as the phrase.
+        id: "fx-ev-camp-split",
+        title: "Camp Floyd Garrisoned",
+        description: "Soldiers watched the emigrant road from the new post.",
+        date: "1858-07-01",
+        datePrecision: "day",
+        sourceId: src,
+      },
+    ],
+  },
+  {
+    id: "fx-loc-harrison",
+    name: "Harrison",
+    coordinates: [-93.11, 36.23],
+    events: [
+      {
+        // "Fancher" in the description — must outrank the quote-only match.
+        id: "fx-ev-departure",
+        title: "Departure from Arkansas",
+        description: "The Fancher party left Arkansas bound for California.",
+        date: "1857-04-01",
+        datePrecision: "season",
+        dateText: "Spring 1857",
+        sourceId: src,
+      },
+    ],
+  },
+  {
+    id: "fx-loc-mexico",
+    name: "Mexico City",
+    coordinates: [-99.13, 19.43],
+    events: [
+      {
+        // Accent folding both ways, trigram typo, exact-title top hit.
+        id: "fx-ev-tenochtitlan",
+        title: "Fall of Tenochtitlán",
+        description: "Spanish and allied forces captured the Aztec capital.",
+        date: "1521-01-01",
+        datePrecision: "year",
+        sourceId: src,
+      },
+      {
+        // Inside a 1500–1600 timeline; the "1840s outside the timeline" conflict.
+        id: "fx-ev-1520",
+        title: "Smallpox Reaches the Valley",
+        description:
+          "An epidemic devastated the population of the Aztec capital.",
+        date: "1520-01-01",
+        datePrecision: "year",
+        sourceId: src,
+      },
+    ],
+  },
+  {
+    id: "fx-loc-tula",
+    name: "Tula",
+    coordinates: [-99.34, 20.06],
+    events: [
+      {
+        // Semantic search: "Toltec collapse" shares no word with it.
+        id: "fx-ev-tula",
+        title: "Overthrow of Tula",
+        description:
+          "Invaders from the north burned the great city and its temples.",
+        date: "1103-01-01",
+        datePrecision: "year",
+        sourceId: src,
+      },
+    ],
+  },
+  {
+    id: "fx-loc-bridger",
+    name: "Fort Bridger",
+    coordinates: [-110.38, 41.32],
+    events: [
+      {
+        // Decade parsing: 1843 is in the 1840s.
+        id: "fx-ev-1840s-a",
+        title: "Trading Post Founded",
+        description: "A supply post opened on the emigrant trail.",
+        date: "1843-01-01",
+        datePrecision: "year",
+        sourceId: src,
+      },
+    ],
+  },
+  {
+    id: "fx-loc-coloma",
+    name: "Coloma",
+    coordinates: [-120.89, 38.8],
+    events: [
+      {
+        // Precision-aware overlap: circa 1848 spans 1843–1853, so it is in
+        // the 1840s *and* overlaps an 1850–1860 range, but not 1855–1860.
+        id: "fx-ev-1840s-b",
+        title: "Gold Found in the Millrace",
+        description:
+          "A carpenter noticed flakes of gold in the tailrace of a sawmill.",
+        date: "1848-01-01",
+        datePrecision: "circa",
+        sourceId: src,
+      },
+    ],
+  },
+  {
+    id: "fx-loc-slc",
+    name: "Salt Lake City",
+    // Not the real coordinates — see the module comment.
+    coordinates: [-112.6, 41.45],
+    events: [
+      {
+        id: "fx-ev-slc-1847",
+        title: "Pioneers Enter the Valley",
+        description: "The first wagon company descended Emigration Canyon.",
+        date: "1847-07-24",
+        datePrecision: "day",
+        sourceId: src,
+      },
+      {
+        id: "fx-ev-slc-1850",
+        title: "University of Deseret Chartered",
+        description: "The territorial legislature chartered a university.",
+        date: "1850-02-28",
+        datePrecision: "day",
+        sourceId: src,
+      },
+      {
+        id: "fx-ev-slc-1869",
+        title: "Railroad Spur Completed",
+        description:
+          "A spur line connected the city to the transcontinental railroad.",
+        date: "1870-01-10",
+        datePrecision: "day",
+        sourceId: src,
+      },
+      {
+        id: "fx-ev-slc-1896",
+        title: "Statehood Celebrated",
+        description: "Crowds gathered as Utah became the forty-fifth state.",
+        date: "1896-01-04",
+        datePrecision: "day",
+        sourceId: src,
+      },
+    ],
+  },
+];
+
+/**
+ * People (plans/22-search-people.md). Three events name Brigham Young under
+ * two spellings — the Level 2 honesty rule keeps "President Young" a separate
+ * person hit — one also names John Smith, and one mentions him only in its
+ * description, which must rank below the events that *name* him. No title
+ * contains the name, so the person field is what's being tested.
+ */
+export const PEOPLE_LOCATION: HistoricalLocation = {
+  id: "fx-loc-ogden",
+  name: "Ogden",
+  coordinates: [-111.97, 41.22],
+  events: [
+    {
+      id: "fx-ev-young-1",
+      title: "Vanguard Company Arrives",
+      description:
+        "The first company descended Emigration Canyon into the valley.",
+      date: "1847-07-24",
+      datePrecision: "day",
+      sourceId: "fx-source-search",
+      people: ["Brigham Young"],
+    },
+    {
+      id: "fx-ev-young-2",
+      title: "Territorial Governor Replaced",
+      description: "Washington appointed a new governor for the territory.",
+      date: "1857-01-01",
+      datePrecision: "year",
+      sourceId: "fx-source-search",
+      people: ["President Young", "John Smith"],
+    },
+    {
+      id: "fx-ev-young-3",
+      title: "Founder Dies",
+      description: "The territory's founder died at seventy-six.",
+      date: "1877-08-29",
+      datePrecision: "day",
+      sourceId: "fx-source-search",
+      people: ["Brigham Young"],
+    },
+    {
+      id: "fx-ev-young-body",
+      title: "Tabernacle Organ Installed",
+      description:
+        "A great organ was installed, and Brigham Young attended its dedication.",
+      date: "1867-01-01",
+      datePrecision: "year",
+      sourceId: "fx-source-search",
+    },
+  ],
+};
+
+/** A sequence of three 1857–1859 members, none of whose titles it repeats. */
+export const SEARCH_GROUP: Pick<EventGroup, "id" | "title" | "description"> & {
+  memberEventIds: string[];
+} = {
+  id: "fx-grp-meadows",
+  title: "The Mountain Meadows Affair",
+  description: "Events in southern Utah, September 1857 and after.",
+  memberEventIds: ["fx-ev-siege", "fx-ev-massacre", "fx-ev-burial"],
+};
+
+// ── Source documents ────────────────────────────────────────────────────────
+//
+// Two ingested documents with passages, written through the real ingest
+// writer (replacePassages → splitPassages + relinkPassageEvents), so the
+// fixtures exercise the same code extract-text and publish run.
+//
+// `ingest_documents.id` is a uuid, so the plan's "fx-doc-1" is a fixed uuid.
+// Every paragraph is over the splitter's 200-char minimum, so each stays its
+// own passage; each carries one marker word no other paragraph uses, plus
+// "chronicle", which all eight share (the passage-cap case).
+
+export const FX_DOC_1 = "00000000-0000-4000-8000-0000000fd001";
+export const FX_DOC_2 = "00000000-0000-4000-8000-0000000fd002";
+export const FX_INGEST_SOURCE_ID = "00000000-0000-4000-8000-0000000f5001";
+
+/** The quote of fx-ev-doc-q1 — inside p.1¶2. */
+export const DOC_QUOTE_1 =
+  "The garrison surrendered the obsidian fortress at dawn after a long investment.";
+/** The quote of fx-ev-doc-q2 — inside p.3¶1. */
+export const DOC_QUOTE_2 =
+  "Traders carried turquoise north along the old road every spring.";
+
+const P1 =
+  "This chronicle opens with the ochre hills that ring the basin, where the first settlers built low houses of adobe and stone and counted their seasons by the rains that came and went across the wide, dry plain below.";
+const P2 = `The ramparts were tall and the chronicle is plain about what followed. ${DOC_QUOTE_1} Nobody inside had eaten for many days, and the commander saw no reason to prolong the suffering of his people.`;
+const P3 =
+  "A zephyr from the south carried the smell of rain for weeks before any fell, and the chronicle records that the elders gathered each evening in the plaza to argue over when to plant the maize and the beans.";
+// p.1¶4 runs across the page break: page 1 ends mid-sentence.
+const P4_PAGE1 =
+  "Among the crafts the chronicle praises most highly, none is described at greater length than the work of the weavers of the valley, who practised";
+const P4_PAGE2 =
+  "quillwork of remarkable delicacy, dyeing porcupine quills with roots and berries and stitching them into patterns that no two families shared.";
+const P5 =
+  "The marigold fields below the town were the pride of every household, and the chronicle lists, year by year, how many baskets of flowers were carried to the shrine on the hill for the autumn festival.";
+const P6 = `Commerce mattered as much as war, and the chronicle gives it equal space. ${DOC_QUOTE_2} They returned with shells, feathers and salt, and the market at the crossing grew larger each year.`;
+// Linked to no event — the lenient undated-passage rule's subject.
+const P7 =
+  "The basalt quarry east of the river supplied every grinding stone in the region, and the chronicle notes that its masons kept their methods secret, passing them only from father to son across generations.";
+// Untrusted text: ts_headline must never hand this back as markup.
+const P8 =
+  "A lantern hung at the gate of the mission every night. <script>alert(1)</script> The chronicle ends here, with the lantern still burning and the gate still open to any traveller who came along the road.";
+
+export const SEARCH_DOCUMENTS = [
+  {
+    id: FX_DOC_1,
+    externalId: "fx-doc-1.pdf",
+    title: "Annals of the Obsidian Basin",
+    segments: [
+      { anchor: "p.1", text: [P1, P2, P3, P4_PAGE1].join("\n") },
+      { anchor: "p.2", text: [P4_PAGE2, P5].join("\n") },
+      { anchor: "p.3", text: [P6, P7, P8].join("\n") },
+    ],
+  },
+  {
+    // No published events — the document panel's empty-events state.
+    id: FX_DOC_2,
+    externalId: "fx-doc-2.pdf",
+    title: "Ledger of the Northern Missions",
+    segments: [
+      {
+        anchor: "p.1",
+        text: "The candlewax accounts of the northern missions fill most of this ledger, item after item, with the chronicle of what each mission bought, what it sold, and what it begged from its neighbours in a hard winter.",
+      },
+    ],
+  },
+];
+
+// ── Vector distractors (plans/23, "timeline pre-filter", "limit to view") ───
+//
+// Fifty events nearer the query "pestilence ravaged the people" than
+// "Smallpox Reaches the Valley" (fx-ev-1520, Mexico City, 1520) — measured
+// with Titan v2: 0.377 against 0.315 — sharing no word with the query, dated
+// 1700–1798 and placed in Europe. Unfiltered, they push fx-ev-1520 beyond the
+// vector arm's top 50; with a 1500–1600 timeline, or a view around Mexico, it
+// must still appear, which it does only if those filters run inside the
+// vector query, before ranking.
+//
+// Not the plan's "Toltec collapse": Titan puts Fall of Tenochtitlán *nearer*
+// that query (0.478) than Overthrow of Tula (0.363), so no distractor set can
+// bury one without burying the other. Their own source and location, so no
+// other spec's counts move.
+
+export const DISTRACTOR_SOURCE: EventSource = {
+  id: "fx-source-distractors",
+  name: "Fixture Vector Distractors",
+  description:
+    "Near-duplicates that crowd the vector arm's top 50 for one query.",
+  color: "#a855f7",
+};
+
+export const DISTRACTOR_LOCATION: HistoricalLocation = {
+  id: "fx-loc-distractors",
+  name: "Distractor Archive",
+  coordinates: [12.5, 47.5],
+  events: Array.from({ length: 50 }, (_, i) => ({
+    id: `fx-ev-distractor-${String(i + 1).padStart(2, "0")}`,
+    title: `Plague Year in the Harbour Town, Account ${i + 1}`,
+    description:
+      "A deadly sickness spread through the harbour town and killed thousands.",
+    date: `${1700 + i * 2}-01-01`,
+    datePrecision: "year" as const,
+    sourceId: "fx-source-distractors",
+  })),
+};
+
+export const SEARCH_DOCUMENT_LOCATION = {
+  id: "fx-loc-archive",
+  name: "Obsidian Basin",
+  coordinates: [-106.6, 35.1] as [number, number],
+};
+
+/** Events published from FX_DOC_1: two quoted verbatim, one not at all. */
+export const SEARCH_DOCUMENT_EVENTS = [
+  {
+    id: "fx-ev-doc-q1",
+    title: "Fortress Surrenders",
+    description: "A besieged garrison gave up its stronghold.",
+    date: "1650-01-01",
+    datePrecision: "year",
+    source: DOC_QUOTE_1,
+    anchor: "p.1",
+  },
+  {
+    id: "fx-ev-doc-q2",
+    title: "Northern Trade Route Opens",
+    description: "Merchants began regular journeys north.",
+    date: "1700-01-01",
+    datePrecision: "year",
+    source: DOC_QUOTE_2,
+    anchor: "p.3",
+  },
+  {
+    // Its quote appears in no paragraph: no passage link, page anchor only.
+    id: "fx-ev-doc-unlinked",
+    title: "Embassy Arrives",
+    description: "Envoys arrived bearing gifts.",
+    date: "1680-01-01",
+    datePrecision: "year",
+    source:
+      "An embassy arrived with gifts that no page of this book records anywhere.",
+    anchor: "p.2",
+  },
+];

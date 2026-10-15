@@ -12,10 +12,12 @@ WORKDIR /repo
 # Manifests first so a dependency-only change reuses the install layer.
 COPY package.json package-lock.json ./
 COPY packages/domain/package.json packages/domain/
+COPY packages/embedding/package.json packages/embedding/
 COPY services/ingest/package.json services/ingest/
 RUN npm ci
 
 COPY packages/domain packages/domain
+COPY packages/embedding packages/embedding
 COPY services/ingest services/ingest
 
 WORKDIR /repo/services/ingest
@@ -30,6 +32,7 @@ WORKDIR /app
 # node_modules must be reachable from there.
 COPY package.json package-lock.json ./
 COPY packages/domain packages/domain
+COPY packages/embedding packages/embedding
 COPY services/ingest/package.json services/ingest/
 
 # NO --include-workspace-root: the root package IS the Next.js web app, and

@@ -23,6 +23,7 @@ import {
   type EventSearchResult,
 } from "../app/map/utils/event-query";
 import * as pg from "./postgres-storage";
+import { normalizeEntityName } from "@historical-map/domain";
 
 const DATA_PATH =
   process.env["MAP_DATA_PATH"] ?? path.resolve("data/map-data.json");
@@ -263,6 +264,14 @@ export async function searchEvents(
     for (const event of location.events) {
       if (sourceFilter && !sourceFilter.has(event.sourceId ?? "")) continue;
       if (groupEventIds && !groupEventIds.has(event.id)) continue;
+      if (query.documentId && event.documentId !== query.documentId) continue;
+      if (
+        query.person &&
+        !(event.people ?? []).some(
+          (n) => normalizeEntityName(n) === query.person,
+        )
+      )
+        continue;
 
       if (lower) {
         const matchesText =

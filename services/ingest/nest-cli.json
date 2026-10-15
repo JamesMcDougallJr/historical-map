@@ -102,6 +102,15 @@
         "tsConfigPath": "libs/extraction/tsconfig.lib.json"
       }
     },
+    "embedding": {
+      "type": "library",
+      "root": "libs/embedding",
+      "entryFile": "index",
+      "sourceRoot": "libs/embedding/src",
+      "compilerOptions": {
+        "tsConfigPath": "libs/embedding/tsconfig.lib.json"
+      }
+    },
     "geocoding": {
       "type": "library",
       "root": "libs/geocoding",
@@ -154,6 +163,15 @@
       "sourceRoot": "apps/workers/validate/src",
       "compilerOptions": {
         "tsConfigPath": "apps/workers/validate/tsconfig.app.json"
+      }
+    },
+    "embed": {
+      "type": "application",
+      "root": "apps/workers/embed",
+      "entryFile": "main",
+      "sourceRoot": "apps/workers/embed/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/workers/embed/tsconfig.app.json"
       }
     }
   }

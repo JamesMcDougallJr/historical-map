@@ -56,6 +56,17 @@ jobs:
           timeout 60 bash -c 'until docker compose exec -T redis redis-cli ping; do sleep 2; done'
           timeout 60 bash -c 'until aws --endpoint-url http://localhost:9000 s3 ls; do sleep 2; done'
 
+      # The db image builds pgvector from db/pgvector-version (db/Dockerfile),
+      # which pins what production RDS ships. Fail here, with both versions
+      # named, rather than later in a migration or a search spec.
+      - name: Check pgvector matches db/pgvector-version
+        run: |
+          want="$(tr -d '[:space:]' < db/pgvector-version)"
+          got="$(docker compose exec -T db psql -U postgres -d db -tAc \
+            "CREATE EXTENSION IF NOT EXISTS vector; SELECT extversion FROM pg_extension WHERE extname = 'vector'" | tail -n1 | tr -d '[:space:]')"
+          echo "pgvector: image has '$got', db/pgvector-version pins '$want'"
+          test "$got" = "$want"
+
       # Must run before `martin` starts, not just before ingest migrations:
       # Martin discovers SQL functions from the Postgres catalog once at
       # boot and never picks up ones created later, so starting it ahead of
@@ -86,6 +97,12 @@ jobs:
       - name: Run the real-backend E2E suite
         run: npm run test:e2e:real
 
+      # The stdio MCP server's `search` tool against the JSON tier (no
+      # POSTGRES_URL — the script strips it). A few seconds, so it runs here
+      # rather than staying manual (plans/24-search-mcp.md).
+      - name: Verify the stdio MCP search tool
+        run: npm run mcp:verify
+
       - name: Run the ingestion fixture test
         env:
           EXTRACTION_ENGINE: fake
@@ -96,6 +113,11 @@ jobs:
 
       - name: Verify the Jev client and checks (mocked)
         run: npm run jev:verify --workspace=services/ingest
+
+      # Offline: error classification, retry behaviour and the recorded-vector
+      # fake. The live Bedrock half is bedrock-live.yml's, under its OIDC role.
+      - name: Verify the embedding engines (offline)
+        run: npm run embed:verify --workspace=services/ingest
 
       - name: Run the ingestion fixture test with Jev enabled
         env:

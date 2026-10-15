@@ -450,3 +450,41 @@ button:focus-visible {
   background: transparent;
   color: #e5e5e5;
 }
+
+/* ── Search (app/map/search) ──────────────────────────────────────────────
+   Plain CSS rather than Tailwind utilities for the rules that are about
+   correctness, not looks, so a stale Turbopack CSS chunk (see CLAUDE.md)
+   can't silently drop them. */
+
+/* Touch targets ≥ 44px on coarse pointers — rows, chips, panel buttons. */
+@media (pointer: coarse) {
+  .search-touch-target {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}
+
+/* No ⌘K affordance where there is no keyboard to press it on. */
+@media (pointer: coarse) {
+  .search-kbd-hint {
+    display: none;
+  }
+}
+
+/* The passage a passage-result click opened the document panel at. */
+.search-passage-focus {
+  box-shadow: 0 0 0 2px rgb(251 191 36 / 0.6);
+}
+
+/* type="search" draws its own clear button; the bar has Esc and its own UI. */
+input[data-testid="search-input"]::-webkit-search-cancel-button {
+  display: none;
+}
+
+/* Timeline thumbs are 20px to look at but need a finger-sized target — the
+   timeline is search's primary filter on touch too. */
+.timeline-thumb::before {
+  content: "";
+  position: absolute;
+  inset: -12px;
+}

@@ -40,6 +40,8 @@ npm run db:backup                          # it truncates and reseeds your dev D
                                             # no separate test DB; Martin's DATABASE_URL in
                                             # docker-compose.yml points at the same `db` npm run dev uses
 docker compose up -d db martin
+POSTGRES_URL=postgres://postgres:password@localhost:5433/db \
+  npm run migrate --workspace=services/ingest   # search fixtures seed document_passages
 ALLOW_TEST_DB_RESET=1 npm run test:e2e:real
 ```
 
@@ -52,6 +54,14 @@ rather than changing admin's own default (every developer running it standalone 
 
 **Both configs bind port 3000 for the web app.** Run `test:e2e` and `test:e2e:real`
 sequentially, never in parallel.
+
+**Embeddings in tests are recorded, never live.** `e2e-real` and the ingestion fixture
+run with `EMBEDDING_ENGINE=fake`, which serves real Titan vectors from
+`e2e-real/fixtures/search-vectors.json` and **throws, naming the text, on anything not
+in it**. So editing fixture text, a golden query or a hybrid spec's query fails until
+you re-record: `BEDROCK_REGION=us-west-2 ALLOW_TEST_DB_RESET=1 npm run search:record-vectors`
+(needs AWS credentials; incremental, so only new texts call Bedrock). The account's
+Titan quota is low, so throttling mid-run is normal; re-run until it completes.
 
 There's also a third, non-Playwright check:
 `services/ingest/scripts/run-ingestion-fixture.ts` runs the full
@@ -217,7 +227,7 @@ production builds):
 | Global             | What it is                                                                                        |
 | ------------------ | ------------------------------------------------------------------------------------------------- |
 | `window.__olMap`   | The live OpenLayers `Map` — layers, sources, view, hit testing                                    |
-| `window.__olDebug` | The popup/hover **refs** (read `.current`): `popupHovered`, `hoverTimeout`, `pinned`, `hoveredId` |
+| `window.__olDebug` | The popup/hover **refs** (read `.current`): `popupHovered`, `hoverTimeout`, `pinned`, `hoveredId`, and `pinStyle` — the timeline/search-highlight/pulse/focus state every pin's style is computed from |
 
 They exist because the hover and popup state deliberately lives in refs rather than state —
 OpenLayers event handlers are registered once and would otherwise close over stale values
@@ -347,12 +357,30 @@ from evidence rather than guessed. First real run: 90/131 quotes found.
 `publish` reads only `verdict = 'publish'` and demotes back to review when
 geocoding fails, since `locations` requires coordinates.
 
+**People are extracted verbatim, not resolved.** The extraction schema has a `people`
+array (names exactly as written); `publish` writes them to `event_entities` (type `person`,
+a web-app-owned map table created by `ensureSchema()`), with `name_norm` from
+`normalizeEntityName` in `packages/domain/src/entities.ts`. "Brigham Young" and "President
+Young" are two names — search shows them as separate person hits on purpose; merging them
+is identity work (plans/22 Level 3, with plan 13), not a normaliser tweak. Events extracted
+before the field existed have no people until re-extracted (deliberately not backfilled).
+
+**`document_passages` is search's index over document text** — one row per paragraph, cut
+from the stored artifact by `splitPassages` (`libs/parsers/src/passages/`). `extract-text`
+rewrites it with every artifact; `publish` re-derives `passage_events` (which event was
+quoted from which paragraph) for the whole document after each run. It has its own
+`SPLITTER_VERSION`, separate from `EXTRACTOR_VERSION`: bumping it re-cuts passages from
+stored artifacts with no re-cleaning, fetch or extraction (`extract-text` does it on its
+"already extracted" path, or run `search:backfill-passages`). The splitter splits on
+sentence punctuation, not line length — real PDFs reach it already reflowed into
+paragraph-length lines; see plans/20-search-lexical.md for the measurement.
+
 Verifiers (`--workspace=services/ingest`): `sources:verify` and `extract:verify`
 need nothing at all; `db:verify` needs Postgres, `queue:verify` needs Redis.
 `extract:verify -- --live` additionally makes one real Groq call.
 
 Operator scripts: `detect:trigger`, `queue:inspect`, `queue:requeue`,
-`geocode:review`, `seed:sources`.
+`geocode:review`, `seed:sources`, `search:backfill-passages`.
 
 Deploy is `docker-compose.prod.yml` layered on `docker-compose.yml`. The web app
 is **not** in it — it stays on Vercel; these workers are long-lived processes
@@ -600,6 +628,13 @@ on `POSTGRES_URL`. Its API mirrors the browser module's but is **async** — ser
 filesystems are ephemeral and read-only, so writes only persist under Postgres. Postgres
 tables are created on demand by `ensureSchema()`.
 
+**Search columns are generated, and depend on things outside the tables.** `ensureSchema()`
+adds `search_tsv`/`name_tsv` to `events`, `locations` and `event_groups`, built from two
+custom text search configurations (`hm_english` stems, `hm_simple` doesn't; both fold accents
+through `unaccent`) plus `immutable_unaccent()` and `event_lo_year()`/`event_hi_year()` — the
+SQL twin of `eventYearSpan()` in `packages/domain/src/date-interval.ts`; change both together.
+A table-scoped `db:restore` into a fresh container needs `npm run db:ensure-schema` first.
+
 `app/map/page.tsx` (thin, 102 lines) bridges browser and server: on first visit it seeds
 `localStorage` from `GET /api/data/locations`, and it polls that endpoint every 5s to pick
 up writes made through the MCP server — but **only when `NEXT_PUBLIC_MAP_API_KEY` is set**.
@@ -615,6 +650,19 @@ nav chrome for embedding. Changing it affects Claude's inline map too.
 - `overlayLayersRef` (a `Map<string, BaseLayer>`) caches OL layers by overlay ID
 - Popup hover uses a 300ms debounce; `isPinnedRef` mirrors `isPinned` state to avoid stale
   closures in OL event handlers
+- **Every event-layer pin is styled by one style function** reading `pinStyleStateRef` —
+  timeline span, search highlight/dim, pulsed row, "Showing: …" focus filter. Change any of
+  it and call `layer.changed()`: that re-styles without refetching (an MVT `setUrl` would
+  refetch every tile). Vector layers' timeline filtering lives there too, so don't go back to
+  `feature.setStyle` for it — that overrode highlighting.
+- **On /map, MapView is driven from `app/map/search/MapWithSearch.tsx`**: the timeline is
+  lifted into it as optional controlled props (absent → MapView's own state, which is what
+  the MCP App uses), and search actions go through the imperative `MapViewHandle`
+  (`showEvent`, `showLocation`, `focusGroup`, `focusLocations`). MapView must never import
+  `app/map/search/` — a spec guards it, since the MCP bundle would grow.
+- The map is rebuilt whenever `locations`/`eventLayers` change; the view (or an in-flight
+  fly's target) and an open popup are carried across, so a rebuild no longer snaps back to the
+  default centre.
 
 ### MCP server — two transports, one registration
 
@@ -635,6 +683,15 @@ origin gets blocked. Origins live in `TILE_ORIGINS` in `mcp/register.ts` and go 
 `connectDomains` and `resourceDomains`. `_meta.ui` is set in two places — on the
 registration (the `resources/list` fallback) and on the content item (which takes
 precedence at read time).
+
+**The `search` tool** (read-only, both transports) is a thin wrapper over `lib/search.ts`, the
+same core as `/api/search` — keep it that way rather than letting the two drift. Its hits feed
+`show_map`'s `focus: { kind, id }`, which the server resolves (`resolveFocus` in
+`mcp/register.ts`, types in `mcp/focus-types.ts`) and the App applies through MapView's
+imperative handle. Document/passage focus shows text and pages only, never the original file
+(its presigned URL is a CSP-blocked origin). `npm run mcp:verify` drives the stdio server's
+`search` against the JSON tier (CI runs it); `e2e/mcp-app-focus.spec.ts` is the only harness for
+the inline App — it builds a development bundle (for `__olMap`) and fakes the host handshake.
 
 Arbitrary user tile URLs and Allmaps IIIF overlays cannot work in the sandbox: their origins
 are unknowable ahead of time. They work normally at `/map`. See `mcp/README.md`.
@@ -687,6 +744,11 @@ the first one arrives with the ingestion engine's `extract` worker (`plans/08-ex
 - `/api/data/locations`, `/api/data/locations/[id]/events`, `/api/data/search` — CRUD over
   `lib/server-storage.ts`, gated on an optional `x-api-key` vs `MAP_API_KEY`
 - `/api/mcp` — the MCP connector
+- `/api/search`, `/api/search/matches` — typed, grouped search hits and the matching pin ids
+  (plans/20-search-lexical.md). All logic is in `lib/search.ts` (orchestration, date parsing via
+  `app/map/utils/search-query.ts`), `lib/search-postgres.ts` (one ranked query per kind) and
+  `lib/search-static.ts` (the in-memory fallback without `POSTGRES_URL`). Snippets carry
+  `\u0002`/`\u0003` sentinels around matches — never HTML; render them as text.
 
 ### Security
 

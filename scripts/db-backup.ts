@@ -20,6 +20,7 @@ const APP_TABLES = [
   "sources",
   "locations",
   "events",
+  "event_entities",
   "geocode_cache",
   "ingest_sources",
   "ingest_documents",

@@ -6,7 +6,7 @@ import { createMapClient } from "@historical-map/api-client";
 import type { EventGroup, EventLayer, HistoricalLocation } from "./types";
 import { getLocations, saveEventsData } from "./utils/storage";
 import type { HistoricalEventsData } from "./types";
-import { MapView } from "./components/MapView";
+import { MapWithSearch } from "./search/MapWithSearch";
 import { eventLayersFromSources, getEventLayers } from "./utils/event-layers";
 
 // Same-origin: no baseUrl needed. `MAP_API_KEY`-gated routes treat a missing
@@ -150,7 +150,7 @@ function MapContent(): JSX.Element {
   if (!eventLayers) return <div>Loading map...</div>;
 
   return (
-    <MapView
+    <MapWithSearch
       locations={locations}
       initialEventLayers={eventLayers}
       eventGroups={eventGroups}

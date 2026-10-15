@@ -38,14 +38,17 @@ BEGIN
       l.id                              AS location_id,
       e.source_id                       AS source_id,
       l.name                            AS name,
-      MIN(EXTRACT(YEAR FROM e.date))::int AS min_year,
-      MAX(EXTRACT(YEAR FROM e.date))::int AS max_year,
+      -- Precision-aware spans (event_lo_year/event_hi_year, created by the web
+      -- app's ensureSchema): the same rule search filters with, so a search
+      -- hit is always a pin this function draws.
+      MIN(event_lo_year(e.date, e.date_precision)) AS min_year,
+      MAX(event_hi_year(e.date, e.date_precision)) AS max_year,
       COUNT(*)::int                     AS event_count
     FROM locations l
     JOIN events e ON e.location_id = l.id
     WHERE ST_Transform(l.geom, 3857) && ST_TileEnvelope(z, x, y)
-      AND (from_year  IS NULL OR EXTRACT(YEAR FROM e.date) >= from_year)
-      AND (to_year    IS NULL OR EXTRACT(YEAR FROM e.date) <= to_year)
+      AND (from_year  IS NULL OR event_hi_year(e.date, e.date_precision) >= from_year)
+      AND (to_year    IS NULL OR event_lo_year(e.date, e.date_precision) <= to_year)
       AND (source_ids IS NULL OR e.source_id = ANY(source_ids))
     -- One pin per (location, source): a location with events from two sources
     -- appears once in each source's layer, which is what independent layers mean.

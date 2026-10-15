@@ -16,9 +16,31 @@ interface RateLimitConfig {
   windowMs: number;
 }
 
+/** Not a path: the bucket for submitted `mode=hybrid` searches on /api/search. */
+const HYBRID_SEARCH_KEY = "/api/search#hybrid";
+
+/** Which rate-limit bucket a request falls in, if any. */
+function rateLimitKey(request: NextRequest, pathname: string): string | null {
+  if (
+    pathname === "/api/search" &&
+    request.nextUrl.searchParams.get("mode") === "hybrid" &&
+    request.nextUrl.searchParams.get("prefix") !== "1"
+  ) {
+    return HYBRID_SEARCH_KEY;
+  }
+  return RATE_LIMITS[pathname] !== undefined ? pathname : null;
+}
+
 const RATE_LIMITS: Record<string, RateLimitConfig> = {
   "/api/parse-pdf": { maxRequests: 3, windowMs: 60_000 },
   "/api/parse": { maxRequests: 10, windowMs: 60_000 },
+  // A submitted hybrid search costs a Bedrock call (or a cache hit); lexical
+  // search and typeahead cost nothing, and stay unlimited here. Its own key,
+  // so exhausting it never blocks lexical search (plans/23, "Cost and abuse").
+  [HYBRID_SEARCH_KEY]: {
+    maxRequests: Number(process.env["SEARCH_HYBRID_RATE_LIMIT"]) || 30,
+    windowMs: 60_000,
+  },
 };
 
 // Bounded map to prevent unbounded memory growth
@@ -96,7 +118,8 @@ export function middleware(request: NextRequest): NextResponse {
   }
 
   // 2. Rate limiting (API routes only)
-  if (isApiRoute && RATE_LIMITS[pathname] !== undefined) {
+  const limitKey = isApiRoute ? rateLimitKey(request, pathname) : null;
+  if (limitKey) {
     const forwarded = request.headers.get("x-forwarded-for");
     const firstForwarded = forwarded
       ? (forwarded.split(",")[0] ?? "").trim()
@@ -104,7 +127,7 @@ export function middleware(request: NextRequest): NextResponse {
     const ip =
       firstForwarded || request.headers.get("x-real-ip") || "127.0.0.1";
 
-    if (isRateLimited(ip, pathname)) {
+    if (isRateLimited(ip, limitKey)) {
       return new NextResponse("Too Many Requests", {
         status: 429,
         headers: { "Retry-After": "60" },
