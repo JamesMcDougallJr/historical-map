@@ -20,11 +20,14 @@ export interface SweepCounts {
 export interface SweepScope {
   eventSourceIds?: string[];
   groupIds?: string[];
+  /** `ingest_sources.key` of the documents whose passages to embed. */
+  passageSourceKeys?: string[];
 }
 
 export interface SweepResult {
   events: SweepCounts;
   groups: SweepCounts;
+  passages: SweepCounts;
 }
 
 const BATCH_SIZE = 32;
@@ -64,7 +67,62 @@ export async function runEmbeddingSweep(
   return {
     events: await sweepEvents(db, engine, scope.eventSourceIds ?? null),
     groups: await sweepGroups(db, engine, scope.groupIds ?? null),
+    passages: await sweepPassages(db, engine, scope.passageSourceKeys ?? null),
   };
+}
+
+/**
+ * Passages need no hash: their text never changes in place — a re-cut deletes
+ * and re-inserts — so a row needs embedding exactly when its `embedding` is
+ * NULL or from another model.
+ */
+async function sweepPassages(
+  db: SqlRunner,
+  engine: EmbeddingEngine,
+  sourceKeys: string[] | null,
+): Promise<SweepCounts> {
+  const [{ checked }] = (await db.query(
+    `SELECT count(*)::int AS checked
+       FROM document_passages p
+       JOIN ingest_documents d ON d.id = p.document_id
+       JOIN ingest_sources s ON s.id = d.source_id
+      WHERE $1::text[] IS NULL OR s.key = ANY($1)`,
+    [sourceKeys],
+  )) as Array<{ checked: number }>;
+  const rows = (await db.query(
+    `SELECT p.document_id, p.seq, p.text
+       FROM document_passages p
+       JOIN ingest_documents d ON d.id = p.document_id
+       JOIN ingest_sources s ON s.id = d.source_id
+      WHERE ($1::text[] IS NULL OR s.key = ANY($1))
+        AND (p.embedding IS NULL OR p.embedding_model IS DISTINCT FROM $2)
+      ORDER BY p.document_id, p.seq`,
+    [sourceKeys, engine.model],
+  )) as Array<{ document_id: string; seq: number; text: string }>;
+
+  const pending: Pending[] = rows.map((r) => ({
+    id: `${r.document_id}#${r.seq}`,
+    text: r.text,
+    hash: "",
+  }));
+  await embedInBatches(engine, pending, (item, vector) => {
+    const [documentId, seq] = item.id.split("#");
+    // Conditional on the text still being what was embedded: a re-cut
+    // between the read and this write must not get the old paragraph's vector.
+    return db.query(
+      `UPDATE document_passages
+          SET embedding = $3::vector, embedding_model = $4
+        WHERE document_id = $1 AND seq = $2 AND text = $5`,
+      [
+        documentId,
+        Number(seq),
+        toVectorLiteral(vector),
+        engine.model,
+        item.text,
+      ],
+    );
+  });
+  return { checked, embedded: pending.length };
 }
 
 function isStale(

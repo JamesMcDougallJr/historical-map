@@ -20,11 +20,15 @@ async function main(): Promise<void> {
   const dataSource = createDataSource();
   await dataSource.initialize();
   try {
-    const { events, groups } = await runEmbeddingSweep(dataSource, engine);
+    const { events, groups, passages } = await runEmbeddingSweep(
+      dataSource,
+      engine,
+    );
     console.log(
       `${engine.engineName} (${engine.model}, ${engine.dims} dims): ` +
         `embedded ${events.embedded}/${events.checked} events, ` +
-        `${groups.embedded}/${groups.checked} sequences`,
+        `${groups.embedded}/${groups.checked} sequences, ` +
+        `${passages.embedded}/${passages.checked} passages`,
     );
   } finally {
     await dataSource.destroy();

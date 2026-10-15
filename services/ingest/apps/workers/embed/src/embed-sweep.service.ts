@@ -55,13 +55,15 @@ export class EmbedSweepService
     if (this.running) return;
     this.running = true;
     try {
-      const { events, groups } = await runEmbeddingSweep(
+      const { events, groups, passages } = await runEmbeddingSweep(
         this.dataSource,
         this.engine,
       );
-      if (events.embedded > 0 || groups.embedded > 0) {
+      if (events.embedded + groups.embedded + passages.embedded > 0) {
         this.logger.log(
-          `embedded ${events.embedded}/${events.checked} events, ${groups.embedded}/${groups.checked} sequences`,
+          `embedded ${events.embedded}/${events.checked} events, ` +
+            `${groups.embedded}/${groups.checked} sequences, ` +
+            `${passages.embedded}/${passages.checked} passages`,
         );
       }
     } catch (error) {

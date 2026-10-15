@@ -20,6 +20,7 @@ import {
   type EmbeddingEngine,
   type SweepScope,
 } from "../libs/embedding/src";
+import { backfillPassages } from "./backfill-passages";
 import { FIXTURE_SOURCE_KEY } from "./fixture-guard";
 
 export const FIXTURE_GROUP_ID = "ingest-fixture-sequence";
@@ -62,7 +63,25 @@ async function run(db: DataSource): Promise<void> {
   const scope: SweepScope = {
     eventSourceIds: [FIXTURE_SOURCE_KEY],
     groupIds: [FIXTURE_GROUP_ID],
+    passageSourceKeys: [FIXTURE_SOURCE_KEY],
   };
+  const passageFilter = `document_id IN (
+      SELECT d.id FROM ingest_documents d JOIN ingest_sources s ON s.id = d.source_id
+       WHERE s.key = '${FIXTURE_SOURCE_KEY}')`;
+  const passageStats = async (): Promise<{
+    rows: number;
+    missing: number;
+    models: string[];
+  }> =>
+    (
+      await db.query(
+        `SELECT count(*)::int AS rows,
+                count(*) FILTER (WHERE embedding IS NULL)::int AS missing,
+                COALESCE(array_agg(DISTINCT embedding_model)
+                         FILTER (WHERE embedding_model IS NOT NULL), '{}') AS models
+           FROM document_passages WHERE ${passageFilter}`,
+      )
+    )[0];
 
   type EventRow = {
     id: string;
@@ -158,11 +177,47 @@ async function run(db: DataSource): Promise<void> {
     }
   }
 
+  const passages = await passageStats();
+  if (
+    passages.rows === 0 ||
+    passages.missing !== 0 ||
+    r1.passages.embedded !== passages.rows ||
+    passages.models.join() !== base.model
+  ) {
+    fail(
+      `first pass left passages ${JSON.stringify(passages)} (embedded ${r1.passages.embedded})`,
+    );
+  }
+
   // 2. Nothing changed → nothing embedded, no call at all.
   const idle = new LoggingEngine(base);
   const r2 = await runEmbeddingSweep(db, idle, scope);
-  if (idle.sent.length !== 0 || r2.events.embedded + r2.groups.embedded !== 0) {
+  if (
+    idle.sent.length !== 0 ||
+    r2.events.embedded + r2.groups.embedded + r2.passages.embedded !== 0
+  ) {
     fail(`an unchanged corpus re-embedded ${idle.sent.length} text(s)`);
+  }
+
+  // 2b. Re-cutting passages (what a SPLITTER_VERSION or EXTRACTOR_VERSION bump
+  // does) replaces the rows; the sweep embeds exactly those new rows.
+  await backfillPassages({ force: true });
+  const recut = await passageStats();
+  if (recut.missing !== recut.rows) {
+    fail(`a re-cut kept ${recut.rows - recut.missing} old passage vector(s)`);
+  }
+  const afterRecut = new LoggingEngine(base);
+  const rRecut = await runEmbeddingSweep(db, afterRecut, scope);
+  const recutTexts: Array<{ text: string }> = await db.query(
+    `SELECT text FROM document_passages WHERE ${passageFilter} ORDER BY document_id, seq`,
+  );
+  if (
+    rRecut.passages.embedded !== recut.rows ||
+    rRecut.events.embedded + rRecut.groups.embedded !== 0 ||
+    afterRecut.sent.join("\n") !== recutTexts.map((r) => r.text).join("\n") ||
+    (await passageStats()).missing !== 0
+  ) {
+    fail(`after a re-cut the sweep sent ${afterRecut.sent.length} text(s)`);
   }
 
   // 3. Editing one event's description re-embeds that row only.
@@ -204,8 +259,19 @@ async function run(db: DataSource): Promise<void> {
     `${base.model}+fixture-model-change`,
   );
   const r5 = await runEmbeddingSweep(db, otherModel, scope);
-  if (r5.events.embedded !== events.length || r5.groups.embedded !== 1) {
+  if (
+    r5.events.embedded !== events.length ||
+    r5.groups.embedded !== 1 ||
+    r5.passages.embedded !== passages.rows
+  ) {
     fail(`a model change embedded ${JSON.stringify(r5)}, expected everything`);
+  }
+  const afterModelChange = await passageStats();
+  if (
+    afterModelChange.missing !== 0 ||
+    afterModelChange.models.join() !== otherModel.model
+  ) {
+    fail(`passages after a model change: ${JSON.stringify(afterModelChange)}`);
   }
   const [{ rows, models }]: Array<{ rows: number; models: string[] }> =
     await db.query(
@@ -237,5 +303,15 @@ async function run(db: DataSource): Promise<void> {
         `${table}: worst |‖v‖ − 1| = ${check.worst}, dims consistent: ${check.dims_ok}`,
       );
     }
+  }
+  const [passageNorms]: Array<{ worst: number; dims_ok: boolean }> =
+    await db.query(
+      `SELECT max(abs(vector_norm(embedding) - 1)) AS worst,
+              bool_and(vector_dims(embedding) = $1) AS dims_ok
+         FROM document_passages WHERE ${passageFilter}`,
+      [base.dims],
+    );
+  if (!(passageNorms.worst < 1e-3) || !passageNorms.dims_ok) {
+    fail(`document_passages: ${JSON.stringify(passageNorms)}`);
   }
 }

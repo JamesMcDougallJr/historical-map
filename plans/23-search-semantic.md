@@ -5,7 +5,7 @@ Part of [19-search.md](./19-search.md). Builds on the substrate in
 first**: provider, model, dimensions and the `EmbeddingEngine` interface are
 settled there, and this file does not reopen them.
 
-> **Status (2026-10-15): step 0 applied; steps 1–3 built; steps 4–6 not
+> **Status (2026-10-15): step 0 applied; steps 1–4 built; steps 5–6 not
 > started.** `infra/`
 > declares everything in "Infrastructure and automation" that lives in
 > Terraform (`caa0a8d`, verified by `tofu validate`/`tofu test` in the
@@ -357,7 +357,7 @@ granted, which must be denied.
 | 1    | pgvector image pinned by `db/pgvector-version`, plus the CI and migration version checks                        | **Built** (2026-10-15): pinned to 0.8.2 (RDS 16.15's); `db/Dockerfile`, CI step, `AddPgvector1760486400000`. Waiting on the e2e-real run in CI; the RDS migrate passes only after the upgrade              |
 | 2    | `EmbeddingEngine` + Bedrock implementation (plan 12, shared with 13), `embed:verify`, `bedrock-live.yml`        | **Done** (2026-10-15): `libs/embedding` (Bedrock + recorded-vector fake, Nest-free except the module). `embed:verify` in E2E; `bedrock-live.yml` green under the OIDC role, including the one-model denial |
 | 3    | Event and sequence embedding + `content_hash` sweep in the `embed` worker                                       | **Built** (2026-10-15): see "Step 3 as built" below. All six fixture bullets green locally, against both live Titan (`record`) and recorded vectors (`fake`)                                               |
-| 4    | Passage embeddings (backfill from `document_passages`)                                                          | Not started                                                                                                                                                                                                |
+| 4    | Passage embeddings (backfill from `document_passages`)                                                          | **Built** (2026-10-15): `document_passages.embedding`/`embedding_model`, filled by the same sweep; fixture passage bullets green (`record` and `fake`)                                                     |
 | 5    | Web app: query embedding + cache + hybrid SQL behind `mode=hybrid`                                              | Not started. (Already in place from earlier phases: `mode=hybrid` is accepted and returns lexical results with `modes.semantic = false`; the UI shows "Search by meaning unavailable" on Enter.)           |
 | 6    | Golden-set comparison, floor tuning, then turn it on in the UI                                                  | Not started                                                                                                                                                                                                |
 
@@ -402,6 +402,12 @@ Where it departs from, or pins down, the text above:
 - **Jev-mode fixture runs skip the embed checks**: Jev holds some events back,
   so the published set and the sequence text over it differ from the
   baseline run's recording.
+- **Passages (step 4)** need no `content_hash`: a re-cut (`SPLITTER_VERSION`
+  or `EXTRACTOR_VERSION`) deletes and re-inserts a document's rows, so "needs
+  embedding" is `embedding IS NULL` or another model. The fixture forces a
+  re-cut and checks the sweep sends exactly the new rows' texts; both version
+  bumps take that same path, so one check covers them. The backfill is the
+  sweep itself — the worker fills every existing passage on its first pass.
 
 ## Decided (2026-10-08)
 
