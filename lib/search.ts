@@ -67,8 +67,20 @@ const RRF_K = 60;
 const HYBRID_POOL = 50;
 /**
  * The vector arm's relevance floor: cosine similarity below this is noise
- * (nearest-neighbour search always returns *something*). Provisional until
- * step 6 sets it from the golden set with `search:eval --floor`.
+ * (nearest-neighbour search always returns *something*).
+ *
+ * Set from `npm run search:eval -- --floor` on the fixture golden set
+ * (2026-10-15, Titan v2 at 256 dims, 127 recorded vectors):
+ *
+ *   floor   hybrid expectations found   negative-query meaning hits
+ *   0.275            6/6                            1
+ *   0.300            6/6                            0   ← this
+ *   0.325            6/6                            0
+ *   0.350            5/6                            0
+ *
+ * The safe band is narrow — Titan's similarities run low (a genuine
+ * paraphrase, Tula vs "Toltec collapse", is 0.363) — so re-run the sweep with
+ * `--live` against the real corpus before trusting it on more data.
  */
 export const VECTOR_MIN_SIMILARITY = 0.3;
 
@@ -379,6 +391,7 @@ async function vectorArm(
   p: Prepared,
   kinds: ReadonlySet<SearchKind>,
   documents: boolean,
+  minSimilarity = VECTOR_MIN_SIMILARITY,
 ): Promise<pg.VectorRanks | null> {
   if (req.mode !== "hybrid" || req.prefix) return null;
   const vectorKinds = new Set(
@@ -395,7 +408,7 @@ async function vectorArm(
       pgInput(req, p, HYBRID_POOL),
       query.vector,
       query.model,
-      VECTOR_MIN_SIMILARITY,
+      minSimilarity,
       HYBRID_POOL,
       vectorKinds,
       documents,
@@ -404,6 +417,46 @@ async function vectorArm(
     console.warn(`[search] vector arm failed: ${(error as Error)?.message}`);
     return null;
   }
+}
+
+/**
+ * The vector arm alone, hydrated, in vector order — for `search:eval`, which
+ * compares lexical, vector-only and hybrid, and sweeps candidate floors. Null
+ * when the arm can't run. Not used to serve searches.
+ */
+export async function searchVectorOnly(
+  req: SearchRequest,
+  minSimilarity = VECTOR_MIN_SIMILARITY,
+): Promise<SearchHit[] | null> {
+  if (!usePostgres()) return null;
+  const p = prepare(req);
+  if (p.conflict || !hasText(p.text)) return [];
+  const documents = await pg.documentsAvailable();
+  const ranks = await vectorArm(
+    { ...req, mode: "hybrid", prefix: false },
+    p,
+    new Set(req.kinds),
+    documents,
+    minSimilarity,
+  );
+  if (!ranks) return null;
+  const limit = (kind: SearchKind) => req.limit ?? DEFAULT_LIMITS[kind];
+  const [events, sequences, passages] = await Promise.all([
+    fuse([], ranks.event, limit("event"), (ids) =>
+      pg.searchEventHits({ ...pgInput(req, p, ids.length), ids }),
+    ),
+    fuse([], ranks.sequence, limit("sequence"), (ids) =>
+      pg.searchSequenceHits({ ...pgInput(req, p, ids.length), ids }),
+    ),
+    fuse([], ranks.passage, limit("passage"), (ids) =>
+      pg.searchPassageHits(
+        { ...pgInput(req, p, ids.length), ids },
+        HYBRID_POOL,
+        new Set(),
+      ),
+    ),
+  ]);
+  return [...events, ...sequences, ...passages];
 }
 
 /**

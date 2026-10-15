@@ -70,6 +70,7 @@ export function useSearch({
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const slowTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastPrefixRef = useRef(true);
+  const lastSubmittedRef = useRef(false);
   const inputRef = useRef("");
   const dismissedRef = useRef(false);
   useEffect(() => {
@@ -93,10 +94,14 @@ export function useSearch({
     async (
       text: string,
       prefix: boolean,
-      log = false,
+      {
+        submitted = false,
+        log = submitted,
+      }: { submitted?: boolean; log?: boolean } = {},
     ): Promise<SearchResponse | null> => {
       cancel();
       lastPrefixRef.current = prefix;
+      lastSubmittedRef.current = submitted;
       if (!text.trim()) {
         setResponse(null);
         setMatches(null);
@@ -109,7 +114,9 @@ export function useSearch({
       const params: SearchParams = {
         q: text,
         prefix,
-        mode: "lexical",
+        // Search by meaning only on submit (plans/23): a keystroke never costs
+        // an embedding, and a submitted query is embedded once (then cached).
+        mode: submitted ? "hybrid" : "lexical",
         timeline,
         view: limitToView ? getViewFilter() : null,
         log,
@@ -184,8 +191,8 @@ export function useSearch({
         inputRef.current = text;
         setInputState(text);
       }
-      // Only a submitted search is logged — never a keystroke (plans/23).
-      return run(inputRef.current, false, true);
+      // Hybrid and logged — never a keystroke (plans/23).
+      return run(inputRef.current, false, { submitted: true });
     },
     [run],
   );
@@ -209,7 +216,12 @@ export function useSearch({
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
       debounceRef.current = null;
-      void run(inputRef.current, lastPrefixRef.current);
+      // A submitted search stays hybrid (its vector is cached, so this costs
+      // no embedding) but isn't logged twice.
+      void run(inputRef.current, lastPrefixRef.current, {
+        submitted: lastSubmittedRef.current,
+        log: false,
+      });
     }, SEARCH_DEBOUNCE_MS);
   }, [timelineKey, limitToView, run]);
 

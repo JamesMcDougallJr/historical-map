@@ -23,6 +23,7 @@
     "db:restore": "tsx scripts/db-restore.ts",
     "test:e2e": "playwright test",
     "test:e2e:real": "playwright test --config=e2e-real/playwright.config.ts",
+    "search:eval": "tsx scripts/search-eval.ts",
     "search:record-vectors": "EMBEDDING_ENGINE=record playwright test --config=e2e-real/playwright.config.ts e2e-real/specs/api --project map && npm run search:record-vectors --workspace=services/ingest",
     "test:e2e:real:reset-db": "tsx scripts/reset-test-db.ts",
     "type-check:all": "nx run-many -t type-check",

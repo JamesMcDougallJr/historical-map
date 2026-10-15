@@ -5,8 +5,9 @@ Part of [19-search.md](./19-search.md). Builds on the substrate in
 first**: provider, model, dimensions and the `EmbeddingEngine` interface are
 settled there, and this file does not reopen them.
 
-> **Status (2026-10-15): step 0 applied; steps 1–5 built; step 6 not
-> started.** `infra/`
+> **Status (2026-10-15): step 0 applied; steps 1–6 built on the fixture
+> golden set.** Open: the live eval on a real corpus, the RDS upgrade
+> (Friday's maintenance window) and the re-recording CI job. `infra/`
 > declares everything in "Infrastructure and automation" that lives in
 > Terraform (`caa0a8d`, verified by `tofu validate`/`tofu test` in the
 > `Infra` workflow), and it was applied to production on 2026-10-15 — 13
@@ -359,7 +360,7 @@ granted, which must be denied.
 | 3    | Event and sequence embedding + `content_hash` sweep in the `embed` worker                                       | **Built** (2026-10-15): see "Step 3 as built" below. All six fixture bullets green locally, against both live Titan (`record`) and recorded vectors (`fake`)                                               |
 | 4    | Passage embeddings (backfill from `document_passages`)                                                          | **Built** (2026-10-15): `document_passages.embedding`/`embedding_model`, filled by the same sweep; fixture passage bullets green (`record` and `fake`)                                                     |
 | 5    | Web app: query embedding + cache + hybrid SQL behind `mode=hybrid`                                              | **Built** (2026-10-15): every `search-hybrid.spec.ts` row green locally (126/126 e2e-real, 141 mocked); see "Step 5 as built". The UI still sends lexical on Enter — that's step 6                         |
-| 6    | Golden-set comparison, floor tuning, then turn it on in the UI                                                  | Not started                                                                                                                                                                                                |
+| 6    | Golden-set comparison, floor tuning, then turn it on in the UI                                                  | **Built** (2026-10-15) on the fixture golden set: ship gate passes, floor 0.30 committed with its numbers, Enter sends `mode=hybrid`. `search:eval --live` on a real corpus still to run                   |
 
 The E2E specs above land **with** each step, not after step 6, and a step
 isn't done until its checks pass:
@@ -449,13 +450,40 @@ Where it departs from, or pins down, the text above:
     Measured with Titan: for "Toltec collapse", Fall of Tenochtitlán (0.478)
     is _nearer_ than Overthrow of Tula (0.363), so no distractor set can bury
     one without burying the other.
-- **Floor**: `VECTOR_MIN_SIMILARITY = 0.3`, provisional. It passes all three
-  negative queries and every paraphrase, but Titan v2 similarities run low
-  (Tula vs "Toltec collapse" is 0.363), so step 6 sets it from data.
-- **Recording**: 119 vectors. `npm run search:record-vectors` re-records
-  both suites in `record` mode, which retries throttling and waits it out.
-  The `bedrock-live.yml` job that should re-record on fixture PRs isn't
-  written yet.
+- **Recording**: `npm run search:record-vectors` re-records both suites in
+  `record` mode, which retries throttling and waits it out. The
+  `bedrock-live.yml` job that should re-record on fixture PRs isn't written
+  yet.
+
+### Step 6 as built (2026-10-15)
+
+`npm run search:eval [-- --floor] [-- --live]` (`scripts/search-eval.ts`)
+runs every golden entry in all three modes. On the fixture corpus, with
+every query recorded (127 vectors):
+
+| mode    | recall@5 | MRR   | MRR, lexical entries |
+| ------- | -------- | ----- | -------------------- |
+| lexical | 77.8%    | 0.708 | 0.896                |
+| vector  | 80.6%    | 0.824 | 0.833                |
+| hybrid  | 100.0%   | 0.891 | 0.933                |
+
+**Ship gate passes**: hybrid recall@5 ≥ lexical, and MRR on the lexical
+entries is higher, not lower. The vector arm's p95 is 26 ms over 91 vectors,
+far from the 50 ms index threshold.
+
+**Floor**: the sweep finds 6/6 expectations with 0 negative meaning-hits
+from 0.300 to 0.325; one negative hit appears at 0.275, and a paraphrase is
+lost at 0.350. `VECTOR_MIN_SIMILARITY = 0.3`, with that table in its comment.
+The band is narrow and the corpus small. The plan's own caveat stands:
+**re-run `--floor --live` on a real corpus** before trusting it more widely.
+That needs a database on the pgvector image, embedded with live Bedrock: a
+dev database rebuilt with `docker compose build db`, or production after the
+RDS upgrade, followed by the ingest migrations and the `embed` worker.
+
+**UI**: Enter sends `mode=hybrid&log=1`. Keystrokes stay lexical and
+unlogged. A timeline or limit-to-view re-run of a submitted search stays
+hybrid (its vector is cached) but isn't logged again. Both mocked UI rows
+are in `e2e/search-bar.spec.ts`.
 
 ## Decided (2026-10-08)
 

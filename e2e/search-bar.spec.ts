@@ -68,6 +68,33 @@ test("typing sends prefix=1; Enter sends a search without it", async ({
   await input(page).press("Enter");
   await expect.poll(() => calls.length).toBe(before + 1);
   expect(calls.at(-1)!.params.get("prefix")).toBeNull();
+
+  // Search by meaning only on submit (plans/23): every keystroke request was
+  // lexical, and only the Enter request is hybrid — and logged.
+  const keystrokes = calls.slice(0, before);
+  expect(keystrokes.every((c) => c.params.get("mode") === "lexical")).toBe(
+    true,
+  );
+  expect(keystrokes.every((c) => c.params.get("log") === null)).toBe(true);
+  expect(calls.at(-1)!.params.get("mode")).toBe("hybrid");
+  expect(calls.at(-1)!.params.get("log")).toBe("1");
+});
+
+test("a hybrid search that couldn't search by meaning says so, and still lists hits", async ({
+  page,
+}) => {
+  await mockSearch(page, () =>
+    searchResponse([SEARCH_HITS.event], {
+      modes: { lexical: true, semantic: false, documents: true },
+    }),
+  );
+  await open(page);
+  await input(page).fill("far");
+  await input(page).press("Enter");
+  await expect(page.getByTestId("search-semantic-unavailable")).toHaveText(
+    "Search by meaning unavailable",
+  );
+  await expect(page.locator('[data-kind="event"]').first()).toBeVisible();
 });
 
 test("debounce and abort: a stale response never overwrites a newer one", async ({
