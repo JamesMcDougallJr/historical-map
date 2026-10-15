@@ -111,6 +111,10 @@ export function MapWithSearch({
     const map = new Map<string, { name: string; color?: string }>();
     for (const layer of initialEventLayers) {
       for (const id of layer.sourceIds ?? [layer.id]) {
+        // First layer wins. With Martin configured, the demo source also has
+        // a "(PostGIS)" comparison layer listed after its own (event-layers.ts);
+        // letting that overwrite would label every demo hit "(PostGIS)".
+        if (map.has(id)) continue;
         map.set(id, {
           name: layer.name,
           ...(layer.color ? { color: layer.color } : {}),
