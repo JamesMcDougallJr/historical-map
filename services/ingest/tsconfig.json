@@ -37,6 +37,8 @@
       "@app/sources/*": ["libs/sources/src/*"],
       "@app/extraction": ["libs/extraction/src"],
       "@app/extraction/*": ["libs/extraction/src/*"],
+      "@app/embedding": ["libs/embedding/src"],
+      "@app/embedding/*": ["libs/embedding/src/*"],
       "@app/jev": ["libs/jev/src"],
       "@app/jev/*": ["libs/jev/src/*"],
       "@historical-map/domain": ["../../packages/domain/src/index.ts"],

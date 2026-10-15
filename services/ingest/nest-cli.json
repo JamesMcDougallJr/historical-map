@@ -102,6 +102,15 @@
         "tsConfigPath": "libs/extraction/tsconfig.lib.json"
       }
     },
+    "embedding": {
+      "type": "library",
+      "root": "libs/embedding",
+      "entryFile": "index",
+      "sourceRoot": "libs/embedding/src",
+      "compilerOptions": {
+        "tsConfigPath": "libs/embedding/tsconfig.lib.json"
+      }
+    },
     "geocoding": {
       "type": "library",
       "root": "libs/geocoding",
