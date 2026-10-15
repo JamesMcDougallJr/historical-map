@@ -48,10 +48,7 @@ export class FakeEmbeddingEngine implements EmbeddingEngine {
    * `EMBEDDING_VECTORS_FILE`, else `e2e-real/fixtures/search-vectors.json`
    * found by walking up from here.
    */
-  static fromFile(
-    path = process.env["EMBEDDING_VECTORS_FILE"] ||
-      findUp(DEFAULT_RELATIVE_PATH),
-  ): FakeEmbeddingEngine {
+  static fromFile(path = recordedVectorsPath()): FakeEmbeddingEngine {
     return new FakeEmbeddingEngine(
       JSON.parse(readFileSync(path, "utf8")) as RecordedVectors,
     );
@@ -72,6 +69,22 @@ export class FakeEmbeddingEngine implements EmbeddingEngine {
       }
       return vector;
     });
+  }
+}
+
+/**
+ * `EMBEDDING_VECTORS_FILE`, else `e2e-real/fixtures/search-vectors.json`
+ * found by walking up from here. `mustExist: false` is for recording, which
+ * may be creating the file.
+ */
+export function recordedVectorsPath(mustExist = true): string {
+  const fromEnv = process.env["EMBEDDING_VECTORS_FILE"];
+  if (fromEnv) return fromEnv;
+  try {
+    return findUp(DEFAULT_RELATIVE_PATH);
+  } catch (error) {
+    if (mustExist) throw error;
+    return join(findUp("e2e-real"), "fixtures", "search-vectors.json");
   }
 }
 

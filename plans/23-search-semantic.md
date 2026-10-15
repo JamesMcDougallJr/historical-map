@@ -5,7 +5,7 @@ Part of [19-search.md](./19-search.md). Builds on the substrate in
 first**: provider, model, dimensions and the `EmbeddingEngine` interface are
 settled there, and this file does not reopen them.
 
-> **Status (2026-10-15): step 0 applied; steps 1–2 built; steps 3–6 not
+> **Status (2026-10-15): step 0 applied; steps 1–3 built; steps 4–6 not
 > started.** `infra/`
 > declares everything in "Infrastructure and automation" that lives in
 > Terraform (`caa0a8d`, verified by `tofu validate`/`tofu test` in the
@@ -351,15 +351,15 @@ granted, which must be denied.
 
 ## Build order
 
-| Step | Work                                                                                                            | Status (2026-10-11)                                                                                                                                                                                                                              |
-| ---- | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 0    | `infra/`: engine-version data source, Bedrock IAM user + OIDC role, Vercel env vars, Budgets — one `tofu apply` | **Applied 2026-10-15**; RDS 16.15 pending its maintenance window                                                                                                                                                                                 |
-| 1    | pgvector image pinned by `db/pgvector-version`, plus the CI and migration version checks                        | **Built** (2026-10-15): pinned to 0.8.2 (RDS 16.15's); `db/Dockerfile`, CI step, `AddPgvector1760486400000`. Waiting on the e2e-real run in CI; the RDS migrate passes only after the upgrade                                                    |
-| 2    | `EmbeddingEngine` + Bedrock implementation (plan 12, shared with 13), `embed:verify`, `bedrock-live.yml`        | **Built** (2026-10-15): `libs/embedding` (Bedrock + recorded-vector fake, Nest-free except the module). Offline `embed:verify` 14/14; live Titan call verified (256 dims, unit, ~600 ms). `composeEventText`/`composeGroupText` land with step 3 |
-| 3    | Event and sequence embedding + `content_hash` sweep in the `embed` worker                                       | Not started                                                                                                                                                                                                                                      |
-| 4    | Passage embeddings (backfill from `document_passages`)                                                          | Not started                                                                                                                                                                                                                                      |
-| 5    | Web app: query embedding + cache + hybrid SQL behind `mode=hybrid`                                              | Not started. (Already in place from earlier phases: `mode=hybrid` is accepted and returns lexical results with `modes.semantic = false`; the UI shows "Search by meaning unavailable" on Enter.)                                                 |
-| 6    | Golden-set comparison, floor tuning, then turn it on in the UI                                                  | Not started                                                                                                                                                                                                                                      |
+| Step | Work                                                                                                            | Status (2026-10-11)                                                                                                                                                                                        |
+| ---- | --------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0    | `infra/`: engine-version data source, Bedrock IAM user + OIDC role, Vercel env vars, Budgets — one `tofu apply` | **Applied 2026-10-15**; RDS 16.15 pending its maintenance window                                                                                                                                           |
+| 1    | pgvector image pinned by `db/pgvector-version`, plus the CI and migration version checks                        | **Built** (2026-10-15): pinned to 0.8.2 (RDS 16.15's); `db/Dockerfile`, CI step, `AddPgvector1760486400000`. Waiting on the e2e-real run in CI; the RDS migrate passes only after the upgrade              |
+| 2    | `EmbeddingEngine` + Bedrock implementation (plan 12, shared with 13), `embed:verify`, `bedrock-live.yml`        | **Done** (2026-10-15): `libs/embedding` (Bedrock + recorded-vector fake, Nest-free except the module). `embed:verify` in E2E; `bedrock-live.yml` green under the OIDC role, including the one-model denial |
+| 3    | Event and sequence embedding + `content_hash` sweep in the `embed` worker                                       | **Built** (2026-10-15): see "Step 3 as built" below. All six fixture bullets green locally, against both live Titan (`record`) and recorded vectors (`fake`)                                               |
+| 4    | Passage embeddings (backfill from `document_passages`)                                                          | Not started                                                                                                                                                                                                |
+| 5    | Web app: query embedding + cache + hybrid SQL behind `mode=hybrid`                                              | Not started. (Already in place from earlier phases: `mode=hybrid` is accepted and returns lexical results with `modes.semantic = false`; the UI shows "Search by meaning unavailable" on Enter.)           |
+| 6    | Golden-set comparison, floor tuning, then turn it on in the UI                                                  | Not started                                                                                                                                                                                                |
 
 The E2E specs above land **with** each step, not after step 6, and a step
 isn't done until its checks pass:
@@ -373,6 +373,35 @@ isn't done until its checks pass:
 | 4    | ingestion-fixture passage bullets green                                                                                                                                                                                        |
 | 5    | every `search-hybrid.spec.ts` row green                                                                                                                                                                                        |
 | 6    | `search:eval` shows hybrid ≥ lexical (recall@5, MRR on lexical entries); the floor is committed as a constant whose comment carries the eval numbers; row 18's budget is in `infra/`; then the UI sends `mode=hybrid` on Enter |
+
+### Step 3 as built (2026-10-15)
+
+Where it departs from, or pins down, the text above:
+
+- **Tables** (`AddEmbeddingTables1760572800000`): `event_embeddings` keyed on
+  `event_id → events(id)` and `event_group_embeddings` on
+  `group_id → event_groups(id)`, both `ON DELETE CASCADE`, `vector(256)`,
+  with `model`, `dims`, `content_hash` and the composed `source_text`. Plan
+  12 sketched `event_key`; search returns published events, whose key is
+  `events.id`. Plan 13's dedup can add candidate rows when it's built.
+- **Composition** lives in `libs/embedding/src/compose.ts`. The `Date:` part
+  uses `formatDate`, moved to `packages/domain` so the map and the vector
+  render a year-only event the same way ("1103", never "January 1, 1103").
+- **The sweep** (`runEmbeddingSweep`) is framework-free and shared by the
+  `embed` worker (a timer, default 60 s, `EMBED_SWEEP_INTERVAL_MS`),
+  `search:reembed` (one pass), and the fixture. It takes an optional scope,
+  which only the fixture uses: in CI the database also holds e2e-real's rows,
+  and recordings exist only for the fixture's own texts.
+- **Recording.** `EMBEDDING_ENGINE=record` serves recorded vectors and calls
+  Bedrock for anything missing, writing it back to `search-vectors.json`, so
+  the file holds exactly what the suites embed. `search:record-vectors` runs
+  the ingestion fixture that way; step 5 extends it to e2e-real's search
+  fixtures and wires it into `bedrock-live.yml` for PRs that change them. The
+  first recording (15 vectors) was made by hand with admin credentials —
+  identical vectors to the CI role's, since only the model decides them.
+- **Jev-mode fixture runs skip the embed checks**: Jev holds some events back,
+  so the published set and the sequence text over it differ from the
+  baseline run's recording.
 
 ## Decided (2026-10-08)
 

@@ -6,6 +6,7 @@ import { AddGeocodeCandidates1760227200000 } from "./1760227200000-add-geocode-c
 import { AddGeocodeReview1760313600000 } from "./1760313600000-add-geocode-review";
 import { AddDocumentPassages1760400000000 } from "./1760400000000-add-document-passages";
 import { AddPgvector1760486400000 } from "./1760486400000-add-pgvector";
+import { AddEmbeddingTables1760572800000 } from "./1760572800000-add-embedding-tables";
 
 /**
  * Explicit imports, in order. **Do not replace this with a glob.**
@@ -28,4 +29,5 @@ export const INGEST_MIGRATIONS = [
   AddGeocodeReview1760313600000,
   AddDocumentPassages1760400000000,
   AddPgvector1760486400000,
+  AddEmbeddingTables1760572800000,
 ];

@@ -1,22 +1,14 @@
 import { Module } from "@nestjs/common";
-import { BedrockEmbeddingEngine } from "./bedrock/bedrock.engine";
-import { FakeEmbeddingEngine } from "./fake/fake.engine";
+import { embeddingEngineFromEnv } from "./engine-from-env";
 import { EMBEDDING_ENGINE } from "./tokens";
 
 /**
- * Binds `EMBEDDING_ENGINE`: the recorded-vector fake when
- * `EMBEDDING_ENGINE=fake` (CI and the ingestion fixture — no AWS credentials
- * there, deliberately), Bedrock otherwise. Exports the token, never a class.
+ * Binds `EMBEDDING_ENGINE` to the engine `EMBEDDING_ENGINE` (the env var)
+ * selects — see `embeddingEngineFromEnv`. Exports the token, never a class.
  */
 @Module({
   providers: [
-    {
-      provide: EMBEDDING_ENGINE,
-      useFactory: () =>
-        process.env["EMBEDDING_ENGINE"] === "fake"
-          ? FakeEmbeddingEngine.fromFile()
-          : BedrockEmbeddingEngine.fromEnv(),
-    },
+    { provide: EMBEDDING_ENGINE, useFactory: embeddingEngineFromEnv },
   ],
   exports: [EMBEDDING_ENGINE],
 })

@@ -69,6 +69,7 @@ import {
 } from "../libs/queue/src";
 import { SPLITTER_VERSION } from "../libs/parsers/src/passages/split-passages";
 import { backfillPassages } from "./backfill-passages";
+import { FIXTURE_GROUP_ID, assertEmbeddings } from "./fixture-embeddings";
 
 async function resetIngestTables(): Promise<void> {
   if (process.env["ALLOW_TEST_DB_RESET"] !== "1") {
@@ -114,6 +115,9 @@ async function resetIngestTables(): Promise<void> {
     await dataSource.query(
       `DELETE FROM events WHERE document_id IN (SELECT id FROM ingest_documents)`,
     );
+    // The sequence fixture-embeddings.ts builds over those events (its
+    // members and both tables' vectors go with the rows they reference).
+    await dataSource.query(`DELETE FROM event_groups WHERE id = $1`, [FIXTURE_GROUP_ID]);
     await dataSource.query("DELETE FROM ingest_event_candidates");
     await dataSource.query("DELETE FROM ingest_extractions");
     await dataSource.query("DELETE FROM ingest_documents");
@@ -465,6 +469,9 @@ async function main(): Promise<void> {
     "corpus",
   );
 
+  // Recorded vectors only, unless asked to record (fixture-embeddings.ts).
+  process.env["EMBEDDING_ENGINE"] ??= "fake";
+
   const jevMode = process.env["JEV_FIXTURE"] === "1";
   let fakeJevServer: FakeJevServer | undefined;
   if (jevMode) {
@@ -546,6 +553,12 @@ async function main(): Promise<void> {
     if (jevMode) await resolveHeldDuplicates(queues);
     console.log("Asserting search passages...");
     await assertPassages();
+    // Baseline run only: Jev mode holds some events back, so its published
+    // set — and the sequence text over it — differs from what was recorded.
+    if (!jevMode) {
+      console.log("Asserting the embed sweep...");
+      await assertEmbeddings();
+    }
     console.log("OK — ingestion fixture pipeline produced the expected rows.");
   } finally {
     await Promise.all(queues.map((q) => q.close()));
@@ -1002,8 +1015,12 @@ async function assertPassages(): Promise<void> {
       }
     }
     const unlinked: Array<{ title: string }> = await dataSource.query(
+      // Except the Jev grounding fixtures (`PARAPHRASE:` blocks): the fake
+      // engine gives them a quote that is deliberately in no paragraph, and
+      // with Jev off they still publish (grounding is recorded, not gating).
       `SELECT e.title FROM events e
         WHERE e.source_id = 'local-directory'
+          AND e.source NOT LIKE '%not quoted verbatim%'
           AND NOT EXISTS (SELECT 1 FROM passage_events pe WHERE pe.event_id = e.id)`,
     );
     if (unlinked.length > 0) {

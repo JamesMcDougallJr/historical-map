@@ -164,6 +164,15 @@
       "compilerOptions": {
         "tsConfigPath": "apps/workers/validate/tsconfig.app.json"
       }
+    },
+    "embed": {
+      "type": "application",
+      "root": "apps/workers/embed",
+      "entryFile": "main",
+      "sourceRoot": "apps/workers/embed/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/workers/embed/tsconfig.app.json"
+      }
     }
   }
 }
