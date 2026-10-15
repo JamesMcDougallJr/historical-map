@@ -361,6 +361,14 @@ function. Both halves share one Postgres, and `POSTGRES_URL` pointing at the
 same database the web app reads is the single most important value: a worker
 aimed elsewhere ingests happily into a void with no error anywhere.
 
+The second is **object storage**: production documents live in the private S3
+bucket from `infra/s3.tf`, not local MinIO, because the deployed "view source"
+link redirects browsers straight to a presigned URL. Workers writing to MinIO
+produce documents whose source links 501 or 404 on the live site. In
+`.env.prod`, `S3_ENDPOINT=` **empty** means AWS — keep it empty, set
+`S3_REGION`, and use the *ingest* key from `tofu output` (Vercel gets the
+read-only *web* key). See `plans/10-deployment.md`.
+
 **Geocoding is the least trustworthy part of the pipeline.** Nominatim is a
 _modern_ gazetteer, so historical place names resolve to whatever bears that
 name today — observed on the first real run: "Sutter's Mill" → Kuna, Idaho

@@ -44,9 +44,25 @@ version, and page someone about.
 The workers run **locally**, on the operator's own machine, via the existing `docker-compose.yml`
 — not a VPS. This is a deliberate cost decision (avoid paying for a host running the "opposite
 shape from serverless" workload described above), not an oversight of the options table that used
-to live here. Redis and object storage (MinIO) stay local too — nothing about the worker host
-needs to be reachable from the internet, since Postgres is the only integration point and the
-workers only ever *write* to it.
+to live here. Redis stays local too — nothing about the worker host needs to be reachable from
+the internet.
+
+## Where documents live · **Decided** (revised 2026-10-14)
+
+Object storage was originally local MinIO too, on the reasoning that Postgres was the only
+integration point. The "view source" link (`/api/documents/[id]/source`) broke that: it redirects
+the *browser* to a presigned URL for the original document, so the bytes must be reachable from the
+internet, and every source link on the deployed site returned `501 object storage is not configured`.
+
+Documents now live in a private AWS S3 bucket (`infra/s3.tf`), with two IAM users:
+
+- **web** (Vercel): `s3:GetObject` only — presigning is a local signature over that permission.
+  Vercel needs `S3_BUCKET`, `S3_REGION`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`.
+- **ingest** (local workers): read/write. In `.env.prod`, `S3_ENDPOINT=` **empty** selects AWS
+  instead of MinIO (`docker-compose.prod.yml` uses `${S3_ENDPOINT-…}` so empty survives).
+
+Local MinIO remains the dev store. Anything the workers wrote there for production documents has to
+be copied into the bucket — the 2026-10-14 migration copied the four objects production referenced.
 
 ## Where Martin runs · **Decided**
 
