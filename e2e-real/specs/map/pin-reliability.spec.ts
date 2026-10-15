@@ -13,14 +13,24 @@ const FRESH_ID = "fx-freshness-loc";
 const FRESH_COORDS: [number, number] = [PIN_LON + PIN_SPACING_DEG, PIN_LAT];
 
 /** Is any pin drawn within a few pixels of this map coordinate? */
-async function pinNear(page: Page, [lon, lat]: [number, number]): Promise<boolean> {
+async function pinNear(
+  page: Page,
+  [lon, lat]: [number, number],
+): Promise<boolean> {
   return page.evaluate(
     ({ lon, lat }) => {
       const map = window.__olMap;
       if (!map) return false;
       const R = 20037508.34;
-      const y = (Math.log(Math.tan(((90 + lat) * Math.PI) / 360)) / (Math.PI / 180) / 180) * R;
-      const [px, py] = map.getPixelFromCoordinate([(lon * R) / 180, y]) as number[];
+      const y =
+        (Math.log(Math.tan(((90 + lat) * Math.PI) / 360)) /
+          (Math.PI / 180) /
+          180) *
+        R;
+      const [px, py] = map.getPixelFromCoordinate([
+        (lon * R) / 180,
+        y,
+      ]) as number[];
       map.renderSync();
       for (let dy = 0; dy >= -34; dy -= 2) {
         const hit = map.forEachFeatureAtPixel([px!, py! + dy], (f) => f, {
@@ -39,7 +49,9 @@ test.describe("pin reliability (real backend)", () => {
     await deleteLocation(FRESH_ID);
   });
 
-  test("a pin disappears once its events are gone (no stale tiles)", async ({ page }) => {
+  test("a pin disappears once its events are gone (no stale tiles)", async ({
+    page,
+  }) => {
     // Martin's tile cache has no invalidation: with it on, a tile requested before a
     // data change is served unchanged afterwards, so deleted events keep a "ghost"
     // pin that opens no card. docker-compose.yml runs Martin with `--cache-size 0`.
@@ -61,7 +73,9 @@ test.describe("pin reliability (real backend)", () => {
 
     await page.goto("/map");
     await waitForRealMapReady(page);
-    await expect.poll(() => pinNear(page, FRESH_COORDS), { timeout: 15_000 }).toBe(true);
+    await expect
+      .poll(() => pinNear(page, FRESH_COORDS), { timeout: 15_000 })
+      .toBe(true);
 
     await deleteLocation(FRESH_ID);
     await page.reload();
@@ -79,19 +93,39 @@ test.describe("pin reliability (real backend)", () => {
     await page.goto("/map");
     await waitForRealMapReady(page);
 
-    const vp = page.viewportSize()!;
-    const tip = { x: vp.width / 2, y: vp.height / 2 };
-    const headCentre = { x: tip.x, y: tip.y - 20 };
-
-    const hit = await page.evaluate(({ x, y }) => {
-      window.__olMap?.renderSync();
-      return !!window.__olMap?.forEachFeatureAtPixel([x, y], (f) => f, {
-        layerFilter: (l) => l.get("layerId") === "events",
-      });
-    }, headCentre);
+    // The seeded pin at the default view centre, located from its coordinate —
+    // not assumed to be the viewport's centre: the map shares the page with the
+    // nav and search bar, so its centre isn't.
+    const { hit, page: head } = await page.evaluate(
+      ({ lon, lat }) => {
+        const map = window.__olMap!;
+        const R = 20037508.34;
+        const y =
+          (Math.log(Math.tan(((90 + lat) * Math.PI) / 360)) /
+            (Math.PI / 180) /
+            180) *
+          R;
+        map.renderSync();
+        const [tx, ty] = map.getPixelFromCoordinate([(lon * R) / 180, y]) as [
+          number,
+          number,
+        ];
+        const headPixel: [number, number] = [tx, ty - 20];
+        const rect = (
+          map.getTargetElement() as HTMLElement
+        ).getBoundingClientRect();
+        return {
+          hit: !!map.forEachFeatureAtPixel(headPixel, (f) => f, {
+            layerFilter: (l) => l.get("layerId") === "events",
+          }),
+          page: { x: rect.left + headPixel[0], y: rect.top + headPixel[1] },
+        };
+      },
+      { lon: PIN_LON, lat: PIN_LAT },
+    );
     expect(hit, "the pin head's centre must be hit-testable").toBe(true);
 
-    await page.mouse.move(headCentre.x, headCentre.y, { steps: 5 });
+    await page.mouse.move(head.x, head.y, { steps: 5 });
     await expect(page.getByTestId("map-popup")).toBeVisible();
   });
 });
