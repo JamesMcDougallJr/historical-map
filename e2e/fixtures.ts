@@ -100,7 +100,6 @@ type DebugMap = {
   ) => unknown;
   renderSync(): void;
   getPixelFromCoordinate(coordinate: number[]): number[] | null;
-  getTargetElement(): HTMLElement;
 };
 type DebugLayer = {
   get(key: string): unknown;
