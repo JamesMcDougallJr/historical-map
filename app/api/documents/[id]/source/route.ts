@@ -73,9 +73,19 @@ export async function GET(
     );
   }
 
+  // The type and disposition are signed into the URL, overriding whatever the
+  // stored object carries. Without them a browser *downloads* the PDF instead
+  // of opening it — S3 serves an object copied without metadata as
+  // `binary/octet-stream` — and the `#page=N` fragment goes nowhere.
+  const filename = doc.title ?? "document";
   const url = await getSignedUrl(
     client,
-    new GetObjectCommand({ Bucket: bucket, Key: doc.originalKey }),
+    new GetObjectCommand({
+      Bucket: bucket,
+      Key: doc.originalKey,
+      ...(doc.contentType ? { ResponseContentType: doc.contentType } : {}),
+      ResponseContentDisposition: `inline; filename*=UTF-8''${encodeURIComponent(filename)}`,
+    }),
     { expiresIn: PRESIGN_TTL_SECONDS },
   );
 

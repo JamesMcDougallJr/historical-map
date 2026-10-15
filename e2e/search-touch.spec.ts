@@ -129,7 +129,7 @@ test("tapping a result pins the popup, centres the map, and dismisses the keyboa
       ),
     )
     .toBe(true);
-  // Far pin is 1.5° east, 0.8° north of the start.
+  // The far pin is 30° east and 5° north of the start.
   await expect
     .poll(async () => {
       const end = await viewCenter(page);

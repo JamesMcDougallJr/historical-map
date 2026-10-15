@@ -14,8 +14,8 @@ import type { MigrationInterface, QueryRunner } from "typeorm";
  * too when missing, so this migration doesn't depend on the order the two
  * schema owners ran in.
  */
-export class AddDocumentPassages1760313600000 implements MigrationInterface {
-  name = "AddDocumentPassages1760313600000";
+export class AddDocumentPassages1760400000000 implements MigrationInterface {
+  name = "AddDocumentPassages1760400000000";
 
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`CREATE EXTENSION IF NOT EXISTS unaccent`);

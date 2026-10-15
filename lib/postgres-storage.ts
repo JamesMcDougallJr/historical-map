@@ -361,11 +361,24 @@ export async function listSources(): Promise<EventSource[]> {
       homepage_url: string | null;
       attribution: string | null;
       color: string | null;
+      location_count: number;
+      event_count: number;
     }[]
-  >`SELECT * FROM sources ORDER BY name ASC`;
+  >`SELECT s.*,
+           COUNT(DISTINCT e.location_id)::int AS location_count,
+           COUNT(e.id)::int AS event_count
+    FROM sources s
+    LEFT JOIN events e ON e.source_id = s.id
+    GROUP BY s.id
+    ORDER BY s.name ASC`;
 
   return rows.map((r) => {
-    const s: EventSource = { id: r.id, name: r.name };
+    const s: EventSource = {
+      id: r.id,
+      name: r.name,
+      locationCount: r.location_count,
+      eventCount: r.event_count,
+    };
     if (r.description) s.description = r.description;
     if (r.homepage_url) s.homepageUrl = r.homepage_url;
     if (r.attribution) s.attribution = r.attribution;
@@ -384,13 +397,21 @@ export async function listSources(): Promise<EventSource[]> {
  */
 export async function getIngestedDocument(
   documentId: string,
-): Promise<{ title: string | null; originalKey: string | null } | null> {
+): Promise<{
+  title: string | null;
+  originalKey: string | null;
+  contentType: string | null;
+} | null> {
   const rows = await sql()<
-    { title: string | null; original_key: string | null }[]
-  >`SELECT title, original_key FROM ingest_documents WHERE id = ${documentId}`;
+    { title: string | null; original_key: string | null; content_type: string | null }[]
+  >`SELECT title, original_key, content_type FROM ingest_documents WHERE id = ${documentId}`;
   const row = rows[0];
   if (!row) return null;
-  return { title: row.title, originalKey: row.original_key };
+  return {
+    title: row.title,
+    originalKey: row.original_key,
+    contentType: row.content_type,
+  };
 }
 
 export async function upsertSource(source: EventSource): Promise<void> {

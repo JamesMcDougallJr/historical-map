@@ -4,11 +4,10 @@
 // it, small enough that every expected hit can be asserted by id. Each fixture
 // exists to test one thing — the comment on it says what.
 //
-// All of it lives under its own source and away from MapView's default view
-// centre, so the map specs' hover target (fx-loc-1, dead centre) is unaffected.
-// Note fx-loc-slc is named "Salt Lake City" but deliberately NOT placed there:
-// the default centre *is* Salt Lake City, and a second pin under the hover
-// target would make pins-and-popup.spec.ts ambiguous.
+// All of it lives under its own source, away from the map specs' hover
+// target (fx-loc-1). fx-loc-slc is named "Salt Lake City" but deliberately
+// not placed exactly there, so it can never share a pixel with a pin the map
+// specs target.
 import type {
   EventGroup,
   EventSource,

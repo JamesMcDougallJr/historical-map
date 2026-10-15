@@ -10,12 +10,11 @@ terraform {
       source  = "hashicorp/random"
       version = "~> 3.6"
     }
-    # Vercel env vars (vercel.tf) and the CI role's ARN as a GitHub Actions
-    # variable (github-oidc.tf), so nothing is pasted into a dashboard.
     vercel = {
       source  = "vercel/vercel"
-      version = "~> 3.0"
+      version = "~> 5.21"
     }
+    # The CI role's ARN as a GitHub Actions variable (github-oidc.tf).
     github = {
       source  = "integrations/github"
       version = "~> 6.0"
@@ -34,14 +33,8 @@ provider "aws" {
   region = var.aws_region
 }
 
-# Credentials from the operator's environment, never from variables or state:
-# VERCEL_API_TOKEN for vercel, GITHUB_TOKEN for github. Both providers only
-# manage resources when their project/repository variables are set (see
-# vercel.tf, github-oidc.tf), so the stack still plans without them.
-provider "vercel" {
-  team = var.vercel_team_id != "" ? var.vercel_team_id : null
-}
-
+# GITHUB_TOKEN from the operator's environment (repo admin, to set Actions
+# variables). The vercel provider is configured in vercel.tf.
 provider "github" {
   owner = var.github_owner
 }

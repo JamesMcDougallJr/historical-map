@@ -9,6 +9,8 @@ import { QUEUE_NAMES, QueueModule } from "@app/queue";
 import { basicAuth } from "./basic-auth.middleware";
 import { DetectionTriggerModule } from "./detection-trigger/detection-trigger.module";
 import { DocumentsModule } from "./documents/documents.module";
+import { DuplicatesModule } from "./duplicates/duplicates.module";
+import { GeocodesModule } from "./geocodes/geocodes.module";
 import { EventsController } from "./events/events.controller";
 
 const ALL_QUEUES = Object.values(QUEUE_NAMES);
@@ -44,6 +46,8 @@ const ALL_QUEUES = Object.values(QUEUE_NAMES);
     ),
     DetectionTriggerModule,
     DocumentsModule,
+    DuplicatesModule,
+    GeocodesModule,
   ],
   controllers: [HealthController, EventsController],
 })

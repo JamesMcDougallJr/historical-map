@@ -8,8 +8,13 @@ import { defineConfig, devices } from "@playwright/test";
 //
 // Do not run this config and the root one concurrently: both bind port 3000
 // for the root app's webServer.
-const POSTGRES_URL = "postgres://postgres:password@localhost:5433/db";
-const MARTIN_URL = "http://localhost:3001";
+//
+// Overridable so the suite can run against an isolated Postgres + Martin instead
+// of the shared dev stack it would otherwise truncate (set both E2E_* here AND
+// POSTGRES_URL for the test process itself — global-setup reads that one).
+const POSTGRES_URL =
+  process.env["E2E_POSTGRES_URL"] ?? "postgres://postgres:password@localhost:5433/db";
+const MARTIN_URL = process.env["E2E_MARTIN_URL"] ?? "http://localhost:3001";
 const API_KEY = "test-api-key";
 const ADMIN_PORT = 3011;
 

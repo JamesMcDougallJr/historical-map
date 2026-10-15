@@ -2,14 +2,21 @@ import type { Page } from "@playwright/test";
 
 /**
  * Same lon/lat as MapView's hardcoded default view center
- * (`fromLonLat([-111.8881, 40.7606])`, zoom 8). Putting the one test pin
+ * (`fromLonLat([0, 20])`, zoom 2 — the whole world). Putting the one test pin
  * exactly there means it always renders at the dead center of the viewport —
  * `(viewportWidth / 2, viewportHeight / 2)` — regardless of window size, with
  * no need to replicate OL's Web Mercator projection math in the test to find
  * it.
  */
-export const PIN_LON = -111.8881;
-export const PIN_LAT = 40.7606;
+export const PIN_LON = 0;
+export const PIN_LAT = 20;
+
+/**
+ * Degrees of longitude between test pins so they render as separate pins, not
+ * one overlapping cluster: at the default zoom 2 a degree is ~5.7px, so this
+ * is ~57px — clear of a 24px-wide pin icon.
+ */
+export const PIN_SPACING_DEG = 10;
 
 export const TEST_LOCATION = {
   id: "test-location-1",
@@ -84,6 +91,7 @@ export async function mockMapData(
 
 type DebugMap = {
   getSize(): [number, number] | undefined;
+  getPixelFromCoordinate(coordinate: number[]): number[] | null;
   getLayers(): { getArray(): DebugLayer[] };
   forEachFeatureAtPixel: (
     pixel: [number, number],
@@ -91,6 +99,7 @@ type DebugMap = {
     opts: { layerFilter: (l: DebugLayer) => boolean },
   ) => unknown;
   renderSync(): void;
+  getPixelFromCoordinate(coordinate: number[]): number[] | null;
 };
 type DebugLayer = {
   get(key: string): unknown;
@@ -125,23 +134,42 @@ export async function waitForMapReady(page: Page): Promise<void> {
         innerWidth: number;
         innerHeight: number;
       };
+      // Hit-test a pin at its own projected pixel, not the viewport centre:
+      // the world view is clamped vertically, so on a tall (portrait)
+      // viewport the centre slides to the equator and a pin at PIN_LAT is
+      // no longer dead centre.
+      // Hit-test pins at their own projected pixels, not the viewport
+      // centre: the world view is clamped vertically, so on a tall (portrait)
+      // viewport the centre slides to the equator, and a shared ?hit= link
+      // flies elsewhere before the test looks. Any on-screen pin that
+      // hit-tests counts.
       const hitsCentre = (map: DebugMap) => {
         map.renderSync();
         const size = map.getSize();
         if (!size) return false;
-        for (let d = 0; d >= -30; d -= 2) {
-          if (
-            map.forEachFeatureAtPixel(
-              [size[0] / 2, size[1] / 2 + d],
-              (f) => f,
-              {
+        const features = map
+          .getLayers()
+          .getArray()
+          .filter((l) => l.get("layerId") === "events")
+          .flatMap((l) => l.getSource?.()?.getFeatures?.() ?? []) as Array<{
+          getGeometry(): { getCoordinates(): number[] } | null;
+        }>;
+        return features.some((feature) => {
+          const coordinate = feature.getGeometry()?.getCoordinates();
+          const pixel = coordinate && map.getPixelFromCoordinate(coordinate);
+          if (!pixel) return false;
+          const [x, y] = [pixel[0]!, pixel[1]!];
+          if (x < 0 || y < 0 || x > size[0] || y > size[1]) return false;
+          for (let d = 0; d >= -30; d -= 2) {
+            if (
+              map.forEachFeatureAtPixel([x, y + d], (f) => f, {
                 layerFilter: (l) => l.get("layerId") === "events",
-              },
+              })
             )
-          )
-            return true;
-        }
-        return false;
+              return true;
+          }
+          return false;
+        });
       };
       const first = w.__olMap;
       if (!first || !hitsCentre(first)) return false;
@@ -151,7 +179,7 @@ export async function waitForMapReady(page: Page): Promise<void> {
     if (settled) return;
     await waitForMapLoaded(page);
   }
-  throw new Error("map never settled with a hit-testable centre pin");
+  throw new Error("map never settled with a hit-testable pin");
 }
 
 async function waitForMapLoaded(page: Page): Promise<void> {
@@ -219,7 +247,9 @@ export async function findHoverPixel(
 export const FAR_LOCATION = {
   id: "test-location-far",
   name: "Far Test Location",
-  coordinates: [PIN_LON + 1.5, PIN_LAT + 0.8] as [number, number],
+  // Three pin spacings east and a little north: far enough at the default
+  // world view (zoom 2) that the fly and the two pins are distinct.
+  coordinates: [PIN_LON + 3 * PIN_SPACING_DEG, PIN_LAT + 5] as [number, number],
   events: [
     {
       id: "far-event-1",
@@ -317,7 +347,7 @@ export const SEARCH_HITS = {
     memberCount: 2,
     membersInRange: 2,
     dateRange: ["1857-01-01", "1900-01-01"],
-    bbox: [PIN_LON, PIN_LAT, PIN_LON + 1.5, PIN_LAT + 0.8],
+    bbox: [PIN_LON, PIN_LAT, PIN_LON + 3 * PIN_SPACING_DEG, PIN_LAT + 5],
   },
   location: {
     kind: "location",

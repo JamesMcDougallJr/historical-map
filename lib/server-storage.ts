@@ -226,7 +226,11 @@ export async function listSources(): Promise<EventSource[]> {
  */
 export async function getIngestedDocument(
   documentId: string,
-): Promise<{ title: string | null; originalKey: string | null } | null> {
+): Promise<{
+  title: string | null;
+  originalKey: string | null;
+  contentType: string | null;
+} | null> {
   if (!usePostgres()) return null;
   return pg.getIngestedDocument(documentId);
 }

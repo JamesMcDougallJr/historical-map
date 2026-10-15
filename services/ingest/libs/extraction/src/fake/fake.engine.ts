@@ -41,7 +41,20 @@ export class FakeExtractionEngine implements ExtractionEngine {
           ?.split(";")
           .map((n) => n.trim())
           .filter(Boolean) ?? [];
+      // `PARAPHRASE: yes|contradicted` makes the quote one that is NOT in the
+      // document verbatim, so the exact-match grounding check misses and the
+      // opt-in Jev grounding check has something to judge. `contradicted`
+      // carries a marker the fixture's fake Jev server answers "contradicts"
+      // to — the only way to exercise the grounding gate holding an event.
+      const paraphrase = block.match(/^PARAPHRASE:\s*(.+)$/m)?.[1]?.trim();
       if (!title || !date) continue;
+
+      const sourceText =
+        paraphrase === "contradicted"
+          ? `[contradicted] A claim about ${title} that the source disputes, not quoted verbatim.`
+          : paraphrase
+            ? `A paraphrase of ${title}, not quoted verbatim from the source.`
+            : block;
 
       events.push({
         // Deterministic within a run, matching GroqExtractionEngine's own
@@ -51,7 +64,7 @@ export class FakeExtractionEngine implements ExtractionEngine {
         description: `Fixture event: ${title}.`,
         date,
         confidence: 1,
-        sourceText: block,
+        sourceText,
         dateText: date,
         dateIso: date,
         datePrecision: "day",

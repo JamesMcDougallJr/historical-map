@@ -26,7 +26,8 @@ resource "aws_iam_user_policy" "web_embeddings" {
 }
 
 # The secret lands in the (local, git-ignored) state, like the RDS password
-# already does — see versions.tf. It leaves only through vercel.tf.
+# already does — see versions.tf. It leaves only through vercel.tf, as
+# BEDROCK_ACCESS_KEY_ID/BEDROCK_SECRET_ACCESS_KEY.
 resource "aws_iam_access_key" "web_embeddings" {
   user = aws_iam_user.web_embeddings.name
 }

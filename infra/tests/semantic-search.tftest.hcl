@@ -138,49 +138,46 @@ run "an_existing_oidc_provider_is_reused" {
   }
 }
 
-run "optional_integrations_are_off_by_default" {
+run "the_budget_is_off_without_an_email" {
   command = plan
 
-  assert {
-    condition     = length(vercel_project_environment_variable.app) == 0
-    error_message = "without vercel_project_id, Vercel is not managed"
-  }
   assert {
     condition     = length(aws_budgets_budget.bedrock) == 0
     error_message = "without alert_email, no budget is created"
   }
 }
 
-run "vercel_gets_the_whole_web_environment" {
+run "vercel_gets_the_bedrock_settings_beside_the_existing_env" {
   command = plan
 
-  variables {
-    vercel_project_id = "prj_test"
-    alert_email       = "alerts@example.com"
-  }
-
   assert {
-    condition = toset(keys(vercel_project_environment_variable.app)) == toset([
-      "POSTGRES_URL", "NEXT_PUBLIC_MARTIN_URL", "BEDROCK_REGION",
-      "EMBEDDING_MODEL", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY",
+    condition = alltrue([
+      for k in ["POSTGRES_URL", "S3_BUCKET", "S3_REGION", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY",
+      "BEDROCK_REGION", "EMBEDDING_MODEL", "BEDROCK_ACCESS_KEY_ID", "BEDROCK_SECRET_ACCESS_KEY"] :
+      contains(keys(vercel_project_environment_variable.this), k)
     ])
-    error_message = "every env var the web app needs must be managed"
+    error_message = "the existing env and the Bedrock settings must all be managed"
+  }
+  assert {
+    condition = length([
+      for k in keys(vercel_project_environment_variable.this) : k if startswith(k, "AWS_")
+    ]) == 0
+    error_message = "Vercel reserves AWS_* names; Bedrock credentials must use BEDROCK_*"
   }
   assert {
     condition = (
-      vercel_project_environment_variable.app["AWS_SECRET_ACCESS_KEY"].sensitive &&
-      vercel_project_environment_variable.app["POSTGRES_URL"].sensitive &&
-      !vercel_project_environment_variable.app["NEXT_PUBLIC_MARTIN_URL"].sensitive
+      vercel_project_environment_variable.this["BEDROCK_SECRET_ACCESS_KEY"].sensitive &&
+      !vercel_project_environment_variable.this["BEDROCK_REGION"].sensitive
     )
-    error_message = "secrets must be sensitive on Vercel; the public Martin URL must not"
+    error_message = "the Bedrock secret must be sensitive on Vercel"
   }
   assert {
-    condition     = vercel_project_environment_variable.app["NEXT_PUBLIC_MARTIN_URL"].value == "https://d111111abcdef8.cloudfront.net"
-    error_message = "the Martin URL must be the CloudFront endpoint"
+    condition     = vercel_project_environment_variable.this["EMBEDDING_MODEL"].value == "amazon.titan-embed-text-v2:0"
+    error_message = "the embedding model must be the one the IAM policy allows"
   }
   assert {
-    condition     = contains(vercel_project_environment_variable.app["NEXT_PUBLIC_MARTIN_URL"].target, "preview")
-    error_message = "NEXT_PUBLIC_* is inlined at build time, so preview builds need it too"
+    condition     = toset(vercel_project_environment_variable.this["BEDROCK_ACCESS_KEY_ID"].target) == toset(["production"])
+    error_message = "production only, like the rest: previews have no database"
   }
 }
 

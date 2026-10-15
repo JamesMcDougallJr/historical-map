@@ -99,6 +99,17 @@ services:
   martin:
     image: ghcr.io/maplibre/martin:1.16.0
     restart: unless-stopped
+    # Tile cache OFF. Martin's cache is LRU-only — no TTL by default and no
+    # invalidation — so any tile requested before a data change keeps being served
+    # afterwards: pins for events that were deleted or re-ingested stay on the map
+    # as "ghosts" with nothing to show on hover, and a pin vanishes at one zoom and
+    # not another depending on which tiles were requested earlier. Reproduced
+    # exactly: with the default cache a tile still held its 347 bytes of pins after
+    # every event was deleted; with this flag it came back empty. A tile here is one
+    # indexed query over a small table, so correctness costs nothing visible. (If a
+    # large deployment needs the cache back, use `--cache-expiry` for bounded
+    # staleness, and know pins can lag publishes by that long.)
+    command: ["--cache-size", "0"]
     # 3001 on the host — Next dev owns 3000.
     ports:
       - "3001:3000"

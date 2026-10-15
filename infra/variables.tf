@@ -111,18 +111,6 @@ variable "alert_email" {
   default     = ""
 }
 
-variable "vercel_project_id" {
-  description = "Vercel project to receive env vars (POSTGRES_URL, NEXT_PUBLIC_MARTIN_URL, Bedrock). Empty skips Vercel management."
-  type        = string
-  default     = ""
-}
-
-variable "vercel_team_id" {
-  description = "Vercel team owning the project, if not a personal account."
-  type        = string
-  default     = ""
-}
-
 variable "github_owner" {
   description = "GitHub owner of the repository CI runs in."
   type        = string
