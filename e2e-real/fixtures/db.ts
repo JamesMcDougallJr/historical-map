@@ -11,7 +11,11 @@ import {
 } from "../../lib/postgres-storage";
 import { applyMartinFunctions } from "../../scripts/apply-martin-functions";
 import { FX_GROUP, FX_LOCATIONS, FX_SOURCES } from "./seed-data";
+import { embeddingEngineFromEnv } from "@historical-map/embedding";
+import { runEmbeddingSweep } from "../../services/ingest/libs/embedding/src/sweep";
 import {
+  DISTRACTOR_LOCATION,
+  DISTRACTOR_SOURCE,
   FX_INGEST_SOURCE_ID,
   PEOPLE_LOCATION,
   SEARCH_DOCUMENT_EVENTS,
@@ -34,7 +38,11 @@ export async function seedFixtureData(): Promise<void> {
   for (const source of FX_SOURCES) await upsertSource(source);
   for (const location of FX_LOCATIONS) await upsertLocation(location);
 
-  await upsertEventGroup({ id: FX_GROUP.id, title: FX_GROUP.title, description: FX_GROUP.description });
+  await upsertEventGroup({
+    id: FX_GROUP.id,
+    title: FX_GROUP.title,
+    description: FX_GROUP.description,
+  });
   await setEventGroupMembers(FX_GROUP.id, FX_GROUP.memberEventIds);
 
   // The search corpus (search-seed.ts) — its own source, so it is its own layer.
@@ -47,7 +55,35 @@ export async function seedFixtureData(): Promise<void> {
     description: SEARCH_GROUP.description,
   });
   await setEventGroupMembers(SEARCH_GROUP.id, SEARCH_GROUP.memberEventIds);
+  await upsertSource(DISTRACTOR_SOURCE);
+  await upsertLocation(DISTRACTOR_LOCATION);
   await seedSearchDocuments();
+  await embedFixtureData();
+}
+
+/**
+ * Vectors for every fixture event, sequence and passage (plans/23), by the
+ * same sweep the `embed` worker runs. `EMBEDDING_ENGINE` picks the engine —
+ * `fake` (the config's default) serves e2e-real/fixtures/search-vectors.json
+ * and throws, naming the text, on anything unrecorded; `record` fills the file
+ * from live Bedrock. Scoped to this suite's own rows: in CI the database also
+ * holds the ingestion fixture's.
+ */
+export async function embedFixtureData(): Promise<void> {
+  const sql = sqlClient();
+  const db = {
+    query: (text: string, params?: unknown[]) =>
+      sql.unsafe(text, (params ?? []) as never[]),
+  };
+  await runEmbeddingSweep(db, embeddingEngineFromEnv(), {
+    eventSourceIds: [
+      ...FX_SOURCES.map((s) => s.id),
+      SEARCH_SOURCE.id,
+      DISTRACTOR_SOURCE.id,
+    ],
+    groupIds: [FX_GROUP.id, SEARCH_GROUP.id],
+    passageSourceKeys: [SEARCH_SOURCE.id],
+  });
 }
 
 /**
@@ -96,13 +132,17 @@ export async function seedSearchDocuments(): Promise<void> {
   }
 
   // The real writer: split, insert, then link events to paragraphs.
-  const asQueryable = (run: (q: string, p?: unknown[]) => Promise<unknown>): Queryable => ({
+  const asQueryable = (
+    run: (q: string, p?: unknown[]) => Promise<unknown>,
+  ): Queryable => ({
     query: run,
   });
   const db: TransactionalQueryable = {
     query: (q, p) => sql.unsafe(q, (p ?? []) as never[]),
     transaction: (fn) =>
-      sql.begin((tx) => fn(asQueryable((q, p) => tx.unsafe(q, (p ?? []) as never[])))) as never,
+      sql.begin((tx) =>
+        fn(asQueryable((q, p) => tx.unsafe(q, (p ?? []) as never[]))),
+      ) as never,
   };
   for (const doc of SEARCH_DOCUMENTS) {
     await replacePassages(db, doc.id, doc.segments, 2);

@@ -53,6 +53,20 @@ export const SEARCH_LOCATIONS: HistoricalLocation[] = [
         sourceId: src,
       },
       {
+        // Semantic search (plans/23): found by "emigrant wagon train ambushed
+        // in southern Utah", with which neither its title nor its description
+        // shares a word — so only the vector arm can find it. (The plan's
+        // "Baker–Fancher party attacked" would have taken the lexical
+        // "fancher" query's top spot.)
+        id: "fx-ev-baker-fancher",
+        title: "Arkansas Company Attacked at the Springs",
+        description:
+          "Militia and Paiute allies fell on a California-bound company resting at a spring.",
+        date: "1857-09-08",
+        datePrecision: "day",
+        sourceId: src,
+      },
+      {
         id: "fx-ev-burial",
         title: "Burial of the Remains",
         description:
@@ -128,6 +142,23 @@ export const SEARCH_LOCATIONS: HistoricalLocation[] = [
         description:
           "An epidemic devastated the population of the Aztec capital.",
         date: "1520-01-01",
+        datePrecision: "year",
+        sourceId: src,
+      },
+    ],
+  },
+  {
+    id: "fx-loc-tula",
+    name: "Tula",
+    coordinates: [-99.34, 20.06],
+    events: [
+      {
+        // Semantic search: "Toltec collapse" shares no word with it.
+        id: "fx-ev-tula",
+        title: "Overthrow of Tula",
+        description:
+          "Invaders from the north burned the great city and its temples.",
+        date: "1103-01-01",
         datePrecision: "year",
         sourceId: src,
       },
@@ -338,6 +369,44 @@ export const SEARCH_DOCUMENTS = [
     ],
   },
 ];
+
+// ── Vector distractors (plans/23, "timeline pre-filter", "limit to view") ───
+//
+// Fifty events nearer the query "pestilence ravaged the people" than
+// "Smallpox Reaches the Valley" (fx-ev-1520, Mexico City, 1520) — measured
+// with Titan v2: 0.377 against 0.315 — sharing no word with the query, dated
+// 1700–1798 and placed in Europe. Unfiltered, they push fx-ev-1520 beyond the
+// vector arm's top 50; with a 1500–1600 timeline, or a view around Mexico, it
+// must still appear, which it does only if those filters run inside the
+// vector query, before ranking.
+//
+// Not the plan's "Toltec collapse": Titan puts Fall of Tenochtitlán *nearer*
+// that query (0.478) than Overthrow of Tula (0.363), so no distractor set can
+// bury one without burying the other. Their own source and location, so no
+// other spec's counts move.
+
+export const DISTRACTOR_SOURCE: EventSource = {
+  id: "fx-source-distractors",
+  name: "Fixture Vector Distractors",
+  description:
+    "Near-duplicates that crowd the vector arm's top 50 for one query.",
+  color: "#a855f7",
+};
+
+export const DISTRACTOR_LOCATION: HistoricalLocation = {
+  id: "fx-loc-distractors",
+  name: "Distractor Archive",
+  coordinates: [12.5, 47.5],
+  events: Array.from({ length: 50 }, (_, i) => ({
+    id: `fx-ev-distractor-${String(i + 1).padStart(2, "0")}`,
+    title: `Plague Year in the Harbour Town, Account ${i + 1}`,
+    description:
+      "A deadly sickness spread through the harbour town and killed thousands.",
+    date: `${1700 + i * 2}-01-01`,
+    datePrecision: "year" as const,
+    sourceId: "fx-source-distractors",
+  })),
+};
 
 export const SEARCH_DOCUMENT_LOCATION = {
   id: "fx-loc-archive",

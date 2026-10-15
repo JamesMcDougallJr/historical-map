@@ -23,6 +23,7 @@ import type {
   SequenceHit,
 } from "../types";
 import { formatDate } from "../utils/date-utils";
+import { logSearchClick } from "./search-client";
 import { Snippet } from "./Snippet";
 import type { SearchState } from "./useSearch";
 
@@ -259,14 +260,17 @@ export function SearchBox({
   }, [phoneOpen]);
 
   const activate = useCallback(
-    (hit: SearchHit) => {
+    (hit: SearchHit, logId = res?.logId) => {
+      // A result opened from a submitted search: the click is the ranking
+      // signal the query log exists for (plans/23).
+      if (logId !== undefined) logSearchClick(logId, hit);
       // Dismiss the on-screen keyboard *before* flying, or the fly target
       // lands under it.
       inputRef.current?.blur();
       setPhoneOpen(false);
       onActivate(hit);
     },
-    [onActivate],
+    [onActivate, res?.logId],
   );
 
   const onKeyDown = async (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -295,7 +299,7 @@ export function SearchBox({
         const top = result.hits.find(
           (h) => h.kind === result.topHit!.kind && h.id === result.topHit!.id,
         );
-        if (top) activate(top);
+        if (top) activate(top, result.logId);
       }
     } else if (e.key === "Escape") {
       e.preventDefault();

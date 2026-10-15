@@ -18,6 +18,7 @@ import {
   SEARCH_KINDS,
   type Bbox,
   type DocumentHit,
+  type PassageHit,
   type SearchHit,
   type SearchKind,
   type SearchResponse,
@@ -37,6 +38,7 @@ import {
   searchStatic,
   staticMatchingLocationIds,
 } from "./search-static";
+import { embedQuery, semanticModel, type QueryVector } from "./search-semantic";
 import { readData } from "./server-storage";
 
 export const MAX_LIMIT = 50;
@@ -56,6 +58,19 @@ const DEFAULT_LIMITS: Record<SearchKind, number> = {
 const PASSAGES_PER_DOCUMENT = 2;
 /** A date-only browse lists that period's events, so it gets a longer list. */
 const DEFAULT_BROWSE_LIMIT = 20;
+
+// ── Hybrid (plans/23-search-semantic.md) ────────────────────────────────────
+
+/** Reciprocal rank fusion's one constant — ranks only, never raw scores. */
+const RRF_K = 60;
+/** Each arm's candidate pool before fusion. */
+const HYBRID_POOL = 50;
+/**
+ * The vector arm's relevance floor: cosine similarity below this is noise
+ * (nearest-neighbour search always returns *something*). Provisional until
+ * step 6 sets it from the golden set with `search:eval --floor`.
+ */
+export const VECTOR_MIN_SIMILARITY = 0.3;
 
 export interface SearchRequest {
   q: string;
@@ -191,6 +206,7 @@ export async function search(req: SearchRequest): Promise<SearchResponse> {
   const kinds = new Set(req.kinds);
   // Document and passage hits need Postgres *and* the ingest-owned tables.
   const documents = usePostgres() && (await pg.documentsAvailable());
+  let semantic = false;
 
   const respond = (
     hits: SearchHit[],
@@ -198,7 +214,7 @@ export async function search(req: SearchRequest): Promise<SearchResponse> {
   ): SearchResponse => {
     const res: SearchResponse = {
       hits: hits.slice(0, MAX_HITS),
-      modes: { lexical: true, semantic: false, documents },
+      modes: { lexical: true, semantic, documents },
       parsed: p.parsed,
       timing: { ms: Date.now() - started, unfiltered: p.unfiltered },
     };
@@ -244,13 +260,21 @@ export async function search(req: SearchRequest): Promise<SearchResponse> {
     return respond(await pg.browseEventHits(input));
   }
 
-  const [events, sequences, locations, people, documentHits] =
+  // The vector arm: only for a submitted hybrid search (typeahead never
+  // embeds — the server enforces it, not just the UI), only when the corpus
+  // holds vectors from the model the query would be embedded with.
+  const ranks = await vectorArm(req, p, kinds, documents);
+  semantic = ranks !== null;
+  const pool = (kind: SearchKind) =>
+    ranks ? Math.max(HYBRID_POOL, limitFor(kind)) : limitFor(kind);
+
+  const [lexEvents, lexSequences, locations, people, documentHits] =
     await Promise.all([
       kinds.has("event")
-        ? pg.searchEventHits(pgInput(req, p, limitFor("event")))
+        ? pg.searchEventHits(pgInput(req, p, pool("event")))
         : [],
       kinds.has("sequence")
-        ? pg.searchSequenceHits(pgInput(req, p, limitFor("sequence")))
+        ? pg.searchSequenceHits(pgInput(req, p, pool("sequence")))
         : [],
       kinds.has("location")
         ? pg.searchLocationHits(pgInput(req, p, limitFor("location")))
@@ -266,19 +290,59 @@ export async function search(req: SearchRequest): Promise<SearchResponse> {
         : [],
     ]);
 
+  const [events, sequences] = ranks
+    ? await Promise.all([
+        fuse(lexEvents, ranks.event, limitFor("event"), (ids) =>
+          pg.searchEventHits({ ...pgInput(req, p, ids.length), ids }),
+        ),
+        fuse(lexSequences, ranks.sequence, limitFor("sequence"), (ids) =>
+          pg.searchSequenceHits({ ...pgInput(req, p, ids.length), ids }),
+        ),
+      ])
+    : [lexEvents, lexSequences];
+
   // One sentence, one result: an event's own quote paragraph rides on the
   // event hit and stays out of the passage group.
   const folded = documents
     ? await pg.foldQuotePassages(pgInput(req, p, 0), events)
     : new Set<string>();
-  const passages =
-    documents && kinds.has("passage")
-      ? await pg.searchPassageHits(
-          pgInput(req, p, limitFor("passage")),
-          PASSAGES_PER_DOCUMENT,
-          folded,
-        )
-      : [];
+  let passages: PassageHit[] = [];
+  if (documents && kinds.has("passage")) {
+    if (ranks) {
+      // Fuse the uncapped pools, then cap per document, so the cap ranks by
+      // fused score rather than by either arm alone.
+      const lexPassages = await pg.searchPassageHits(
+        pgInput(req, p, HYBRID_POOL),
+        HYBRID_POOL,
+        folded,
+      );
+      const fused = await fuse(
+        lexPassages,
+        ranks.passage.filter((id) => !folded.has(id)),
+        Infinity,
+        (ids) =>
+          pg.searchPassageHits(
+            { ...pgInput(req, p, ids.length), ids },
+            HYBRID_POOL,
+            folded,
+          ),
+      );
+      const perDoc = new Map<string, number>();
+      passages = fused
+        .filter((h) => {
+          const n = (perDoc.get(h.documentId) ?? 0) + 1;
+          perDoc.set(h.documentId, n);
+          return n <= PASSAGES_PER_DOCUMENT;
+        })
+        .slice(0, limitFor("passage"));
+    } else {
+      passages = await pg.searchPassageHits(
+        pgInput(req, p, limitFor("passage")),
+        PASSAGES_PER_DOCUMENT,
+        folded,
+      );
+    }
+  }
 
   // A document whose only match is one passage already listed adds nothing
   // the passage row doesn't say.
@@ -302,6 +366,86 @@ export async function search(req: SearchRequest): Promise<SearchResponse> {
     ...passages,
   ];
   return respond(hits, findTopHit(hits, p.text));
+}
+
+/**
+ * Ranks from the vector arm, or null when it doesn't run — and null means the
+ * response says `modes.semantic = false` and is purely lexical. Any failure
+ * on the way (no engine, the daily ceiling, the embedder, a corpus embedded
+ * with another model, the query itself) lands here, never as a 5xx.
+ */
+async function vectorArm(
+  req: SearchRequest,
+  p: Prepared,
+  kinds: ReadonlySet<SearchKind>,
+  documents: boolean,
+): Promise<pg.VectorRanks | null> {
+  if (req.mode !== "hybrid" || req.prefix) return null;
+  const vectorKinds = new Set(
+    (["event", "sequence", "passage"] as const).filter((k) => kinds.has(k)),
+  );
+  if (vectorKinds.size === 0) return null;
+  const model = semanticModel();
+  if (!model) return null;
+  try {
+    if (!(await pg.semanticReady(model))) return null;
+    const query: QueryVector | null = await embedQuery(p.text);
+    if (!query) return null;
+    return await pg.vectorRanks(
+      pgInput(req, p, HYBRID_POOL),
+      query.vector,
+      query.model,
+      VECTOR_MIN_SIMILARITY,
+      HYBRID_POOL,
+      vectorKinds,
+      documents,
+    );
+  } catch (error) {
+    console.warn(`[search] vector arm failed: ${(error as Error)?.message}`);
+    return null;
+  }
+}
+
+/**
+ * Reciprocal rank fusion: each id scores Σ 1/(k + rank) over the arms that
+ * found it — ranks only, because `ts_rank_cd` and cosine similarity live on
+ * unrelated scales. A hit both arms found keeps its lexical fields
+ * (`matchedOn`, snippet); one only the vector arm found is fetched by id
+ * through the same query and filters, and says `matchedOn: ["meaning"]`.
+ */
+async function fuse<H extends SearchHit>(
+  lexical: H[],
+  vectorIds: string[],
+  limit: number,
+  hydrate: (ids: string[]) => Promise<H[]>,
+): Promise<H[]> {
+  const score = new Map<string, number>();
+  const firstSeen = new Map<string, number>();
+  const add = (id: string, rank: number) => {
+    score.set(id, (score.get(id) ?? 0) + 1 / (RRF_K + rank + 1));
+    if (!firstSeen.has(id)) firstSeen.set(id, firstSeen.size);
+  };
+  lexical.forEach((h, i) => add(h.id, i));
+  vectorIds.forEach((id, i) => add(id, i));
+
+  const top = Array.from(score.keys())
+    .sort(
+      (a, b) =>
+        score.get(b)! - score.get(a)! || firstSeen.get(a)! - firstSeen.get(b)!,
+    )
+    .slice(0, limit);
+
+  const byId = new Map<string, H>(lexical.map((h) => [h.id, h]));
+  const missing = top.filter((id) => !byId.has(id));
+  if (missing.length > 0) {
+    for (const hit of await hydrate(missing)) {
+      byId.set(hit.id, { ...hit, matchedOn: ["meaning"] });
+    }
+  }
+  return top
+    .map((id) => byId.get(id))
+    .filter((h): h is H => h !== undefined)
+    .map((h) => ({ ...h, score: score.get(h.id)! }));
 }
 
 /**

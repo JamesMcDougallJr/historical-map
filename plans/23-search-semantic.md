@@ -5,7 +5,7 @@ Part of [19-search.md](./19-search.md). Builds on the substrate in
 first**: provider, model, dimensions and the `EmbeddingEngine` interface are
 settled there, and this file does not reopen them.
 
-> **Status (2026-10-15): step 0 applied; steps 1–4 built; steps 5–6 not
+> **Status (2026-10-15): step 0 applied; steps 1–5 built; step 6 not
 > started.** `infra/`
 > declares everything in "Infrastructure and automation" that lives in
 > Terraform (`caa0a8d`, verified by `tofu validate`/`tofu test` in the
@@ -358,7 +358,7 @@ granted, which must be denied.
 | 2    | `EmbeddingEngine` + Bedrock implementation (plan 12, shared with 13), `embed:verify`, `bedrock-live.yml`        | **Done** (2026-10-15): `libs/embedding` (Bedrock + recorded-vector fake, Nest-free except the module). `embed:verify` in E2E; `bedrock-live.yml` green under the OIDC role, including the one-model denial |
 | 3    | Event and sequence embedding + `content_hash` sweep in the `embed` worker                                       | **Built** (2026-10-15): see "Step 3 as built" below. All six fixture bullets green locally, against both live Titan (`record`) and recorded vectors (`fake`)                                               |
 | 4    | Passage embeddings (backfill from `document_passages`)                                                          | **Built** (2026-10-15): `document_passages.embedding`/`embedding_model`, filled by the same sweep; fixture passage bullets green (`record` and `fake`)                                                     |
-| 5    | Web app: query embedding + cache + hybrid SQL behind `mode=hybrid`                                              | Not started. (Already in place from earlier phases: `mode=hybrid` is accepted and returns lexical results with `modes.semantic = false`; the UI shows "Search by meaning unavailable" on Enter.)           |
+| 5    | Web app: query embedding + cache + hybrid SQL behind `mode=hybrid`                                              | **Built** (2026-10-15): every `search-hybrid.spec.ts` row green locally (126/126 e2e-real, 141 mocked); see "Step 5 as built". The UI still sends lexical on Enter — that's step 6                         |
 | 6    | Golden-set comparison, floor tuning, then turn it on in the UI                                                  | Not started                                                                                                                                                                                                |
 
 The E2E specs above land **with** each step, not after step 6, and a step
@@ -408,6 +408,54 @@ Where it departs from, or pins down, the text above:
   re-cut and checks the sweep sends exactly the new rows' texts; both version
   bumps take that same path, so one check covers them. The backfill is the
   sweep itself — the worker fills every existing passage on its first pass.
+
+### Step 5 as built (2026-10-15)
+
+- **Shared engines.** The framework-free engine code moved to
+  `packages/embedding` (`@historical-map/embedding`), so the web app embeds
+  queries with the same Bedrock engine, error classification and
+  recorded-vector fake as the workers.
+- **The query** (`lib/search.ts`): for events, sequences and passages, a
+  50-deep lexical pool and the vector arm's top 50 are fused by RRF (k = 60)
+  in TypeScript. Vector-only hits are fetched through the same lexical
+  queries with an id list in place of the text match (`PgSearchInput.ids`),
+  so they keep identical shapes and filters, and carry
+  `matchedOn: ["meaning"]`. Every filter (timeline, bbox, sources, the
+  document span for passages) and the floor run inside the vector query
+  (`vectorRanks`). Documents still roll up lexically only.
+- **Query embedding** (`lib/search-semantic.ts`): normalised and clamped to
+  200 characters, cached in `search_query_embeddings` (`real[]`, 30-day TTL,
+  swept on misses), behind an atomic daily ceiling row
+  (`SEARCH_EMBED_DAILY_CEILING`, default 5,000), no retries and a hard
+  1.5 s deadline. Every failure → lexical, `modes.semantic = false`.
+  Typeahead never embeds; a corpus with no vectors from the current model
+  never embeds either.
+- **Rate limit**: submitted `mode=hybrid` has its own per-IP bucket in the
+  middleware (`SEARCH_HYBRID_RATE_LIMIT`, default 30/min); lexical and
+  typeahead are unaffected.
+- **Query log**: `search_query_log` exactly as specified, written for `log=1`
+  (the search bar's Enter), with `POST /api/search/log` for clicks and
+  90-day retention swept on write.
+- **Test hooks**: `/api/search/test-embedder` (404 unless
+  `EMBEDDING_ENGINE` is `fake` or `record`) exposes call counts and
+  received texts, injects throttle/validation/timeout failures, and sets
+  the ceiling.
+- **Fixtures, departing from the plan**:
+  - The Utah paraphrase is "Arkansas Company Attacked at the Springs", not
+    "Baker–Fancher party attacked", which would have taken the lexical
+    "fancher" golden query's top spot.
+  - The filter rows use their own query, "pestilence ravaged the people",
+    with target fx-ev-1520 and 50 distractors dated 1700–1798 in Europe.
+    Measured with Titan: for "Toltec collapse", Fall of Tenochtitlán (0.478)
+    is _nearer_ than Overthrow of Tula (0.363), so no distractor set can bury
+    one without burying the other.
+- **Floor**: `VECTOR_MIN_SIMILARITY = 0.3`, provisional. It passes all three
+  negative queries and every paraphrase, but Titan v2 similarities run low
+  (Tula vs "Toltec collapse" is 0.363), so step 6 sets it from data.
+- **Recording**: 119 vectors. `npm run search:record-vectors` re-records
+  both suites in `record` mode, which retries throttling and waits it out.
+  The `bedrock-live.yml` job that should re-record on fixture PRs isn't
+  written yet.
 
 ## Decided (2026-10-08)
 

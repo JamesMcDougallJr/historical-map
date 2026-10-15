@@ -157,4 +157,9 @@ export interface SearchResponse {
     /** No date filter of any kind applied — what the UI's "try the timeline" hint keys on. */
     unfiltered: boolean;
   };
+  /**
+   * The query-log row for a submitted search (`log=1`), so a click on a
+   * result can be recorded against it with `POST /api/search/log`.
+   */
+  logId?: number;
 }

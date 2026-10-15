@@ -88,12 +88,14 @@ test.describe("MCP search tool (real backend)", () => {
   });
 
   test("semantic: true says whether meaning-search ran", async () => {
-    // S3 (semantic search) isn't built yet: the flag must degrade to lexical
-    // results with modes.semantic = false, never fail.
+    // With the corpus embedded and the recorded-vector embedder, it runs; the
+    // degraded case (no embedder, no vectors) is search-hybrid.spec's.
     const client = await connect();
     const { body } = await callSearch(client, { q: "meadows", semantic: true });
-    expect(body!.modes.semantic).toBe(false);
+    expect(body!.modes.semantic).toBe(true);
     expect(body!.hits.length).toBeGreaterThan(0);
+    const lexical = await callSearch(client, { q: "meadows" });
+    expect(lexical.body!.modes.semantic).toBe(false);
     await client.close();
   });
 

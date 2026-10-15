@@ -42,6 +42,13 @@ export interface PgSearchInput {
   bbox?: Bbox;
   sourceIds?: string[];
   limit: number;
+  /**
+   * Hybrid search's hydration (plans/23): match exactly these ids instead of
+   * the text, keeping every filter, so a hit only the vector arm found comes
+   * back in the same shape as a lexical one. Events, sequences and passages
+   * (`documentId:seq`) only.
+   */
+  ids?: string[];
 }
 
 type Sql = ReturnType<typeof postgres>;
@@ -222,7 +229,7 @@ export async function searchEventHits(
                + ${TRIGRAM_WEIGHT}::real * ${sim} AS score
       FROM events e
       JOIN locations l ON l.id = e.location_id, q
-      WHERE ${eventMatch(sql, input)}
+      WHERE ${input.ids ? sql`e.id = ANY(${input.ids})` : eventMatch(sql, input)}
         ${yearFilter(sql, input.years)}
         ${viewFilter(sql, input)}
       ORDER BY score DESC, e.date ASC, e.id ASC
@@ -417,8 +424,12 @@ export async function searchSequenceHits(
                + ${TRIGRAM_WEIGHT}::real * ${sim} AS score
       FROM event_groups g
       LEFT JOIN agg a ON a.group_id = g.id, q
-      WHERE (g.search_tsv @@ q.qe OR g.name_tsv @@ q.qs OR coalesce(a.m_member, false)
-             ${trigramMatch})
+      WHERE ${
+        input.ids
+          ? sql`g.id = ANY(${input.ids})`
+          : sql`(g.search_tsv @@ q.qe OR g.name_tsv @@ q.qs OR coalesce(a.m_member, false)
+             ${trigramMatch})`
+      }
         AND (NOT ${filtered}::boolean OR (
               a.member_count > 0
               AND (${lo}::int IS NULL OR a.hi >= ${lo}::int)
@@ -755,7 +766,11 @@ export async function searchPassageHits(
       FROM document_passages p
       JOIN ingest_documents d ON d.id = p.document_id
       JOIN ingest_sources s ON s.id = d.source_id, q
-      WHERE p.search_tsv @@ q.qe
+      WHERE ${
+        input.ids
+          ? sql`(p.document_id::text || ':' || p.seq) = ANY(${input.ids})`
+          : sql`p.search_tsv @@ q.qe`
+      }
         AND NOT ((p.document_id::text || ':' || p.seq) = ANY(${excluded}::text[]))
         ${documentSpanFilter(sql, input.years)}
         ${sourceKeyFilter(sql, input)}
@@ -1067,4 +1082,113 @@ export async function getPassage(
   return row
     ? { anchor: row.anchor, text: row.text, documentTitle: row.title }
     : null;
+}
+
+// ── Vector arm (plans/23-search-semantic.md) ────────────────────────────────
+
+export type VectorKind = "event" | "sequence" | "passage";
+
+/** Kind → the ids nearest the query vector, best first. */
+export type VectorRanks = Record<VectorKind, string[]>;
+
+/**
+ * Whether the vector arm can run for `model`: the embedding tables exist and
+ * hold at least one row from that model. Comparing a query vector against
+ * vectors from another model is meaningless, so a corpus embedded with a
+ * different model degrades to lexical rather than ranking noise.
+ */
+export async function semanticReady(model: string): Promise<boolean> {
+  await ensureSchema();
+  const sql = sqlClient();
+  const [tables] = await sql<{ ok: boolean }[]>`
+    SELECT to_regclass('event_embeddings') IS NOT NULL
+       AND to_regclass('event_group_embeddings') IS NOT NULL AS ok`;
+  if (!tables?.ok) return false;
+  const [row] = await sql<{ ok: boolean }[]>`
+    SELECT EXISTS (SELECT 1 FROM event_embeddings WHERE model = ${model}) AS ok`;
+  return Boolean(row?.ok);
+}
+
+/**
+ * The nearest `n` ids per kind, by `<#>` (negative inner product — cosine,
+ * since stored and query vectors are unit length).
+ *
+ * Every filter runs **inside** each query, before ranking: with the timeline
+ * as the common case, filtering after fusion would let out-of-range
+ * neighbours take the top-n slots and then vanish, so an in-range match
+ * ranked n+1st would never appear. `minSimilarity` is the relevance floor —
+ * nearest-neighbour search always returns *something*, and below the floor
+ * that something is noise.
+ *
+ * No vector index: at this size an exact scan beats one, and it never has
+ * the "filtered ANN returns fewer than n" problem (plan 23, row 11).
+ */
+export async function vectorRanks(
+  input: PgSearchInput,
+  vector: number[],
+  model: string,
+  minSimilarity: number,
+  n: number,
+  kinds: ReadonlySet<VectorKind>,
+  passages: boolean,
+): Promise<VectorRanks> {
+  const sql = sqlClient();
+  const qvec = `[${vector.join(",")}]`;
+  const maxDistance = -minSimilarity;
+  const lo =
+    input.years && Number.isFinite(input.years[0]) ? input.years[0] : null;
+  const hi =
+    input.years && Number.isFinite(input.years[1]) ? input.years[1] : null;
+
+  const [events, sequences, passageIds] = await Promise.all([
+    kinds.has("event")
+      ? sql<{ id: string }[]>`
+          SELECT e.id
+          FROM event_embeddings v
+          JOIN events e ON e.id = v.event_id
+          JOIN locations l ON l.id = e.location_id
+          WHERE v.model = ${model}
+            AND (v.embedding <#> ${qvec}::vector) <= ${maxDistance}
+            ${yearFilter(sql, input.years)}
+            ${viewFilter(sql, input)}
+          ORDER BY v.embedding <#> ${qvec}::vector, e.id
+          LIMIT ${n}`
+      : [],
+    kinds.has("sequence")
+      ? sql<{ id: string }[]>`
+          SELECT g.id
+          FROM event_group_embeddings v
+          JOIN event_groups g ON g.id = v.group_id
+          WHERE v.model = ${model}
+            AND (v.embedding <#> ${qvec}::vector) <= ${maxDistance}
+            AND (${input.years === undefined}::boolean OR EXISTS (
+                  SELECT 1 FROM event_group_members m
+                  JOIN events e ON e.id = m.event_id
+                  WHERE m.group_id = g.id
+                  GROUP BY m.group_id
+                  HAVING (${lo}::int IS NULL OR max(event_hi_year(e.date, e.date_precision)) >= ${lo}::int)
+                     AND (${hi}::int IS NULL OR min(event_lo_year(e.date, e.date_precision)) <= ${hi}::int)))
+          ORDER BY v.embedding <#> ${qvec}::vector, g.id
+          LIMIT ${n}`
+      : [],
+    passages && kinds.has("passage")
+      ? sql<{ id: string }[]>`
+          SELECT p.document_id::text || ':' || p.seq AS id
+          FROM document_passages p
+          JOIN ingest_documents d ON d.id = p.document_id
+          JOIN ingest_sources s ON s.id = d.source_id
+          WHERE p.embedding IS NOT NULL
+            AND p.embedding_model = ${model}
+            AND (p.embedding <#> ${qvec}::vector) <= ${maxDistance}
+            ${documentSpanFilter(sql, input.years)}
+            ${sourceKeyFilter(sql, input)}
+          ORDER BY p.embedding <#> ${qvec}::vector, p.document_id, p.seq
+          LIMIT ${n}`
+      : [],
+  ]);
+  return {
+    event: events.map((r) => r.id),
+    sequence: sequences.map((r) => r.id),
+    passage: passageIds.map((r) => r.id),
+  };
 }

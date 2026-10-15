@@ -85,7 +85,7 @@ async function sweepPassages(
   engine: EmbeddingEngine,
   sourceKeys: string[] | null,
 ): Promise<SweepCounts> {
-  const [{ checked }] = (await db.query(
+  const [counted] = (await db.query(
     `SELECT count(*)::int AS checked
        FROM document_passages p
        JOIN ingest_documents d ON d.id = p.document_id
@@ -126,7 +126,7 @@ async function sweepPassages(
       ],
     );
   });
-  return { checked, embedded: pending.length };
+  return { checked: counted?.checked ?? 0, embedded: pending.length };
 }
 
 function isStale(
@@ -278,8 +278,8 @@ async function embedInBatches(
   for (let i = 0; i < pending.length; i += BATCH_SIZE) {
     const batch = pending.slice(i, i + BATCH_SIZE);
     const vectors = await engine.embed(batch.map((p) => p.text));
-    for (const [j, item] of batch.entries()) {
-      await write(item, vectors[j]);
+    for (let j = 0; j < batch.length; j++) {
+      await write(batch[j]!, vectors[j]!);
     }
   }
 }

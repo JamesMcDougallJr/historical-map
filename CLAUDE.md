@@ -55,6 +55,14 @@ rather than changing admin's own default (every developer running it standalone 
 **Both configs bind port 3000 for the web app.** Run `test:e2e` and `test:e2e:real`
 sequentially, never in parallel.
 
+**Embeddings in tests are recorded, never live.** `e2e-real` and the ingestion fixture
+run with `EMBEDDING_ENGINE=fake`, which serves real Titan vectors from
+`e2e-real/fixtures/search-vectors.json` and **throws, naming the text, on anything not
+in it**. So editing fixture text, a golden query or a hybrid spec's query fails until
+you re-record: `BEDROCK_REGION=us-west-2 ALLOW_TEST_DB_RESET=1 npm run search:record-vectors`
+(needs AWS credentials; incremental, so only new texts call Bedrock). The account's
+Titan quota is low, so throttling mid-run is normal; re-run until it completes.
+
 There's also a third, non-Playwright check:
 `services/ingest/scripts/run-ingestion-fixture.ts` runs the full
 detect → publish pipeline against a fake `ExtractionEngine` and a tiny fixture corpus.

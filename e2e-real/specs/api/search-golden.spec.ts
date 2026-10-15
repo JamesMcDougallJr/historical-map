@@ -2,13 +2,14 @@ import { test, expect } from "@playwright/test";
 import type { SearchResponse } from "../../../app/map/types";
 import { GOLDEN_QUERIES } from "../../fixtures/golden-queries";
 
-// One test per lexical entry in golden-queries.ts — ranking *quality*, kept
-// apart from search.spec.ts (features) so a failure says which kind it is.
+// One test per entry in golden-queries.ts — ranking *quality*, kept apart
+// from search.spec.ts (features) so a failure says which kind it is. Hybrid
+// entries run against the recorded-vector embedder (EMBEDDING_ENGINE=fake).
 
 const HEADERS = { "x-api-key": "test-api-key" };
 
-for (const g of GOLDEN_QUERIES.filter((g) => g.mode === "lexical")) {
-  const label = `${JSON.stringify(g.q)}${g.timeline ? ` [${g.timeline.join("–")}]` : ""}${g.kinds ? ` kinds=${g.kinds}` : ""}`;
+for (const g of GOLDEN_QUERIES) {
+  const label = `${JSON.stringify(g.q)}${g.timeline ? ` [${g.timeline.join("–")}]` : ""}${g.kinds ? ` kinds=${g.kinds}` : ""}${g.mode === "hybrid" ? " (hybrid)" : ""}`;
 
   test(`golden: ${label}`, async ({ request }) => {
     const params = new URLSearchParams({ q: g.q, mode: g.mode });
@@ -23,6 +24,10 @@ for (const g of GOLDEN_QUERIES.filter((g) => g.mode === "lexical")) {
     });
     expect(res.status()).toBe(200);
     const body = (await res.json()) as SearchResponse;
+    // A hybrid entry that silently ran lexically would test nothing.
+    expect(body.modes.semantic, `semantic arm ran for ${label}`).toBe(
+      g.mode === "hybrid",
+    );
     const keys = body.hits.map((h) => `${h.kind}:${h.id}`);
 
     // "Top 5" per kind: the response is grouped, so each kind's own ranking

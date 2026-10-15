@@ -90,7 +90,11 @@ export function useSearch({
   }, []);
 
   const run = useCallback(
-    async (text: string, prefix: boolean): Promise<SearchResponse | null> => {
+    async (
+      text: string,
+      prefix: boolean,
+      log = false,
+    ): Promise<SearchResponse | null> => {
       cancel();
       lastPrefixRef.current = prefix;
       if (!text.trim()) {
@@ -108,6 +112,7 @@ export function useSearch({
         mode: "lexical",
         timeline,
         view: limitToView ? getViewFilter() : null,
+        log,
       };
       const controller = new AbortController();
       controllerRef.current = controller;
@@ -179,7 +184,8 @@ export function useSearch({
         inputRef.current = text;
         setInputState(text);
       }
-      return run(inputRef.current, false);
+      // Only a submitted search is logged — never a keystroke (plans/23).
+      return run(inputRef.current, false, true);
     },
     [run],
   );

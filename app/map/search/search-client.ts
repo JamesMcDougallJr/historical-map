@@ -11,6 +11,7 @@ import type {
   EventGroup,
   HistoricalEvent,
   HistoricalLocation,
+  SearchHit,
   SearchKind,
   SearchResponse,
 } from "../types";
@@ -27,6 +28,8 @@ export interface SearchParams {
     sourceIds: string[];
   } | null;
   kinds?: SearchKind[];
+  /** A submitted search (Enter): written to the query log (plans/23). */
+  log?: boolean;
 }
 
 export interface DocumentPanelData {
@@ -70,7 +73,21 @@ export function searchQueryString(params: SearchParams): string {
       qs.set("sources", params.view.sourceIds.join(","));
   }
   if (params.kinds) qs.set("kinds", params.kinds.join(","));
+  if (params.log) qs.set("log", "1");
   return qs.toString();
+}
+
+/**
+ * Records which result a logged search led to. Fire-and-forget, and
+ * `keepalive` so it survives the navigation the click may cause.
+ */
+export function logSearchClick(logId: number, hit: SearchHit): void {
+  void fetch("/api/search/log", {
+    method: "POST",
+    headers: { ...headers(), "Content-Type": "application/json" },
+    body: JSON.stringify({ id: logId, clicked: `${hit.kind}:${hit.id}` }),
+    keepalive: true,
+  }).catch(() => {});
 }
 
 async function getJson<T>(url: string, signal?: AbortSignal): Promise<T> {
