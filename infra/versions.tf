@@ -10,6 +10,10 @@ terraform {
       source  = "hashicorp/random"
       version = "~> 3.6"
     }
+    vercel = {
+      source  = "vercel/vercel"
+      version = "~> 5.21"
+    }
   }
 
   # Local state on purpose: this is a single-operator demo stack, and a local
