@@ -84,7 +84,15 @@ async function resetIngestTables(): Promise<void> {
   await dataSource.initialize();
   try {
     // Refuse before deleting anything unless it is all the fixture's own.
-    const documents = await dataSource.query(`SELECT external_id FROM ingest_documents`);
+    // Only the fixture source's documents: e2e-real seeds its own (`fx-doc-*`,
+    // under `fx-source-search`) into the same CI database, and neither suite
+    // may judge — or delete — the other's (plans/19).
+    const documents = await dataSource.query(
+      `SELECT d.external_id FROM ingest_documents d
+         JOIN ingest_sources s ON s.id = d.source_id
+        WHERE s.key = $1`,
+      [FIXTURE_SOURCE_KEY],
+    );
     const events = await dataSource.query(
       `SELECT d.external_id AS document_external_id, count(*)::int AS n
        FROM events e LEFT JOIN ingest_documents d ON d.id = e.document_id
@@ -112,15 +120,20 @@ async function resetIngestTables(): Promise<void> {
     // event kept off the map" unanswerable (the baseline run, with Jev off, may
     // have published it). Only the fixture's documents' events — never e2e-real's
     // `fx-source-*` rows, and (by the guard above) never real ones.
+    const fixtureDocuments = `SELECT d.id FROM ingest_documents d
+        JOIN ingest_sources s ON s.id = d.source_id WHERE s.key = $1`;
     await dataSource.query(
-      `DELETE FROM events WHERE document_id IN (SELECT id FROM ingest_documents)`,
+      `DELETE FROM events WHERE document_id IN (${fixtureDocuments})`,
+      [FIXTURE_SOURCE_KEY],
     );
     // The sequence fixture-embeddings.ts builds over those events (its
     // members and both tables' vectors go with the rows they reference).
     await dataSource.query(`DELETE FROM event_groups WHERE id = $1`, [FIXTURE_GROUP_ID]);
-    await dataSource.query("DELETE FROM ingest_event_candidates");
-    await dataSource.query("DELETE FROM ingest_extractions");
-    await dataSource.query("DELETE FROM ingest_documents");
+    // Extractions, candidates, review items and passages cascade from their
+    // document (ON DELETE CASCADE), so only the fixture's go with it.
+    await dataSource.query(`DELETE FROM ingest_documents WHERE id IN (${fixtureDocuments})`, [
+      FIXTURE_SOURCE_KEY,
+    ]);
     await dataSource.query("DELETE FROM ingest_sources WHERE key = $1", [FIXTURE_SOURCE_KEY]);
     // Only the three places the fixture seeds — not the whole geocode cache,
     // which holds hand-corrected coordinates.
@@ -572,7 +585,11 @@ async function assertResults(jevMode: boolean): Promise<void> {
   await dataSource.initialize();
   try {
     const documentRepo = dataSource.getRepository(IngestDocument);
-    const documents = await documentRepo.find();
+    // The fixture source's only — e2e-real's documents may share the database.
+    const fixtureSource = await dataSource
+      .getRepository(IngestSource)
+      .findOneByOrFail({ key: FIXTURE_SOURCE_KEY });
+    const documents = await documentRepo.findBy({ sourceId: fixtureSource.id });
     if (documents.length !== 2) {
       throw new Error(
         `expected 2 ingest_documents (one per fixture file), got ${documents.length}`,
@@ -1005,8 +1022,10 @@ async function assertPassages(): Promise<void> {
         `SELECT d.id, count(p.seq)::int AS n,
                 string_agg(DISTINCT p.extractor_version || '/' || p.splitter_version, ',') AS versions
            FROM ingest_documents d
+           JOIN ingest_sources s ON s.id = d.source_id AND s.key = $1
            LEFT JOIN document_passages p ON p.document_id = d.id
           GROUP BY d.id`,
+        [FIXTURE_SOURCE_KEY],
       );
     for (const doc of perDoc) {
       if (doc.n === 0) throw new Error(`document ${doc.id} has no passages`);
