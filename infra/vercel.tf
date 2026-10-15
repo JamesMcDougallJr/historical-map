@@ -26,14 +26,19 @@ variable "vercel_project_id" {
 }
 
 variable "vercel_env_targets" {
-  description = "Deployments that read these values. Preview deploys use the same database and bucket as production."
+  # Production only, matching how POSTGRES_URL was set by hand. PR previews
+  # get no database and run on the bundled demo data — giving them production
+  # Postgres would let any preview write to it, since /api/data allows writes
+  # whenever MAP_API_KEY is unset.
+  description = "Deployments that read these values."
   type        = list(string)
-  default     = ["production", "preview"]
+  default     = ["production"]
 }
 
-provider "vercel" {
-  team = var.vercel_team_id
-}
+# No `team` here on purpose: setting it makes the provider read the team on
+# startup, which a personal (Hobby) account's team scope refuses with
+# team_unauthorized. Each resource passes team_id instead.
+provider "vercel" {}
 
 locals {
   # name → { value, sensitive }. Sensitive values can't be read back from
@@ -50,6 +55,7 @@ locals {
 resource "vercel_project_environment_variable" "this" {
   for_each = local.vercel_env
 
+  team_id    = var.vercel_team_id
   project_id = var.vercel_project_id
   key        = each.key
   value      = each.value.value
