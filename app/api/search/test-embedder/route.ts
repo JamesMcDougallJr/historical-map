@@ -1,6 +1,6 @@
 // Test-only window onto the fake query embedder (plans/23, search-hybrid.spec).
-// 404 unless EMBEDDING_ENGINE is fake or record, which only e2e-real's web
-// server sets — so in any real deployment this route does not exist in effect.
+// 404 unless EMBEDDING_ENGINE is fake or record, and always 404 on Vercel
+// (previews run fake too) — only e2e-real's local web server can reach it.
 //
 //   GET  → { calls, received, failure, ceiling }
 //   POST { reset?: true, sweep?: true,
@@ -9,10 +9,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { sweepSearchLog } from "@/lib/search-log";
 import { sweepQueryCache, testHooks } from "@/lib/search-semantic";
 
-// `record` too: re-recording runs the same specs against live Bedrock.
+// `record` too: re-recording runs the same specs against live Bedrock. Never
+// on Vercel: previews also run EMBEDDING_ENGINE=fake, and this route can wipe
+// the query cache and break the embedder for everyone.
 const enabled = () =>
-  process.env["EMBEDDING_ENGINE"] === "fake" ||
-  process.env["EMBEDDING_ENGINE"] === "record";
+  !process.env["VERCEL"] &&
+  (process.env["EMBEDDING_ENGINE"] === "fake" ||
+    process.env["EMBEDDING_ENGINE"] === "record");
 const notFound = () =>
   NextResponse.json({ error: "Not found" }, { status: 404 });
 

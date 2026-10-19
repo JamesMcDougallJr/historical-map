@@ -18,6 +18,7 @@
     "mcp": "tsx mcp/server.ts",
     "mcp:verify": "tsx scripts/verify-mcp-search.ts",
     "seed:db": "tsx scripts/seed-db.ts",
+    "seed:preview": "tsx scripts/seed-preview.ts",
     "db:ensure-schema": "tsx scripts/ensure-schema.ts",
     "db:backup": "tsx scripts/db-backup.ts",
     "db:restore": "tsx scripts/db-restore.ts",

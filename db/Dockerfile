@@ -2,9 +2,10 @@
 # prebuilt PostGIS+pgvector images are third-party images we'd then have in
 # the critical path of CI and local dev (plans/23-search-semantic.md).
 #
-# pgvector is built from the tag in db/pgvector-version — the one source of
-# truth for the version, matching what production RDS ships. CI and the ingest
-# migration both fail when a database's `extversion` differs from that file.
+# pgvector is built from the tag in db/pgvector-version — the exact version
+# local dev and CI test against; CI fails when the image's `extversion`
+# differs from that file. Hosted databases (Neon for previews) choose their
+# own 0.8.x; the ingest migration only requires >= 0.8.0.
 # After changing it, rebuild: `docker compose build db`.
 FROM imresamu/postgis:17-3.5-alpine
 
