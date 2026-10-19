@@ -1,3 +1,4 @@
+import { Inject } from "@nestjs/common";
 import { OnWorkerEvent, Processor, WorkerHost } from "@nestjs/bullmq";
 import { InjectRepository } from "@nestjs/typeorm";
 import { JobLogger } from "@app/common";
@@ -17,7 +18,10 @@ import { TextExtractionService } from "./text-extraction.service";
 export class TextExtractionProcessor extends WorkerHost {
   private readonly jobLogger = new JobLogger(TextExtractionProcessor.name);
 
+  // Explicit @Inject — see HealthController for why bare constructor-param-type
+  // injection of a cross-file class silently resolves to undefined under tsx.
   constructor(
+    @Inject(TextExtractionService)
     private readonly textExtraction: TextExtractionService,
     @InjectRepository(IngestDocument)
     private readonly documentRepo: Repository<IngestDocument>,

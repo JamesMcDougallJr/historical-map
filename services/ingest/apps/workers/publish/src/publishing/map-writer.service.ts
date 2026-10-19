@@ -2,6 +2,12 @@ import { createHash } from "node:crypto";
 import { Injectable } from "@nestjs/common";
 import { InjectDataSource } from "@nestjs/typeorm";
 import { DataSource } from "typeorm";
+import {
+  DEDUP_POOL_DAYS,
+  DEDUP_POOL_LIMIT,
+  DEDUP_RADIUS_M,
+  type NearbyEvent,
+} from "./jev-dedup";
 
 /**
  * Writes into the **map** tables (`sources`, `locations`, `events`).
@@ -83,6 +89,60 @@ export class MapWriterService {
       [id, name, lon, lat],
     );
     return id;
+  }
+
+  /**
+   * Published events that could be the same event as one about to be written:
+   * within `DEDUP_RADIUS_M` of the point and within `DEDUP_POOL_DAYS` of the
+   * date, nearest first. Deliberately a **wide** net — the precision-aware date
+   * filter (`datesCompatible`) and Jev do the narrowing.
+   *
+   * Excludes the event's own id and anything from the same document (a
+   * document's own duplicates are `validate`'s concern). Every source is
+   * included: cross-source is the whole point. Rows with no `document_id`
+   * (web-created) are kept.
+   */
+  async findNearbyEvents(params: {
+    lon: number;
+    lat: number;
+    /** `YYYY-MM-DD`. */
+    date: string;
+    excludeEventId: string;
+    excludeDocumentId: string;
+  }): Promise<NearbyEvent[]> {
+    return this.dataSource.query(
+      `SELECT e.id,
+              e.title,
+              e.description,
+              to_char(e.date, 'YYYY-MM-DD') AS date,
+              e.date_precision AS "datePrecision",
+              e.date_text AS "dateText",
+              e.source_id AS "sourceId",
+              l.name AS "placeName",
+              e.source AS quote
+       FROM events e
+       JOIN locations l ON l.id = e.location_id
+       WHERE ST_DWithin(
+               l.geom::geography,
+               ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography,
+               $3
+             )
+         AND e.date BETWEEN ($4::date - $5::int) AND ($4::date + $5::int)
+         AND e.id <> $6
+         AND (e.document_id IS NULL OR e.document_id <> $7::uuid)
+       ORDER BY l.geom::geography <-> ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography
+       LIMIT $8`,
+      [
+        params.lon,
+        params.lat,
+        DEDUP_RADIUS_M,
+        params.date,
+        DEDUP_POOL_DAYS,
+        params.excludeEventId,
+        params.excludeDocumentId,
+        DEDUP_POOL_LIMIT,
+      ],
+    );
   }
 
   /**

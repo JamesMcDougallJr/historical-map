@@ -40,7 +40,9 @@ export class EventExtractionService {
     @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
     @InjectQueue(QUEUE_NAMES.VALIDATE)
     private readonly validateQueue: Queue<ValidateJobData>,
-    private readonly config: ConfigService,
+    // Explicit @Inject — see HealthController for why bare constructor-param-type
+    // injection of a cross-file class silently resolves to undefined under tsx.
+    @Inject(ConfigService) private readonly config: ConfigService,
   ) {}
 
   async extract(job: Job<ExtractEventsJobData>): Promise<void> {

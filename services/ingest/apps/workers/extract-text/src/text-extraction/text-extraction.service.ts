@@ -46,7 +46,9 @@ export class TextExtractionService {
     @InjectRepository(IngestDocument)
     private readonly documentRepo: Repository<IngestDocument>,
     @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
-    private readonly parsers: ParserRegistry,
+    // Explicit @Inject — see HealthController for why bare constructor-param-type
+    // injection of a cross-file class silently resolves to undefined under tsx.
+    @Inject(ParserRegistry) private readonly parsers: ParserRegistry,
     @InjectQueue(QUEUE_NAMES.EXTRACT_EVENTS)
     private readonly eventsQueue: Queue<ExtractEventsJobData>,
   ) {}

@@ -1,4 +1,4 @@
-import { Injectable, Logger } from "@nestjs/common";
+import { Inject, Injectable, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import type { ExtractedEvent } from "@historical-map/domain";
 import { estimateTokens } from "../chunker";
@@ -75,7 +75,9 @@ export class GroqExtractionEngine implements ExtractionEngine {
   private readonly apiKey: string;
   private readonly bucket: TokenBucket;
 
-  constructor(config: ConfigService) {
+  // Explicit @Inject — see HealthController for why bare constructor-param-type
+  // injection of a cross-file class silently resolves to undefined under tsx.
+  constructor(@Inject(ConfigService) config: ConfigService) {
     this.apiKey = config.getOrThrow<string>("GROQ_API_KEY");
     this.model = config.get<string>("GROQ_MODEL") ?? "openai/gpt-oss-120b";
     this.bucket = new TokenBucket(

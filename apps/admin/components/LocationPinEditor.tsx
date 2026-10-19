@@ -18,6 +18,12 @@ import { Translate } from "ol/interaction";
 import { fromLonLat, toLonLat } from "ol/proj";
 import "ol/ol.css";
 
+declare global {
+  interface Window {
+    __pinEditorMap?: OlMap;
+  }
+}
+
 interface LocationPinEditorProps {
   coordinates: [number, number]; // [lon, lat]
   onMoved: (coordinates: [number, number]) => void;
@@ -46,6 +52,13 @@ export function LocationPinEditor({
       layers: [new TileLayer({ source: new OSM() }), new VectorLayer({ source })],
       view: new View({ center: fromLonLat(coordinates), zoom: 10 }),
     });
+
+    // Mirrors MapView.tsx's window.__olMap debug handle — stripped from
+    // production builds. Without it, driving the drag-to-reposition
+    // interaction from a test has no way to find the pin's screen pixel.
+    if (process.env.NODE_ENV !== "production") {
+      window.__pinEditorMap = map;
+    }
 
     const translate = new Translate({ features });
     map.addInteraction(translate);

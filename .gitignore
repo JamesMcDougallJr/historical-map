@@ -11,6 +11,10 @@ backups
 .DS_Store
 .claude/worktrees
 .env*.local
+test-results
+playwright-report
+blob-report
+playwright/.cache
 
 # Terraform state holds the generated RDS password in plaintext.
 # (.terraform.lock.hcl is NOT ignored — it's meant to be committed, pins provider versions.)
