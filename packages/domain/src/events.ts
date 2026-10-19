@@ -31,6 +31,12 @@ export interface HistoricalEvent {
   anchor?: string;
   /** Derived: which EventGroups list this event's id. Never written directly — storage layers populate it by scanning `memberEventIds`. */
   groupIds?: string[];
+  /**
+   * 0 to 1: how much this event mattered to the narrative, as extraction
+   * scored it. Absent for hand-curated events and anything ingested before
+   * this field existed — not every event has one, and that is not an error.
+   */
+  significance?: number;
 }
 
 /**

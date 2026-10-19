@@ -33,6 +33,7 @@ export const EXTRACTION_JSON_SCHEMA = {
           "datePrecision",
           "placeName",
           "confidence",
+          "significance",
           "sourceText",
         ],
         properties: {
@@ -70,6 +71,11 @@ export const EXTRACTION_JSON_SCHEMA = {
             type: "number",
             description:
               "0 to 1. How confident you are that this is a real, correctly-dated historical event as opposed to a misreading of the text.",
+          },
+          significance: {
+            type: "number",
+            description:
+              "0 to 1. How much this event mattered to the broader narrative — a major turning point, battle, founding, treaty, or death scores high; a routine travel day, a minor logistical note, or connective detail scores low. This is independent of confidence: a minor detail can still be reported with high confidence. Never a reason to omit an event — extract it and score it low.",
           },
           sourceText: {
             type: "string",
@@ -110,6 +116,7 @@ export const extractionResponseSchema = z.object({
       ]),
       placeName: z.string().nullable(),
       confidence: z.number().min(0).max(1),
+      significance: z.number().min(0).max(1),
       sourceText: z.string(),
     }),
   ),

@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
-import type { HistoricalLocation, HistoricalEvent } from "../types";
+import type { EventGroup, HistoricalLocation, HistoricalEvent } from "../types";
 import { getYear, sortByDate, groupByYear } from "../utils/date-utils";
 import { EventCard } from "./EventCard";
 import { EventTabs } from "./EventTabs";
@@ -16,6 +16,7 @@ interface MapPopupProps {
   onHeaderMouseDown?: (e: React.MouseEvent) => void;
   acknowledgedIds?: Set<string>;
   onAcknowledge?: (eventId: string) => void;
+  eventGroups?: EventGroup[];
 }
 
 export function MapPopup({
@@ -25,6 +26,7 @@ export function MapPopup({
   onHeaderMouseDown,
   acknowledgedIds,
   onAcknowledge,
+  eventGroups = [],
 }: MapPopupProps) {
   const popupRef = useRef<HTMLDivElement>(null);
   /**
@@ -60,6 +62,13 @@ export function MapPopup({
   const eventsByYear = useMemo(() => {
     return groupByYear(sortedEvents);
   }, [sortedEvents]);
+
+  // Built once per popup render, not per card: an event can list several
+  // groupIds and a location can have many events, so this avoids each
+  // EventCard re-scanning all of eventGroups to resolve its own titles.
+  const groupTitleById = useMemo(() => {
+    return new Map(eventGroups.map((g) => [g.id, g.title]));
+  }, [eventGroups]);
 
   const years = useMemo(() => {
     return Array.from(eventsByYear.keys()).sort();
@@ -156,6 +165,9 @@ export function MapPopup({
             event={event}
             isAcknowledged={acknowledgedIds?.has(event.id)}
             onAcknowledge={onAcknowledge}
+            groupTitles={event.groupIds
+              ?.map((id) => groupTitleById.get(id))
+              .filter((title): title is string => title !== undefined)}
           />
         ))}
       </div>

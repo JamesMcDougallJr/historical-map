@@ -33,6 +33,7 @@ export async function PATCH(
         | "sourceId"
         | "tags"
         | "imageUrl"
+        | "significance"
       >
     >;
     const event = await storage.updateEvent(id, eventId, body);

@@ -166,6 +166,7 @@ export async function updateEvent(
       | "sourceId"
       | "tags"
       | "imageUrl"
+      | "significance"
     >
   >,
 ): Promise<HistoricalEvent | null> {

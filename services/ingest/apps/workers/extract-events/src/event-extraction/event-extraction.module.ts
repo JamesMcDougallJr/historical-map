@@ -1,7 +1,7 @@
 import { BullModule } from "@nestjs/bullmq";
 import { Module } from "@nestjs/common";
 import { TypeOrmModule } from "@nestjs/typeorm";
-import { IngestDocument, IngestExtraction } from "@app/database";
+import { IngestDocument, IngestEventSequence, IngestExtraction } from "@app/database";
 // The provider that gets imported here. Swapping engines replaces this import
 // and nothing else — EventExtractionService depends only on EXTRACTION_ENGINE.
 // EXTRACTION_ENGINE=fake selects FakeExtractionModule, a deterministic
@@ -18,7 +18,11 @@ const ExtractionProviderModule =
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([IngestDocument, IngestExtraction]),
+    TypeOrmModule.forFeature([
+      IngestDocument,
+      IngestExtraction,
+      IngestEventSequence,
+    ]),
     ExtractionProviderModule,
     StorageModule,
     BullModule.registerQueue(

@@ -4,6 +4,7 @@ import { SplitTextExtraction1757980800000 } from "./1757980800000-split-text-ext
 import { AddEventAnchor1760140800000 } from "./1760140800000-add-event-anchor";
 import { AddGeocodeCandidates1760227200000 } from "./1760227200000-add-geocode-candidates";
 import { AddGeocodeReview1760313600000 } from "./1760313600000-add-geocode-review";
+import { AddEventSequences1760313600000 } from "./1760313600000-add-event-sequences";
 
 /**
  * Explicit imports, in order. **Do not replace this with a glob.**
@@ -24,4 +25,5 @@ export const INGEST_MIGRATIONS = [
   AddEventAnchor1760140800000,
   AddGeocodeCandidates1760227200000,
   AddGeocodeReview1760313600000,
+  AddEventSequences1760313600000,
 ];

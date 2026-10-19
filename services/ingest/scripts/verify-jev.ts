@@ -140,6 +140,7 @@ const SAMPLE_EVENT: ExtractedEvent = {
   datePrecision: "year",
   placeName: "Fixture Village",
   anchor: "p.1",
+  significance: 0.5,
 };
 
 async function main(): Promise<void> {

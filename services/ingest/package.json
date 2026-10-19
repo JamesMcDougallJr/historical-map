@@ -23,6 +23,8 @@
     "start:publish": "nest start publish --watch",
     "extract:verify": "tsx scripts/verify-extraction.ts",
     "detect:trigger": "tsx scripts/trigger-detect.ts",
+    "backfill-sequences": "tsx scripts/backfill-sequences.ts",
+    "reextract-events": "tsx scripts/reextract-events.ts",
     "geocode:review": "tsx scripts/geocode-review.ts",
     "geocode:refresh": "tsx scripts/geocode-refresh.ts",
     "duplicate:review": "tsx scripts/duplicate-review.ts",

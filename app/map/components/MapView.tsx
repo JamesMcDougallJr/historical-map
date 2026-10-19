@@ -1361,6 +1361,7 @@ export function MapView({
           onHeaderMouseDown={handlePopupDragStart}
           acknowledgedIds={acknowledgedIds}
           onAcknowledge={handleAcknowledge}
+          eventGroups={eventGroups}
         />
       </div>
     </div>

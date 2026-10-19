@@ -38,6 +38,11 @@ Confidence:
 - Report how sure you are that this is a real, correctly-dated event drawn from this text.
 - Below 0.5 for anything you are reconstructing from fragmentary or garbled text — this corpus includes OCR output, and mangled text is common.
 
+Significance:
+- Report how much this event mattered to the broader narrative, independent of confidence. A battle, a founding, a treaty, a death, a major decision — high. A routine day's travel, a minor logistical note, connective detail between larger events — low.
+- Confidence and significance are different questions. A minor detail can be reported with high confidence; do not lower confidence just because significance is low.
+- Low significance is never a reason to omit an event. Extract it and score it low — the "return nothing rather than something" rule above is about events that did not happen, not about events that did not matter much.
+
 Return an empty events array when the passage contains no events. That is a normal and expected result; most pages of most books contain none. Do not pad, and do not repeat an event you have already reported for this passage.`;
 
 export function buildUserPrompt(text: string, anchors: string[]): string {
