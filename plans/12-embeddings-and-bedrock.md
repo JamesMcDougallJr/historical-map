@@ -27,6 +27,15 @@ independent of where S3/MinIO lives, so this costs nothing but an env var —
 `BEDROCK_REGION`, deliberately separate from `AWS_REGION`, so moving the model
 calls never moves the object storage.
 
+> **Progress (2026-10-11):** the search side of this is declared in `infra/`
+> (plan 23, step 0): `bedrock.tf` creates a web-app IAM user and
+> `github-oidc.tf` a CI role, each allowed only `bedrock:InvokeModel` on
+> Titan Embed v2 in us-west-2; `rds.tf` targets the newest 16.x (pgvector
+> 0.8). Validated with `tofu validate` and mocked-provider `tofu test`;
+> **not yet applied**. Still open here: credentials for the ingest workers
+> (the `embed` worker, the judge model, their S3 access), and retiring the
+> root keys the CLI uses.
+
 **Stop using root credentials.** `aws sts get-caller-identity` returns
 `arn:aws:iam::138630010063:root`. Long-lived root access keys cannot be scoped
 or rotated independently and are the one credential that can never be revoked

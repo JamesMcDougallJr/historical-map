@@ -19,6 +19,8 @@ npm run db:backup
 
 ```bash
 docker compose up -d db martin
+POSTGRES_URL=postgres://postgres:password@localhost:5433/db \
+  npm run migrate --workspace=services/ingest   # search fixtures seed document_passages
 ALLOW_TEST_DB_RESET=1 npm run test:e2e:real
 ```
 

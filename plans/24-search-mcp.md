@@ -1,5 +1,17 @@
 # Stretch B — Search on the MCP server
 
+> **Status: done (2026-10-10)** on branch `search-lexical`, including
+> `show_map`'s `focus` and the App harness. Verified locally: `search-mcp`
+> (e2e-real, against Postgres), `npm run mcp:verify` (stdio, JSON tier — 2.8s,
+> so it runs in CI after the real suite), and `e2e/mcp-app-focus.spec.ts`.
+> Deviations: `kinds` also accepts `person` (Stretch A), and the tool takes
+> optional `fromYear`/`toYear` like `/api/search`'s timeline. Semantic mode
+> waits on S3: `semantic: true` currently returns lexical hits with
+> `modes.semantic = false` (asserted), and the rate-limit/ceiling cases arrive
+> with S3. Sequences, people and documents focus as "draw only these
+> locations" (with a path where plan 18's proximity rule allows) — the
+> sandbox can't fetch a sequence or document itself.
+
 Part of [19-search.md](./19-search.md). **A stretch goal** (19, decision 7).
 It depends on S1, and it can optionally use S3.
 

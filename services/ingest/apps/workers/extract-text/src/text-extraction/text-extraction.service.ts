@@ -1,6 +1,6 @@
 import { InjectQueue } from "@nestjs/bullmq";
 import { Inject, Injectable } from "@nestjs/common";
-import { InjectRepository } from "@nestjs/typeorm";
+import { InjectDataSource, InjectRepository } from "@nestjs/typeorm";
 import { JobLogger } from "@app/common";
 import { IngestDocument, jsonb } from "@app/database";
 import {
@@ -9,6 +9,9 @@ import {
   ParserRegistry,
   type TextArtifact,
   cleanDocument,
+  parseArtifact,
+  passagesStale,
+  replacePassages,
   serializeArtifact,
 } from "@app/parsers";
 import {
@@ -24,7 +27,7 @@ import {
   storageKeys,
 } from "@app/storage";
 import type { Job, Queue } from "bullmq";
-import { Repository } from "typeorm";
+import { DataSource, Repository } from "typeorm";
 
 /**
  * Turns stored original bytes into a cleaned, segmented text artifact.
@@ -51,6 +54,7 @@ export class TextExtractionService {
     @Inject(ParserRegistry) private readonly parsers: ParserRegistry,
     @InjectQueue(QUEUE_NAMES.EXTRACT_EVENTS)
     private readonly eventsQueue: Queue<ExtractEventsJobData>,
+    @InjectDataSource() private readonly dataSource: DataSource,
   ) {}
 
   async extractText(job: Job<ExtractTextJobData>): Promise<void> {
@@ -79,6 +83,20 @@ export class TextExtractionService {
         job,
         `already extracted at v${EXTRACTOR_VERSION} — skipping`,
       );
+      // The search index has its own version: a splitter change re-cuts
+      // passages from the stored artifact without re-cleaning anything.
+      if (await passagesStale(this.dataSource, documentId, EXTRACTOR_VERSION)) {
+        const artifact = parseArtifact(
+          await this.storage.getObject(document.textKey),
+        );
+        const count = await replacePassages(
+          this.dataSource,
+          documentId,
+          artifact.segments,
+          artifact.extractorVersion,
+        );
+        await this.jobLogger.log(job, `re-indexed ${count} passages`);
+      }
       await this.enqueueEvents(documentId);
       return;
     }
@@ -128,6 +146,15 @@ export class TextExtractionService {
         "application/json",
       );
 
+      // The search index over this text (document_passages): rewritten with
+      // every artifact, so it can never describe an older cleaning.
+      const passageCount = await replacePassages(
+        this.dataSource,
+        documentId,
+        artifact.segments,
+        EXTRACTOR_VERSION,
+      );
+
       await this.documentRepo.update(documentId, {
         status: "text_ready",
         textKey: key,
@@ -143,7 +170,8 @@ export class TextExtractionService {
       await this.jobLogger.log(
         job,
         `${parsed.kind}: ${r.charsBefore}→${r.charsAfter} chars, ` +
-          `${artifact.stats.segments} segments, rules=[${r.rules.join(",")}]` +
+          `${artifact.stats.segments} segments, ${passageCount} passages, ` +
+          `rules=[${r.rules.join(",")}]` +
           (r.runningHeader ? `, header stripped` : ""),
       );
 

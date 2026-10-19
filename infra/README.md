@@ -164,3 +164,38 @@ re-run `tofu destroy` directly rather than reusing an old plan file.
   `terraform destroy` doesn't leave a snapshot behind to notice on a bill
   later. There's nothing in this database that isn't reproducible from
   `data/map-data.json` + re-running ingest.
+
+## Semantic-search pieces (plans/23-search-semantic.md)
+
+Declared here, not yet applied:
+
+- **RDS version** follows the newest PostgreSQL 16 minor
+  (`data.aws_rds_engine_version`) instead of a hand pin — pgvector 0.8 needs
+  ≥ 16.5. The upgrade happens in the instance's maintenance window
+  (`apply_immediately = false`), not on `tofu apply`; `tofu output
+  rds_engine_version` shows the target.
+- **Bedrock** (`bedrock.tf`): a web-app IAM user allowed only
+  `bedrock:InvokeModel` on Titan Embed v2 in us-west-2. `vercel.tf` passes its
+  key to Vercel as `BEDROCK_ACCESS_KEY_ID`/`BEDROCK_SECRET_ACCESS_KEY` (not
+  `AWS_*`, which Vercel reserves), with `BEDROCK_REGION` and `EMBEDDING_MODEL`.
+- **CI** (`github-oidc.tf`): this repository's workflows get the same one-model
+  permission through a GitHub OIDC role — no long-lived secret — published as
+  the `AWS_EMBEDDINGS_ROLE_ARN` Actions variable. Needs `GITHUB_TOKEN` (repo
+  admin) in the environment at apply. An account allows one GitHub OIDC
+  provider; if it already has one, set `github_oidc_provider_arn`. Setting
+  `github_repository = ""` skips all of it.
+- **Budget** (`budgets.tf`): set `alert_email` (in `terraform.tfvars`) to get a
+  Bedrock-only monthly budget, emailing at 80% of
+  `bedrock_monthly_budget_usd` actual and 100% forecast.
+
+## Checks
+
+`tofu fmt -check`, `tofu validate` and `tofu test` run in CI
+(`.github/workflows/infra.yml`) with no credentials: `tests/` plans the whole
+stack against mocked providers and asserts the properties that matter
+(one-model IAM policy, repository-scoped OIDC trust, maintenance-window
+upgrade, budget filter, the Vercel env set). Locally:
+
+```bash
+tofu init -backend=false && tofu validate && tofu test
+```

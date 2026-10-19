@@ -9,6 +9,9 @@ interface TimelineSliderProps {
   onRangeChange: (range: [number, number]) => void;
   onToggle?: (enabled: boolean) => void;
   isEnabled?: boolean;
+  /** Controlled open state — lets the search bar's timeline chip open the panel. */
+  expanded?: boolean;
+  onExpandedChange?: (expanded: boolean) => void;
 }
 
 export function TimelineSlider({
@@ -18,8 +21,18 @@ export function TimelineSlider({
   onRangeChange,
   onToggle,
   isEnabled = false,
+  expanded,
+  onExpandedChange,
 }: TimelineSliderProps): JSX.Element {
-  const [isExpanded, setIsExpanded] = useState(false);
+  const [internalExpanded, setInternalExpanded] = useState(false);
+  const isExpanded = expanded ?? internalExpanded;
+  const setIsExpanded = useCallback(
+    (next: boolean) => {
+      if (expanded === undefined) setInternalExpanded(next);
+      onExpandedChange?.(next);
+    },
+    [expanded, onExpandedChange],
+  );
   const containerRef = useRef<HTMLDivElement>(null);
   const trackRef = useRef<HTMLDivElement>(null);
   const [dragging, setDragging] = useState<"low" | "high" | null>(null);
@@ -41,7 +54,7 @@ export function TimelineSlider({
       document.removeEventListener("mousedown", handler);
       document.removeEventListener("touchstart", handler);
     };
-  }, [isExpanded]);
+  }, [isExpanded, setIsExpanded]);
 
   const totalRange = maxYear - minYear;
   const lowPct = ((range[0] - minYear) / totalRange) * 100;
@@ -192,7 +205,7 @@ export function TimelineSlider({
                 {/* Low thumb */}
                 <div
                   data-testid="timeline-thumb-low"
-                  className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-5 h-5 bg-white rounded-full shadow-md border-2 border-blue-500 cursor-grab active:cursor-grabbing hover:scale-110 transition-transform touch-none"
+                  className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-5 h-5 bg-white rounded-full shadow-md border-2 border-blue-500 cursor-grab active:cursor-grabbing hover:scale-110 transition-transform touch-none timeline-thumb"
                   style={{ left: `${lowPct}%` }}
                   onMouseDown={(e) => {
                     e.stopPropagation();
@@ -207,7 +220,7 @@ export function TimelineSlider({
                 {/* High thumb */}
                 <div
                   data-testid="timeline-thumb-high"
-                  className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-5 h-5 bg-white rounded-full shadow-md border-2 border-purple-500 cursor-grab active:cursor-grabbing hover:scale-110 transition-transform touch-none"
+                  className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-5 h-5 bg-white rounded-full shadow-md border-2 border-purple-500 cursor-grab active:cursor-grabbing hover:scale-110 transition-transform touch-none timeline-thumb"
                   style={{ left: `${highPct}%` }}
                   onMouseDown={(e) => {
                     e.stopPropagation();

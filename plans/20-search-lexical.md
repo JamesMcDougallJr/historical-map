@@ -1,5 +1,18 @@
 # S1 — Lexical search: indexes, the unified endpoint, dates
 
+> **Status: done (2026-10-10)** on branch `search-lexical`. Verified locally
+> against Postgres (PGlite with `pg_trgm`/`unaccent`/PostGIS): every spec below
+> passes — `e2e/search-query`, `search-static`, `split-passages`, and the
+> e2e-real `search`/`search-golden` specs, alongside the rest of the API suite.
+> The ingestion-fixture additions need Redis + MinIO and run in CI only.
+> Deviations from the text below, each recorded where it applies: the
+> splitter rule (measured, see "Splitting paragraphs"); an event matches
+> together with its place name (so `-exclusions` and cross-field words work);
+> `MatchField` gained `"member"`; text documents' passage anchors are `¶3` /
+> `¶3.2` rather than nesting; the fixture documents use fixed uuids, since
+> `ingest_documents.id` is a uuid. Map pins still filter by the stored year
+> while search uses precision-aware spans — S2 aligns the pins.
+
 Part of [19-search.md](./19-search.md). No new infrastructure. Every extension
 used here is already available locally and on RDS.
 
@@ -175,6 +188,22 @@ rule as the cleaning work. If PDF paragraphs come out unreliable, the
 fallback is fixed-size sentence windows (~3 sentences, overlapping by one),
 which still gives tight snippets. That's a splitter-version bump, not a
 schema change.
+
+> **Measured (2026-10-10), and the heuristic above was replaced.** On the real
+> artifact (`short_history_of_mexico.pdf`, 83 pages, 322k characters after
+> cleaning) there are no typeset lines to measure: `unpdf` plus
+> `reflowParagraphs` already joins most wraps, leaving 1,670 lines with a median
+> of 123 characters and **zero blank lines**. A surviving newline is either a
+> paragraph end (the line closes a sentence) or a wrap `reflowParagraphs`
+> declined because the next line starts uppercase ("at the time of the\n
+> Conquest are"). So the shipped splitter (`SPLITTER_VERSION = 1`) splits on
+> sentence punctuation (abbreviation- and initialism-aware) and headings, not
+> line length; an open paragraph continues across a page break whatever the
+> next page's case, unless that page opens with a heading; and a heading always
+> starts a passage. Result: **483 passages**, median 639 characters (p5 249,
+> p95 1,251), none under 200 or over 1,500, none starting lowercase, none ending
+> mid-sentence, 59 crossing a page. Twenty random samples all read as real
+> paragraphs, so the sentence-window fallback isn't needed.
 
 #### Writers
 

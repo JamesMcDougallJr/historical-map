@@ -11,6 +11,12 @@
 // PostGIS's own schemas (tiger/topology) still need `CREATE EXTENSION postgis`,
 // which the imresamu/postgis image already runs on container init — so this
 // only ever needs to run on top of a container that has already booted once.
+//
+// On a *fresh* container, run `npm run db:ensure-schema` first. The dump is
+// table-scoped, and the search columns on events/locations/event_groups are
+// generated from the `hm_english`/`hm_simple` text search configurations and
+// `immutable_unaccent()`, which live outside those tables — without them,
+// pg_restore's CREATE TABLE fails on the generated column.
 
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";

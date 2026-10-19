@@ -14,6 +14,11 @@ terraform {
       source  = "vercel/vercel"
       version = "~> 5.21"
     }
+    # The CI role's ARN as a GitHub Actions variable (github-oidc.tf).
+    github = {
+      source  = "integrations/github"
+      version = "~> 6.0"
+    }
   }
 
   # Local state on purpose: this is a single-operator demo stack, and a local
@@ -26,4 +31,10 @@ terraform {
 
 provider "aws" {
   region = var.aws_region
+}
+
+# GITHUB_TOKEN from the operator's environment (repo admin, to set Actions
+# variables). The vercel provider is configured in vercel.tf.
+provider "github" {
+  owner = var.github_owner
 }

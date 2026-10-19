@@ -40,7 +40,10 @@ test.describe("layer control (real backend)", () => {
   test("add and remove a custom overlay", async ({ page }) => {
     await page.getByRole("button", { name: "Add" }).click();
     await page.getByPlaceholder("e.g., 1890 Railroad Map").fill("Fixture Overlay");
-    await page.getByRole("combobox").selectOption("custom");
+    // By name: the search box on /map is a combobox too.
+    await page
+      .getByRole("combobox", { name: "Source Type" })
+      .selectOption("custom");
     await page
       .getByPlaceholder("https://tiles.example.com/{z}/{x}/{y}.png")
       .fill("https://tiles.example.com/{z}/{x}/{y}.png");

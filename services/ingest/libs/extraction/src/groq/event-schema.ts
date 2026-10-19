@@ -34,6 +34,7 @@ export const EXTRACTION_JSON_SCHEMA = {
           "placeName",
           "confidence",
           "sourceText",
+          "people",
         ],
         properties: {
           title: {
@@ -76,6 +77,12 @@ export const EXTRACTION_JSON_SCHEMA = {
             description:
               "The verbatim sentence or passage this event was drawn from.",
           },
+          people: {
+            type: "array",
+            items: { type: "string" },
+            description:
+              'People named in this event, each exactly as the text writes them, e.g. "President Young", "Hernando Cortes". Empty when the text names no one.',
+          },
         },
       },
     },
@@ -111,6 +118,7 @@ export const extractionResponseSchema = z.object({
       placeName: z.string().nullable(),
       confidence: z.number().min(0).max(1),
       sourceText: z.string(),
+      people: z.array(z.string()),
     }),
   ),
 });

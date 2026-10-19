@@ -8,5 +8,9 @@
 // through a tsconfig path mapping. Neither has to build this package first.
 
 export * from "./dates";
+export * from "./format-date";
 export * from "./events";
 export * from "./ingestion";
+export * from "./date-interval";
+export * from "./search";
+export * from "./entities";

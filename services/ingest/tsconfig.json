@@ -37,10 +37,14 @@
       "@app/sources/*": ["libs/sources/src/*"],
       "@app/extraction": ["libs/extraction/src"],
       "@app/extraction/*": ["libs/extraction/src/*"],
+      "@app/embedding": ["libs/embedding/src"],
+      "@app/embedding/*": ["libs/embedding/src/*"],
       "@app/jev": ["libs/jev/src"],
       "@app/jev/*": ["libs/jev/src/*"],
       "@historical-map/domain": ["../../packages/domain/src/index.ts"],
-      "@historical-map/domain/*": ["../../packages/domain/src/*"]
+      "@historical-map/domain/*": ["../../packages/domain/src/*"],
+      "@historical-map/embedding": ["../../packages/embedding/src/index.ts"],
+      "@historical-map/embedding/*": ["../../packages/embedding/src/*"]
     }
   },
   "include": ["apps/**/*.ts", "libs/**/*.ts", "scripts/**/*.ts"],

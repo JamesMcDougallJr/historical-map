@@ -24,6 +24,8 @@
       "@/*": ["./*"],
       "@historical-map/domain": ["./packages/domain/src/index.ts"],
       "@historical-map/domain/*": ["./packages/domain/src/*"],
+      "@historical-map/embedding": ["./packages/embedding/src/index.ts"],
+      "@historical-map/embedding/*": ["./packages/embedding/src/*"],
       "@historical-map/api-client": ["./packages/api-client/src/index.ts"],
       "@historical-map/api-client/*": ["./packages/api-client/src/*"]
     },

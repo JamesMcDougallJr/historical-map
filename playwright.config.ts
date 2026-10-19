@@ -17,6 +17,26 @@ export default defineConfig({
     {
       name: "chromium",
       use: { ...devices["Desktop Chrome"] },
+      // Touch layouts run on the device projects below.
+      testIgnore: /search-touch\.spec\.ts/,
+    },
+    // Tablets and phones (plans/21-search-ui.md). Scoped to the touch spec, so
+    // the hover specs never run where hover doesn't exist. Chromium in device
+    // emulation, since CI installs only chromium.
+    {
+      name: "ipad-landscape",
+      testMatch: /search-touch\.spec\.ts/,
+      use: { ...devices["iPad (gen 7) landscape"], browserName: "chromium" },
+    },
+    {
+      name: "ipad-portrait",
+      testMatch: /search-touch\.spec\.ts/,
+      use: { ...devices["iPad (gen 7)"], browserName: "chromium" },
+    },
+    {
+      name: "iphone",
+      testMatch: /search-touch\.spec\.ts/,
+      use: { ...devices["iPhone 14"], browserName: "chromium" },
     },
   ],
   webServer: {

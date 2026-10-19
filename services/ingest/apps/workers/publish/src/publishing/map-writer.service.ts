@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { Injectable } from "@nestjs/common";
 import { InjectDataSource } from "@nestjs/typeorm";
 import { DataSource } from "typeorm";
+import { cleanMentions, normalizeEntityName } from "@historical-map/domain";
 import {
   DEDUP_POOL_DAYS,
   DEDUP_POOL_LIMIT,
@@ -166,6 +167,7 @@ export class MapWriterService {
     dateText?: string | null;
     documentId?: string | null;
     anchor?: string | null;
+    people?: readonly string[];
   }): Promise<boolean> {
     const result: unknown[] = await this.dataSource.query(
       `INSERT INTO events (
@@ -190,7 +192,27 @@ export class MapWriterService {
         event.anchor ?? null,
       ],
     );
+    await this.insertPeople(event.id, event.people);
     return result.length > 0;
+  }
+
+  /**
+   * People named by the event, verbatim plus a normalised key, into
+   * `event_entities` (type "person"). Idempotent like the event insert: a
+   * re-publish adds nothing, and never rewrites what is there.
+   */
+  private async insertPeople(
+    eventId: string,
+    people: readonly string[] | undefined,
+  ): Promise<void> {
+    for (const name of cleanMentions(people)) {
+      await this.dataSource.query(
+        `INSERT INTO event_entities (event_id, type, name, name_norm)
+         VALUES ($1, 'person', $2, $3)
+         ON CONFLICT DO NOTHING`,
+        [eventId, name, normalizeEntityName(name)],
+      );
+    }
   }
 }
 

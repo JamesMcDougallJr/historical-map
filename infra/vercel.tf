@@ -49,6 +49,13 @@ locals {
     S3_REGION            = { value = var.aws_region, sensitive = false }
     S3_ACCESS_KEY_ID     = { value = aws_iam_access_key.documents_web.id, sensitive = false }
     S3_SECRET_ACCESS_KEY = { value = aws_iam_access_key.documents_web.secret, sensitive = true }
+
+    # Semantic search (bedrock.tf, plans/23). Not AWS_ACCESS_KEY_ID/
+    # AWS_SECRET_ACCESS_KEY: Vercel reserves those names for its own runtime.
+    BEDROCK_REGION            = { value = var.bedrock_region, sensitive = false }
+    EMBEDDING_MODEL           = { value = var.embedding_model, sensitive = false }
+    BEDROCK_ACCESS_KEY_ID     = { value = aws_iam_access_key.web_embeddings.id, sensitive = false }
+    BEDROCK_SECRET_ACCESS_KEY = { value = aws_iam_access_key.web_embeddings.secret, sensitive = true }
   }
 }
 

@@ -1,6 +1,6 @@
 import { Inject, Injectable, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import { InjectRepository } from "@nestjs/typeorm";
+import { InjectDataSource, InjectRepository } from "@nestjs/typeorm";
 import type { ExtractedEvent, ValidationCheck } from "@historical-map/domain";
 import { JobLogger } from "@app/common";
 import {
@@ -11,9 +11,10 @@ import {
 } from "@app/database";
 import { GeocodingService } from "@app/geocoding";
 import { JevClient, isJevFeatureEnabled } from "@app/jev";
+import { relinkPassageEvents } from "@app/parsers";
 import type { PublishJobData } from "@app/queue";
 import type { Job } from "bullmq";
-import { IsNull, Repository } from "typeorm";
+import { DataSource, IsNull, Repository } from "typeorm";
 import {
   judgeDuplicateWithJev,
   selectCandidates,
@@ -48,6 +49,7 @@ export class PublishingService {
     @Inject(MapWriterService) private readonly mapWriter: MapWriterService,
     @Inject(JevClient) private readonly jev: JevClient,
     @Inject(ConfigService) private readonly config: ConfigService,
+    @InjectDataSource() private readonly dataSource: DataSource,
   ) {}
 
   async publish(job: Job<PublishJobData>): Promise<void> {
@@ -155,6 +157,7 @@ export class PublishingService {
           dateText: event.dateText,
           documentId,
           anchor: event.anchor,
+          ...(event.people ? { people: event.people } : {}),
         });
 
         await this.candidateRepo.update(candidate.id, {
@@ -163,6 +166,11 @@ export class PublishingService {
         if (inserted) published++;
         else alreadyPresent++;
       }
+
+      // Which paragraph each event was quoted from, for search. Re-derived for
+      // the whole document, so it's idempotent and also covers events an
+      // earlier run published.
+      const linked = await relinkPassageEvents(this.dataSource, documentId);
 
       await this.documentRepo.update(documentId, {
         status: "published",
@@ -174,7 +182,7 @@ export class PublishingService {
         job,
         `candidates=${candidates.length} published=${published} ` +
           `already-present=${alreadyPresent} demoted-to-review=${demoted} ` +
-          `auto-duplicates=${autoDuplicates}`,
+          `auto-duplicates=${autoDuplicates} passage-links=${linked}`,
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

@@ -169,3 +169,23 @@ services:
       redis:
         condition: service_healthy
     restart: unless-stopped
+
+  # The content_hash sweep (plans/23-search-semantic.md): re-embeds events and
+  # sequences whose vector is missing or stale. Needs no queue, only Postgres
+  # and Bedrock. BEDROCK_ACCESS_KEY_ID/SECRET are optional — without them the
+  # standard AWS credential chain applies (an instance role, a profile).
+  ingest-embed:
+    build:
+      context: .
+      dockerfile: services/ingest/apps/workers/embed/Dockerfile
+    environment:
+      <<: *ingest-env
+      PORT: 3107
+      BEDROCK_REGION: ${BEDROCK_REGION:-us-west-2}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-amazon.titan-embed-text-v2:0}
+      BEDROCK_ACCESS_KEY_ID: ${BEDROCK_ACCESS_KEY_ID:-}
+      BEDROCK_SECRET_ACCESS_KEY: ${BEDROCK_SECRET_ACCESS_KEY:-}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped

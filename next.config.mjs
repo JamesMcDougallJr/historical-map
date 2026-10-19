@@ -18,12 +18,16 @@ const nextConfig = {
   // has to compile it itself. Today every import of it is `import type` and is
   // erased before bundling — this exists so the first runtime export added to
   // the package (a shared zod schema, say) doesn't fail resolution.
-  transpilePackages: ['@historical-map/domain', '@historical-map/api-client'],
+  transpilePackages: ['@historical-map/domain', '@historical-map/embedding', '@historical-map/api-client'],
 
   // The MCP App bundle is read at runtime, so Next's tracer can't see it.
   // Built by `npm run build:mcp`, which `prebuild` runs ahead of `next build`.
+  //
+  // The recorded query vectors likewise: previews run EMBEDDING_ENGINE=fake
+  // (no Bedrock), which reads them from disk on first search.
   outputFileTracingIncludes: {
-    '/api/mcp': ['./mcp/dist/**'],
+    '/api/mcp': ['./mcp/dist/**', './e2e-real/fixtures/search-vectors.json'],
+    '/api/search': ['./e2e-real/fixtures/search-vectors.json'],
   },
 
   images: {

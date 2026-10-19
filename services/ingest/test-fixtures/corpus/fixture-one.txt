@@ -1,6 +1,7 @@
 TITLE: The Centennial Parade
 DATE: 1876-07-04
 PLACE: Fixture Town
+PEOPLE: Mayor Ezra Fixture; President Ulysses S. Grant
 
 TITLE: The New Railway Line
 DATE: 1890-03-15

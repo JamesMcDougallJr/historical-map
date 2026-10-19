@@ -17,9 +17,12 @@
 
 services:
   db:
-    # imresamu/* is the multi-arch rebuild of postgis/postgis — the official
-    # image publishes amd64 only, which won't run natively on Apple Silicon.
-    image: imresamu/postgis:17-3.5-alpine
+    # imresamu/postgis (the multi-arch rebuild of postgis/postgis — the
+    # official image publishes amd64 only, which won't run natively on Apple
+    # Silicon) plus pgvector at the version in db/pgvector-version. See
+    # db/Dockerfile; rebuild with `docker compose build db` after bumping it.
+    build: ./db
+    image: historical-map-db:local
     restart: unless-stopped
     ports:
       # 5433 on the host — 5432 is commonly taken by a local Postgres install.

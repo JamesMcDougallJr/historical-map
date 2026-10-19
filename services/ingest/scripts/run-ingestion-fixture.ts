@@ -67,6 +67,9 @@ import {
   validateJobId,
   waitForQueueIdle,
 } from "../libs/queue/src";
+import { SPLITTER_VERSION } from "../libs/parsers/src/passages/split-passages";
+import { backfillPassages } from "./backfill-passages";
+import { FIXTURE_GROUP_ID, assertEmbeddings } from "./fixture-embeddings";
 
 async function resetIngestTables(): Promise<void> {
   if (process.env["ALLOW_TEST_DB_RESET"] !== "1") {
@@ -81,7 +84,15 @@ async function resetIngestTables(): Promise<void> {
   await dataSource.initialize();
   try {
     // Refuse before deleting anything unless it is all the fixture's own.
-    const documents = await dataSource.query(`SELECT external_id FROM ingest_documents`);
+    // Only the fixture source's documents: e2e-real seeds its own (`fx-doc-*`,
+    // under `fx-source-search`) into the same CI database, and neither suite
+    // may judge — or delete — the other's (plans/19).
+    const documents = await dataSource.query(
+      `SELECT d.external_id FROM ingest_documents d
+         JOIN ingest_sources s ON s.id = d.source_id
+        WHERE s.key = $1`,
+      [FIXTURE_SOURCE_KEY],
+    );
     const events = await dataSource.query(
       `SELECT d.external_id AS document_external_id, count(*)::int AS n
        FROM events e LEFT JOIN ingest_documents d ON d.id = e.document_id
@@ -109,12 +120,20 @@ async function resetIngestTables(): Promise<void> {
     // event kept off the map" unanswerable (the baseline run, with Jev off, may
     // have published it). Only the fixture's documents' events — never e2e-real's
     // `fx-source-*` rows, and (by the guard above) never real ones.
+    const fixtureDocuments = `SELECT d.id FROM ingest_documents d
+        JOIN ingest_sources s ON s.id = d.source_id WHERE s.key = $1`;
     await dataSource.query(
-      `DELETE FROM events WHERE document_id IN (SELECT id FROM ingest_documents)`,
+      `DELETE FROM events WHERE document_id IN (${fixtureDocuments})`,
+      [FIXTURE_SOURCE_KEY],
     );
-    await dataSource.query("DELETE FROM ingest_event_candidates");
-    await dataSource.query("DELETE FROM ingest_extractions");
-    await dataSource.query("DELETE FROM ingest_documents");
+    // The sequence fixture-embeddings.ts builds over those events (its
+    // members and both tables' vectors go with the rows they reference).
+    await dataSource.query(`DELETE FROM event_groups WHERE id = $1`, [FIXTURE_GROUP_ID]);
+    // Extractions, candidates, review items and passages cascade from their
+    // document (ON DELETE CASCADE), so only the fixture's go with it.
+    await dataSource.query(`DELETE FROM ingest_documents WHERE id IN (${fixtureDocuments})`, [
+      FIXTURE_SOURCE_KEY,
+    ]);
     await dataSource.query("DELETE FROM ingest_sources WHERE key = $1", [FIXTURE_SOURCE_KEY]);
     // Only the three places the fixture seeds — not the whole geocode cache,
     // which holds hand-corrected coordinates.
@@ -463,6 +482,9 @@ async function main(): Promise<void> {
     "corpus",
   );
 
+  // Recorded vectors only, unless asked to record (fixture-embeddings.ts).
+  process.env["EMBEDDING_ENGINE"] ??= "fake";
+
   const jevMode = process.env["JEV_FIXTURE"] === "1";
   let fakeJevServer: FakeJevServer | undefined;
   if (jevMode) {
@@ -542,6 +564,14 @@ async function main(): Promise<void> {
     console.log("Asserting results...");
     await assertResults(jevMode);
     if (jevMode) await resolveHeldDuplicates(queues);
+    console.log("Asserting search passages...");
+    await assertPassages();
+    // Baseline run only: Jev mode holds some events back, so its published
+    // set — and the sequence text over it — differs from what was recorded.
+    if (!jevMode) {
+      console.log("Asserting the embed sweep...");
+      await assertEmbeddings();
+    }
     console.log("OK — ingestion fixture pipeline produced the expected rows.");
   } finally {
     await Promise.all(queues.map((q) => q.close()));
@@ -555,7 +585,11 @@ async function assertResults(jevMode: boolean): Promise<void> {
   await dataSource.initialize();
   try {
     const documentRepo = dataSource.getRepository(IngestDocument);
-    const documents = await documentRepo.find();
+    // The fixture source's only — e2e-real's documents may share the database.
+    const fixtureSource = await dataSource
+      .getRepository(IngestSource)
+      .findOneByOrFail({ key: FIXTURE_SOURCE_KEY });
+    const documents = await documentRepo.findBy({ sourceId: fixtureSource.id });
     if (documents.length !== 2) {
       throw new Error(
         `expected 2 ingest_documents (one per fixture file), got ${documents.length}`,
@@ -604,6 +638,26 @@ async function assertResults(jevMode: boolean): Promise<void> {
           throw new Error(`baseline run should publish "${title}" (Jev is off)`);
         }
       }
+    }
+
+    // People (plans/22): verbatim names plus normalised keys, honorifics
+    // stripped only while two words remain, accents folded; an event naming
+    // nobody writes no rows.
+    const people: Array<{ title: string; name: string; name_norm: string }> =
+      await dataSource.query(
+        `SELECT e.title, ee.name, ee.name_norm
+           FROM event_entities ee JOIN events e ON e.id = ee.event_id
+          WHERE e.source_id = 'local-directory' AND ee.type = 'person'
+          ORDER BY e.title, ee.name_norm`,
+      );
+    const got = JSON.stringify(people.map((p) => [p.title, p.name, p.name_norm]));
+    const want = JSON.stringify([
+      ["The Centennial Parade", "Mayor Ezra Fixture", "ezra fixture"],
+      ["The Centennial Parade", "President Ulysses S. Grant", "ulysses s grant"],
+      ["The Church Dedicated", "Élise Fixture", "elise fixture"],
+    ]);
+    if (got !== want) {
+      throw new Error(`event_entities: expected ${want}, got ${got}`);
     }
   } finally {
     await dataSource.destroy();
@@ -750,6 +804,33 @@ async function assertJevChecksRecorded(
         `be published and exactly one should carry a passing duplicate-published check with ` +
         `outcome "new"; got ${JSON.stringify(newChecks)}`,
     );
+  }
+}
+
+interface PassageSnapshot {
+  rows: string;
+  links: string;
+  extractions: number;
+}
+
+async function snapshotPassages(): Promise<PassageSnapshot> {
+  const dataSource = createDataSource();
+  await dataSource.initialize();
+  try {
+    const rows = await dataSource.query(
+      `SELECT document_id, seq, anchor, text, extractor_version, splitter_version
+         FROM document_passages ORDER BY document_id, seq`,
+    );
+    const links = await dataSource.query(
+      `SELECT document_id, seq, event_id FROM passage_events
+        ORDER BY document_id, seq, event_id`,
+    );
+    const [{ n }] = await dataSource.query(
+      `SELECT count(*)::int AS n FROM ingest_extractions`,
+    );
+    return { rows: JSON.stringify(rows), links: JSON.stringify(links), extractions: n };
+  } finally {
+    await dataSource.destroy();
   }
 }
 
@@ -923,6 +1004,66 @@ async function resolveHeldDuplicates(queues: Queue[]): Promise<void> {
   } finally {
     killWorker(apiChild, "SIGTERM");
     await dataSource.destroy();
+  }
+}
+
+/**
+ * extract-text wrote document_passages for every document, publish linked
+ * every event whose quote is verbatim in a paragraph (the fake engine quotes
+ * whole blocks, so all three), and re-cutting from the stored artifacts is
+ * idempotent and touches nothing upstream.
+ */
+async function assertPassages(): Promise<void> {
+  const dataSource = createDataSource();
+  await dataSource.initialize();
+  try {
+    const perDoc: Array<{ id: string; n: number; versions: string }> =
+      await dataSource.query(
+        `SELECT d.id, count(p.seq)::int AS n,
+                string_agg(DISTINCT p.extractor_version || '/' || p.splitter_version, ',') AS versions
+           FROM ingest_documents d
+           JOIN ingest_sources s ON s.id = d.source_id AND s.key = $1
+           LEFT JOIN document_passages p ON p.document_id = d.id
+          GROUP BY d.id`,
+        [FIXTURE_SOURCE_KEY],
+      );
+    for (const doc of perDoc) {
+      if (doc.n === 0) throw new Error(`document ${doc.id} has no passages`);
+      if (!doc.versions?.endsWith(`/${SPLITTER_VERSION}`)) {
+        throw new Error(`document ${doc.id} passages at versions ${doc.versions}`);
+      }
+    }
+    const unlinked: Array<{ title: string }> = await dataSource.query(
+      // Except the Jev grounding fixtures (`PARAPHRASE:` blocks): the fake
+      // engine gives them a quote that is deliberately in no paragraph, and
+      // with Jev off they still publish (grounding is recorded, not gating).
+      `SELECT e.title FROM events e
+        WHERE e.source_id = 'local-directory'
+          AND e.source NOT LIKE '%not quoted verbatim%'
+          AND NOT EXISTS (SELECT 1 FROM passage_events pe WHERE pe.event_id = e.id)`,
+    );
+    if (unlinked.length > 0) {
+      throw new Error(
+        `expected every fixture event linked to its paragraph, unlinked: ${unlinked
+          .map((e) => e.title)
+          .join(", ")}`,
+      );
+    }
+  } finally {
+    await dataSource.destroy();
+  }
+
+  const before = await snapshotPassages();
+  const result = await backfillPassages({});
+  if (result.indexed !== 0) {
+    throw new Error(`backfill re-indexed ${result.indexed} current document(s)`);
+  }
+  await backfillPassages({ force: true });
+  const after = await snapshotPassages();
+  if (after.rows !== before.rows) throw new Error("re-cut changed document_passages");
+  if (after.links !== before.links) throw new Error("re-cut changed passage_events");
+  if (after.extractions !== before.extractions) {
+    throw new Error("re-cutting passages created ingest_extractions rows");
   }
 }
 
