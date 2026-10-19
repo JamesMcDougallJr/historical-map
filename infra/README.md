@@ -72,12 +72,22 @@ task will crash-loop** until the database has PostGIS installed — see
 
 ## Wire up Vercel
 
+`vercel.tf` sets `POSTGRES_URL` and the documents bucket's `S3_*` variables on
+the Vercel project directly from this stack's resources, so `tofu apply` needs
+a Vercel token alongside your AWS credentials:
+
 ```bash
-tofu output -raw postgres_url    # → Vercel env var POSTGRES_URL
-tofu output martin_url           # → Vercel env var NEXT_PUBLIC_MARTIN_URL
+export VERCEL_API_TOKEN=...   # vercel.com/account/tokens, scoped to the team
+tofu apply
 ```
-Both are build-time env vars (`NEXT_PUBLIC_MARTIN_URL` is inlined into the
-client bundle) — set them in the Vercel project settings, then redeploy.
+
+An env var change does **not** redeploy — push to `main` (or redeploy in the
+dashboard) for a running site to pick it up.
+
+`NEXT_PUBLIC_MARTIN_URL` is deliberately not managed: it switches `/map` from
+GeoJSON pins to Martin MVT tiles, and the live site currently runs without it.
+To turn tiles on, set it from `tofu output martin_url` — it is build-time,
+inlined into the client bundle.
 
 ## Seed it once
 

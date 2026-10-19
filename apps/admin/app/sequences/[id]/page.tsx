@@ -201,7 +201,11 @@ export default function SequenceDetailPage({
         <div className="row">
           <div className="field">
             <label>Title</label>
-            <input value={title} onChange={(e) => setTitle(e.target.value)} />
+            <input
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              data-testid="sequence-title-input"
+            />
           </div>
         </div>
         <div className="field">
@@ -209,6 +213,7 @@ export default function SequenceDetailPage({
           <input
             value={description}
             onChange={(e) => setDescription(e.target.value)}
+            data-testid="sequence-description-input"
           />
         </div>
         <div className="row">
@@ -220,10 +225,15 @@ export default function SequenceDetailPage({
               (title === group.title &&
                 description === (group.description ?? ""))
             }
+            data-testid="sequence-save-details-button"
           >
             {savingDetails ? "Saving…" : "Save details"}
           </button>
-          <button className="danger" onClick={handleDelete}>
+          <button
+            className="danger"
+            onClick={handleDelete}
+            data-testid="sequence-delete-button"
+          >
             Delete sequence
           </button>
         </div>
@@ -259,22 +269,31 @@ export default function SequenceDetailPage({
 
       <h2>Members ({memberRows.length})</h2>
       {memberRows.map((row, index) => (
-        <div key={row.eventId} className="card">
+        <div key={row.eventId} className="card" data-testid={`sequence-member-row-${row.eventId}`}>
           <strong>{row.title}</strong>{" "}
           <span className="muted">
             — {row.dateLabel} — at {row.locationName}
           </span>
           <div className="row">
-            <button onClick={() => handleMoveUp(index)} disabled={index === 0}>
+            <button
+              onClick={() => handleMoveUp(index)}
+              disabled={index === 0}
+              data-testid={`sequence-member-up-${row.eventId}`}
+            >
               Up
             </button>
             <button
               onClick={() => handleMoveDown(index)}
               disabled={index === memberRows.length - 1}
+              data-testid={`sequence-member-down-${row.eventId}`}
             >
               Down
             </button>
-            <button className="danger" onClick={() => handleRemove(row.eventId)}>
+            <button
+              className="danger"
+              onClick={() => handleRemove(row.eventId)}
+              data-testid={`sequence-member-remove-${row.eventId}`}
+            >
               Remove
             </button>
           </div>
@@ -290,9 +309,14 @@ export default function SequenceDetailPage({
               placeholder="Search events…"
               value={searchText}
               onChange={(e) => setSearchText(e.target.value)}
+              data-testid="sequence-add-member-search-input"
             />
           </div>
-          <button onClick={handleSearch} disabled={searching || !searchText}>
+          <button
+            onClick={handleSearch}
+            disabled={searching || !searchText}
+            data-testid="sequence-add-member-search-button"
+          >
             {searching ? "Searching…" : "Search"}
           </button>
         </div>
@@ -302,7 +326,12 @@ export default function SequenceDetailPage({
               {result.event.title} — at {result.location.name} —{" "}
               <span className="muted">{result.event.date}</span>
             </span>
-            <button onClick={() => handleAddMember(result.event.id)}>Add</button>
+            <button
+              onClick={() => handleAddMember(result.event.id)}
+              data-testid={`sequence-add-member-button-${result.event.id}`}
+            >
+              Add
+            </button>
           </div>
         ))}
         {searchResults.length === 0 && searchText && !searching && (

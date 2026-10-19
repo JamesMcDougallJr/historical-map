@@ -60,7 +60,7 @@ export default function LocationsPage(): JSX.Element {
             </thead>
             <tbody>
               {filtered?.map((loc) => (
-                <tr key={loc.id}>
+                <tr key={loc.id} data-testid={`location-row-${loc.id}`}>
                   <td>
                     <Link href={`/locations/${encodeURIComponent(loc.id)}`}>
                       {loc.name}

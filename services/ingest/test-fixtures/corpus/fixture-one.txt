@@ -1,0 +1,23 @@
+TITLE: The Centennial Parade
+DATE: 1876-07-04
+PLACE: Fixture Town
+
+TITLE: The New Railway Line
+DATE: 1890-03-15
+PLACE: Fixture Valley
+
+TITLE: Founding Day at Fixture Village
+DATE: 1850-01-01
+PLACE: Fixture Village
+
+TITLE: Harvest Festival at Fixture Town
+DATE: 1880-09-01
+PLACE: Fixture Town
+
+TITLE: The Mill Opening
+DATE: 1860-04-10
+PLACE: Fixture Village
+
+TITLE: The Schoolhouse Raised
+DATE: 1870-02-01
+PLACE: Fixture Village

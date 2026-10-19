@@ -2,14 +2,21 @@ import type { Page } from "@playwright/test";
 
 /**
  * Same lon/lat as MapView's hardcoded default view center
- * (`fromLonLat([-111.8881, 40.7606])`, zoom 8). Putting the one test pin
+ * (`fromLonLat([0, 20])`, zoom 2 — the whole world). Putting the one test pin
  * exactly there means it always renders at the dead center of the viewport —
  * `(viewportWidth / 2, viewportHeight / 2)` — regardless of window size, with
  * no need to replicate OL's Web Mercator projection math in the test to find
  * it.
  */
-export const PIN_LON = -111.8881;
-export const PIN_LAT = 40.7606;
+export const PIN_LON = 0;
+export const PIN_LAT = 20;
+
+/**
+ * Degrees of longitude between test pins so they render as separate pins, not
+ * one overlapping cluster: at the default zoom 2 a degree is ~5.7px, so this
+ * is ~57px — clear of a 24px-wide pin icon.
+ */
+export const PIN_SPACING_DEG = 10;
 
 export const TEST_LOCATION = {
   id: "test-location-1",
@@ -91,6 +98,7 @@ type DebugMap = {
     opts: { layerFilter: (l: DebugLayer) => boolean },
   ) => unknown;
   renderSync(): void;
+  getPixelFromCoordinate(coordinate: number[]): number[] | null;
 };
 type DebugLayer = {
   get(key: string): unknown;

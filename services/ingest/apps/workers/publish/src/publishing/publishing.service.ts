@@ -1,6 +1,7 @@
-import { Injectable } from "@nestjs/common";
+import { Inject, Injectable, Logger } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 import { InjectRepository } from "@nestjs/typeorm";
-import type { ExtractedEvent } from "@historical-map/domain";
+import type { ExtractedEvent, ValidationCheck } from "@historical-map/domain";
 import { JobLogger } from "@app/common";
 import {
   IngestDocument,
@@ -10,9 +11,15 @@ import {
   jsonb,
 } from "@app/database";
 import { GeocodingService } from "@app/geocoding";
+import { JevClient, isJevFeatureEnabled } from "@app/jev";
 import type { PublishJobData } from "@app/queue";
 import type { Job } from "bullmq";
 import { IsNull, Repository } from "typeorm";
+import {
+  judgeDuplicateWithJev,
+  selectCandidates,
+  type DuplicateJudgment,
+} from "./jev-dedup";
 import { MapWriterService } from "./map-writer.service";
 
 /**
@@ -27,6 +34,7 @@ import { MapWriterService } from "./map-writer.service";
 @Injectable()
 export class PublishingService {
   private readonly jobLogger = new JobLogger(PublishingService.name);
+  private readonly logger = new Logger(PublishingService.name);
 
   constructor(
     @InjectRepository(IngestDocument)
@@ -37,8 +45,12 @@ export class PublishingService {
     private readonly sourceRepo: Repository<IngestSource>,
     @InjectRepository(IngestEventSequence)
     private readonly sequenceRepo: Repository<IngestEventSequence>,
-    private readonly geocoding: GeocodingService,
-    private readonly mapWriter: MapWriterService,
+    // Explicit @Inject — see HealthController for why bare constructor-param-type
+    // injection of a cross-file class silently resolves to undefined under tsx.
+    @Inject(GeocodingService) private readonly geocoding: GeocodingService,
+    @Inject(MapWriterService) private readonly mapWriter: MapWriterService,
+    @Inject(JevClient) private readonly jev: JevClient,
+    @Inject(ConfigService) private readonly config: ConfigService,
   ) {}
 
   async publish(job: Job<PublishJobData>): Promise<void> {
@@ -76,6 +88,7 @@ export class PublishingService {
       let published = 0;
       let alreadyPresent = 0;
       let demoted = 0;
+      let autoDuplicates = 0;
 
       for (const candidate of candidates) {
         const event = candidate.event as ExtractedEvent;
@@ -91,7 +104,12 @@ export class PublishingService {
           continue;
         }
 
-        const hit = await this.geocoding.resolve(event.placeName);
+        // The event itself, so a same-named place can be told from the one
+        // it happened at (the Jev context tier — see GeocodingService).
+        const hit = await this.geocoding.resolve(event.placeName, {
+          title: event.title,
+          description: event.description,
+        });
         if (!hit) {
           // A good event we cannot place. Back to review with its reason, not
           // discarded — `locations` requires coordinates, so it has nowhere
@@ -99,6 +117,27 @@ export class PublishingService {
           await this.demote(candidate, `geocode failed: ${event.placeName}`);
           demoted++;
           continue;
+        }
+
+        // Opt-in: is this the same event as one a *different* document already
+        // put on the map? The only point with a coordinate and nothing written.
+        const judgment = await this.duplicateCheck(candidate, event, hit, documentId);
+        if (judgment) {
+          if (judgment.outcome === "duplicate") {
+            // Confidently the same event as one already on the map: resolved
+            // without a person, left off the map, and recorded so one can
+            // overturn it (`duplicate:review`, the admin panel).
+            await this.autoResolveDuplicate(candidate, judgment.check);
+            autoDuplicates++;
+            continue;
+          }
+          if (judgment.outcome === "review") {
+            await this.hold(candidate, judgment.check);
+            demoted++;
+            continue;
+          }
+          // `new`, or nothing decided (record-only): keep the evidence on the row.
+          await this.recordCheck(candidate, judgment.check);
         }
 
         const locationId = await this.mapWriter.findOrCreateLocation(
@@ -142,6 +181,7 @@ export class PublishingService {
         job,
         `candidates=${candidates.length} published=${published} ` +
           `already-present=${alreadyPresent} demoted-to-review=${demoted} ` +
+          `auto-duplicates=${autoDuplicates} ` +
           `groups=${groupsApplied} scores-backfilled=${scoresBackfilled}`,
       );
     } catch (error) {
@@ -236,6 +276,88 @@ export class PublishingService {
       backfilled++;
     }
     return backfilled;
+  }
+
+  /**
+   * Cross-document duplicate check. Returns `null` (publish as normal) when the
+   * flag is off, the reviewer already resolved this candidate, nothing nearby
+   * is comparable, or anything at all goes wrong: it is an advisory layer, and
+   * a failed lookup or an outage must never block or newly hold an event.
+   */
+  private async duplicateCheck(
+    candidate: IngestEventCandidate,
+    event: ExtractedEvent,
+    hit: { lon: number; lat: number },
+    documentId: string,
+  ): Promise<DuplicateJudgment | null> {
+    if (!isJevFeatureEnabled(this.config, this.jev, "JEV_PUBLISH_DEDUP_ENABLED")) return null;
+    // A human approved or dismissed this one; do not second-guess them.
+    if (candidate.resolvedAt) return null;
+    if (!event.dateIso) return null;
+
+    try {
+      const pool = await this.mapWriter.findNearbyEvents({
+        lon: hit.lon,
+        lat: hit.lat,
+        date: event.dateIso,
+        excludeEventId: candidate.eventKey,
+        excludeDocumentId: documentId,
+      });
+      return await judgeDuplicateWithJev(
+        this.jev,
+        this.config,
+        event,
+        selectCandidates(event, pool),
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.warn(`duplicate check skipped for ${candidate.eventKey}: ${message}`);
+      return null;
+    }
+  }
+
+  /** `checks` with `check` in place of any earlier result of the same name. */
+  private withCheck(
+    checks: ValidationCheck[],
+    check: ValidationCheck,
+  ): ValidationCheck[] {
+    return [...checks.filter((c) => c.name !== check.name), check];
+  }
+
+  private async recordCheck(
+    candidate: IngestEventCandidate,
+    check: ValidationCheck,
+  ): Promise<void> {
+    await this.candidateRepo.update(candidate.id, {
+      checks: jsonb(this.withCheck(candidate.checks, check)) as never,
+    });
+  }
+
+  /**
+   * A confident duplicate: resolved (so `validate` cannot re-derive it to
+   * `publish` — its upsert is `WHERE resolved_at IS NULL`), kept out of the
+   * `publish` verdict, and carrying the matched event and probabilities.
+   */
+  private async autoResolveDuplicate(
+    candidate: IngestEventCandidate,
+    check: ValidationCheck,
+  ): Promise<void> {
+    await this.candidateRepo.update(candidate.id, {
+      verdict: "review",
+      resolvedAt: new Date(),
+      checks: jsonb(this.withCheck(candidate.checks, check)) as never,
+    });
+  }
+
+  /** Send an uncertain or probable-duplicate event to review, with Jev's reasoning on the row. */
+  private async hold(
+    candidate: IngestEventCandidate,
+    check: ValidationCheck,
+  ): Promise<void> {
+    await this.candidateRepo.update(candidate.id, {
+      verdict: "review",
+      checks: jsonb(this.withCheck(candidate.checks, check)) as never,
+    });
   }
 
   /** Move a candidate back to review, recording why publishing declined it. */

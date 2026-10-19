@@ -8,6 +8,7 @@ import {
   IngestSource,
 } from "@app/database";
 import { GeocodingModule } from "@app/geocoding";
+import { JevModule } from "@app/jev";
 import { QUEUE_NAMES } from "@app/queue";
 import { MapWriterService } from "./map-writer.service";
 import { PublishingProcessor } from "./publishing.processor";
@@ -22,6 +23,7 @@ import { PublishingService } from "./publishing.service";
       IngestSource,
     ]),
     GeocodingModule,
+    JevModule,
     // Terminal stage — consumes `publish` and produces to nothing.
     BullModule.registerQueue({ name: QUEUE_NAMES.PUBLISH }),
   ],

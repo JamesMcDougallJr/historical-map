@@ -55,6 +55,14 @@ services:
       retries: 10
 
   # Object storage for document originals and extracted text.
+  #
+  # Both minio/minio and minio/mc now require an authenticated pull on
+  # Docker Hub *and* quay.io/minio/* — confirmed directly against each
+  # registry's v2 API, not just inferred from a CI error. If a fresh pull
+  # here starts failing with "unauthorized"/"pull access denied", that's
+  # this, not a local misconfiguration; `docker login` to an account with
+  # access is the only fix for local dev today. CI sidesteps it entirely —
+  # see docker-compose.ci.yml.
   minio:
     image: minio/minio
     restart: unless-stopped
@@ -91,6 +99,17 @@ services:
   martin:
     image: ghcr.io/maplibre/martin:1.16.0
     restart: unless-stopped
+    # Tile cache OFF. Martin's cache is LRU-only — no TTL by default and no
+    # invalidation — so any tile requested before a data change keeps being served
+    # afterwards: pins for events that were deleted or re-ingested stay on the map
+    # as "ghosts" with nothing to show on hover, and a pin vanishes at one zoom and
+    # not another depending on which tiles were requested earlier. Reproduced
+    # exactly: with the default cache a tile still held its 347 bytes of pins after
+    # every event was deleted; with this flag it came back empty. A tile here is one
+    # indexed query over a small table, so correctness costs nothing visible. (If a
+    # large deployment needs the cache back, use `--cache-expiry` for bounded
+    # staleness, and know pins can lag publishes by that long.)
+    command: ["--cache-size", "0"]
     # 3001 on the host — Next dev owns 3000.
     ports:
       - "3001:3000"

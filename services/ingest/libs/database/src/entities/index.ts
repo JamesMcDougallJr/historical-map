@@ -5,6 +5,11 @@ import { IngestEventSequence } from "./ingest-event-sequence.entity";
 import { IngestExtraction } from "./ingest-extraction.entity";
 import { IngestSource } from "./ingest-source.entity";
 
+export type {
+  GeocodeDecision,
+  GeocodeReviewStatus,
+} from "./geocode-cache.entity";
+
 export {
   GeocodeCache,
   IngestDocument,

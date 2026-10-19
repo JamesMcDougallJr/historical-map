@@ -1,5 +1,7 @@
 export * from "./chunker";
 export * from "./extraction-engine.interface";
+export * from "./fake/fake.engine";
+export * from "./fake/fake.module";
 export * from "./groq/event-schema";
 export * from "./groq/groq.engine";
 export * from "./groq/groq.module";

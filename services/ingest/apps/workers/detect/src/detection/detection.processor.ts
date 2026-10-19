@@ -1,3 +1,4 @@
+import { Inject } from "@nestjs/common";
 import { OnWorkerEvent, Processor, WorkerHost } from "@nestjs/bullmq";
 import { JobLogger } from "@app/common";
 import { QUEUE_NAMES, type DetectJobData } from "@app/queue";
@@ -21,7 +22,9 @@ import { DetectionService } from "./detection.service";
 export class DetectionProcessor extends WorkerHost {
   private readonly jobLogger = new JobLogger(DetectionProcessor.name);
 
-  constructor(private readonly detectionService: DetectionService) {
+  // Explicit @Inject — see HealthController for why bare constructor-param-type
+  // injection of a cross-file class silently resolves to undefined under tsx.
+  constructor(@Inject(DetectionService) private readonly detectionService: DetectionService) {
     super();
   }
 

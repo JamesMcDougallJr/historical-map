@@ -7,8 +7,10 @@ import { GroqExtractionEngine } from "./groq.engine";
  * **token**, never the class — so nothing downstream can accidentally depend on
  * Groq specifically.
  *
- * Swapping providers is this one import line in `extracting.module.ts`, with no
- * change to `ExtractingService`, the queue contract, the schema, or storage.
+ * Swapping providers is this one import line in `event-extraction.module.ts`,
+ * with no change to `EventExtractionService`, the queue contract, the schema,
+ * or storage. See `FakeExtractionModule` for the deterministic swap used by
+ * the ingestion fixture test.
  */
 @Module({
   providers: [{ provide: EXTRACTION_ENGINE, useClass: GroqExtractionEngine }],

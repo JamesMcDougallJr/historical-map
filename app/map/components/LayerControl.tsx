@@ -203,7 +203,14 @@ export function LayerControl({
 
       {/* Expanded Panel */}
       {isExpanded && (
-        <div className="absolute bottom-12 right-0 w-80 bg-slate-900/95 backdrop-blur-sm rounded-lg shadow-xl border border-slate-700 overflow-hidden">
+        // Anchored to the bottom, so it grows upward: with no height cap, Event
+        // Sources + Sequences + Overlays overflowed the top of the viewport and the
+        // first sections were clipped and unreachable. 5rem = the button's offset
+        // from the bottom plus a margin; the whole stack scrolls inside it.
+        <div
+          data-testid="layer-panel"
+          className="absolute bottom-12 right-0 w-80 max-h-[calc(100vh-5rem)] overflow-y-auto overscroll-contain bg-slate-900/95 backdrop-blur-sm rounded-lg shadow-xl border border-slate-700"
+        >
           {/* Event layers — one per publisher. `kind` is surfaced so it's
               obvious which is live PostGIS and which is the static demo. */}
           {eventLayers.length > 0 && (
@@ -214,12 +221,14 @@ export function LayerControl({
               {eventLayers.map((layer) => (
                 <label
                   key={layer.id}
+                  data-testid={`event-layer-row-${layer.id}`}
                   className="px-4 py-2.5 flex items-center gap-3 hover:bg-slate-800/50 cursor-pointer"
                 >
                   <input
                     type="checkbox"
                     checked={layer.enabled}
                     onChange={() => onToggleEventLayer?.(layer.id)}
+                    data-testid={`event-layer-checkbox-${layer.id}`}
                     className="w-4 h-4 rounded border-slate-600 bg-slate-700 text-blue-500 focus:ring-blue-500 focus:ring-offset-0"
                   />
                   <span
@@ -248,7 +257,10 @@ export function LayerControl({
               <div className="px-4 py-3 border-b border-slate-700">
                 <h3 className="text-white font-medium">Sequences</h3>
               </div>
-              <label className="px-4 py-2.5 flex items-center gap-3 hover:bg-slate-800/50 cursor-pointer">
+              <label
+                data-testid="event-group-radio-none"
+                className="px-4 py-2.5 flex items-center gap-3 hover:bg-slate-800/50 cursor-pointer"
+              >
                 <input
                   type="radio"
                   name="event-group"
@@ -260,29 +272,45 @@ export function LayerControl({
                   None
                 </span>
               </label>
-              {eventGroups.map((group) => (
-                <label
-                  key={group.id}
-                  className="px-4 py-2.5 flex items-center gap-3 hover:bg-slate-800/50 cursor-pointer"
-                >
-                  <input
-                    type="radio"
-                    name="event-group"
-                    checked={selectedGroupId === group.id}
-                    onChange={() => onSelectGroup?.(group.id)}
-                    className="w-4 h-4 border-slate-600 bg-slate-700 text-blue-500 focus:ring-blue-500 focus:ring-offset-0"
-                  />
-                  <span className="flex-1 min-w-0">
-                    <span className="block text-sm text-white truncate">
-                      {group.title}
+              {eventGroups.map((group) => {
+                // A sequence with no members has nothing to show: selecting it
+                // used to blank every pin on a vector layer. Listed (so it is
+                // not silently missing) but not selectable.
+                const empty = group.memberEventIds.length === 0;
+                return (
+                  <label
+                    key={group.id}
+                    data-testid={`event-group-radio-${group.id}`}
+                    title={empty ? "No events in this sequence" : undefined}
+                    className={
+                      empty
+                        ? "px-4 py-2.5 flex items-center gap-3 opacity-50 cursor-not-allowed"
+                        : "px-4 py-2.5 flex items-center gap-3 hover:bg-slate-800/50 cursor-pointer"
+                    }
+                  >
+                    <input
+                      type="radio"
+                      name="event-group"
+                      checked={selectedGroupId === group.id}
+                      disabled={empty}
+                      onChange={() => onSelectGroup?.(group.id)}
+                      className="w-4 h-4 border-slate-600 bg-slate-700 text-blue-500 focus:ring-blue-500 focus:ring-offset-0"
+                    />
+                    <span className="flex-1 min-w-0">
+                      <span className="block text-sm text-white truncate">
+                        {group.title}
+                      </span>
+                      <span className="block text-xs text-slate-400">
+                        {empty
+                          ? "no events"
+                          : `${group.memberEventIds.length} event${
+                              group.memberEventIds.length !== 1 ? "s" : ""
+                            }`}
+                      </span>
                     </span>
-                    <span className="block text-xs text-slate-400">
-                      {group.memberEventIds.length} event
-                      {group.memberEventIds.length !== 1 ? "s" : ""}
-                    </span>
-                  </span>
-                </label>
-              ))}
+                  </label>
+                );
+              })}
             </div>
           )}
 
@@ -419,6 +447,7 @@ export function LayerControl({
               overlays.map((overlay) => (
                 <div
                   key={overlay.id}
+                  data-testid={`overlay-row-${overlay.id}`}
                   draggable={!!onReorderOverlays}
                   onDragStart={(e) => handleDragStart(e, overlay.id)}
                   onDragEnd={handleDragEnd}
@@ -461,6 +490,7 @@ export function LayerControl({
                           type="checkbox"
                           checked={overlay.enabled}
                           onChange={() => onToggleOverlay(overlay.id)}
+                          data-testid={`overlay-toggle-${overlay.id}`}
                           className="sr-only peer"
                         />
                         <div className="w-9 h-5 bg-slate-600 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
@@ -524,6 +554,7 @@ export function LayerControl({
                             parseInt(e.target.value) / 100,
                           )
                         }
+                        data-testid={`overlay-opacity-${overlay.id}`}
                         className="flex-1 h-1 bg-slate-600 rounded-lg appearance-none cursor-pointer accent-blue-500"
                       />
                       <span className="text-xs text-slate-400 w-8">

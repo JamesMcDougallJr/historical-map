@@ -2,6 +2,15 @@
 const nextConfig = {
   poweredByHeader: false,
 
+  // The dev-mode build-activity badge (<nextjs-portal>) renders fixed to a
+  // screen corner and, at this app's chosen positions for TimelineSlider /
+  // LayerControl (both `fixed bottom-4 …`), sits directly on top of them —
+  // "subtree intercepts pointer events" blocked every real click on the
+  // timeline toggle button in the real-backend E2E suite (which, unlike the
+  // mocked suite, has no test exercising that button to have caught it
+  // sooner). Dev-only; stripped from production builds regardless.
+  devIndicators: false,
+
   serverExternalPackages: ['unpdf'],
 
   // `packages/domain` ships TypeScript source, not a build artifact, so neither
@@ -88,9 +97,14 @@ const nextConfig = {
         headers: [
           { key: 'Cache-Control', value: 'no-store' },
           { key: 'Access-Control-Allow-Origin', value: appUrl },
-          // GET/PATCH/DELETE and the x-api-key header are needed for
+          // GET/PUT/PATCH/DELETE and the x-api-key header are needed for
           // apps/admin (a separate origin) to read and write /api/data/*.
-          { key: 'Access-Control-Allow-Methods', value: 'GET, POST, PATCH, DELETE, OPTIONS' },
+          // PUT specifically is /api/data/groups/[id]/members — missing it
+          // here let every cross-origin setEventGroupMembers call fail
+          // the browser's CORS preflight silently (admin's own sequence
+          // reorder/add-member/remove-member UI had no working write path
+          // from apps/admin until this was added).
+          { key: 'Access-Control-Allow-Methods', value: 'GET, POST, PUT, PATCH, DELETE, OPTIONS' },
           { key: 'Access-Control-Allow-Headers', value: 'Content-Type, x-api-key' },
         ],
       },
