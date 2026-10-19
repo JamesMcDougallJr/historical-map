@@ -52,10 +52,12 @@ import {
 import { MapPopup } from "./MapPopup";
 import { ScoreBadge } from "./ScoreBadge";
 import { LayerControl } from "./LayerControl";
-import { TimelineSlider } from "./TimelineSlider";
+import { MapMenu } from "./MapMenu";
 import {
   getProgress,
   acknowledgeEvent as ackEvent,
+  getDefaultView,
+  saveDefaultView,
   type MapProgress,
 } from "../utils/storage";
 import { getYear } from "../utils/date-utils";
@@ -367,7 +369,6 @@ export function MapView({
   const [hoveredLocation, setHoveredLocation] =
     useState<HistoricalLocation | null>(null);
   const [showHomeMarker, setShowHomeMarker] = useState(false);
-  const [isFullscreen, setIsFullscreen] = useState(false);
   const [isPinned, setIsPinned] = useState(false);
   const isPinnedRef = useRef(false);
   const isDraggingPopupRef = useRef(false);
@@ -499,15 +500,6 @@ export function MapView({
     isPinnedRef.current = isPinned;
   }, [isPinned]);
 
-  // Notify layout of fullscreen changes
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      window.dispatchEvent(
-        new CustomEvent("map-fullscreen-change", { detail: isFullscreen }),
-      );
-    }
-  }, [isFullscreen]);
-
   // Create map and event features — re-runs when locations change
   useEffect(() => {
     if (!mapContainerRef.current || !popupRef.current) return;
@@ -570,6 +562,22 @@ export function MapView({
     countableSources.forEach((s) => s.on("change", recountPins));
     recountPins();
 
+    // This effect re-runs (and rebuilds the map) whenever `locations` or
+    // `eventLayers` change, not just on first mount. Carrying over the live
+    // camera position from the map being replaced means a data refresh
+    // doesn't yank the user back to the default view mid-session; only a
+    // genuine first mount falls back to the persisted default.
+    const previousView = mapRef.current?.getView();
+    const previousCenter = previousView?.getCenter();
+    const previousZoom = previousView?.getZoom();
+    const initialView =
+      previousCenter && previousZoom !== undefined
+        ? { center: previousCenter, zoom: previousZoom }
+        : (() => {
+            const stored = getDefaultView();
+            return { center: fromLonLat(stored.center), zoom: stored.zoom };
+          })();
+
     const map = new OlMap({
       layers: [
         new TileLayer({
@@ -578,12 +586,7 @@ export function MapView({
         ...pinLayers,
       ],
       overlays: [overlay],
-      // Whole world: sources now span several continents, so the old
-      // Salt Lake City default hid most of the map.
-      view: new View({
-        center: fromLonLat([0, 20]),
-        zoom: 2,
-      }),
+      view: new View(initialView),
       // Drop OL's zoom/rotate buttons. The attribution stays: OSM's ODbL
       // requires it, and ol/source/OSM sets attributionsCollapsible:false so
       // OpenLayers keeps it visible. Deliberately not passing `collapsible` —
@@ -967,6 +970,14 @@ export function MapView({
     );
   }, []);
 
+  const handleSetDefaultView = useCallback(() => {
+    const view = mapRef.current?.getView();
+    const center = view?.getCenter();
+    const zoom = view?.getZoom();
+    if (!center || zoom === undefined) return;
+    saveDefaultView({ center: toLonLat(center) as [number, number], zoom });
+  }, []);
+
   const handleClosePopup = useCallback(() => {
     isPopupHoveredRef.current = false;
     setHoveredLocation(null);
@@ -1243,29 +1254,9 @@ export function MapView({
 
   return (
     <div className="relative h-full w-full">
-      {/* Floating Controls - Top Left */}
-      {showNav && (
-        <div className="absolute top-4 left-4 z-10 flex flex-wrap gap-2">
-          {onRefresh && (
-            <button
-              onClick={onRefresh}
-              className="px-4 py-2 bg-white/90 hover:bg-white dark:bg-slate-800/90 dark:hover:bg-slate-800 text-neutral-800 dark:text-neutral-200 rounded-lg transition-colors text-sm font-medium shadow-lg hover:shadow-xl backdrop-blur-sm"
-              aria-label="Refresh map data"
-            >
-              Refresh
-            </button>
-          )}
-          <a
-            href={importHref}
-            className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors text-sm font-medium shadow-lg hover:shadow-xl backdrop-blur-sm"
-          >
-            Import Events
-          </a>
-        </div>
-      )}
-
-      {/* Stats, score and fullscreen — one row, so they can't overlap. Both used
-          to position themselves absolutely in the same corner and collide. */}
+      {/* Stats, score and the map menu — one row, so they can't overlap. Both
+          stats and ScoreBadge used to position themselves absolutely in the
+          same corner and collide. */}
       <div className="absolute top-4 right-4 z-10 flex items-center gap-2">
         <div
           data-testid="pin-stats"
@@ -1279,63 +1270,19 @@ export function MapView({
           acknowledged={progress.acknowledgedEventIds.length}
           total={totalEvents}
         />
-        <button
-          onClick={() => setIsFullscreen(!isFullscreen)}
-          className="p-2 bg-black/60 hover:bg-black/80 backdrop-blur-sm rounded-lg text-white shadow-lg transition-colors"
-          aria-label={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
-        >
-          {isFullscreen ? (
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <polyline points="4 14 10 14 10 20" />
-              <polyline points="20 10 14 10 14 4" />
-              <line x1="14" y1="10" x2="21" y2="3" />
-              <line x1="3" y1="21" x2="10" y2="14" />
-            </svg>
-          ) : (
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <polyline points="15 3 21 3 21 9" />
-              <polyline points="9 21 3 21 3 15" />
-              <line x1="21" y1="3" x2="14" y2="10" />
-              <line x1="3" y1="21" x2="10" y2="14" />
-            </svg>
-          )}
-        </button>
+        {showNav && (
+          <MapMenu
+            onRefresh={onRefresh}
+            importHref={importHref}
+            onSetDefaultView={handleSetDefaultView}
+          />
+        )}
       </div>
 
       {/* Map Container */}
       <div ref={mapContainerRef} className="h-full w-full" />
 
-      {/* Timeline Slider */}
-      <TimelineSlider
-        minYear={minYear}
-        maxYear={maxYear}
-        range={timelineRange}
-        onRangeChange={setTimelineRange}
-        onToggle={setIsTimelineEnabled}
-        isEnabled={isTimelineEnabled}
-      />
-
-      {/* Layer Control */}
+      {/* Layer Control (includes the Timeline filter as its first section) */}
       <LayerControl
         eventLayers={eventLayers}
         onToggleEventLayer={handleToggleEventLayer}
@@ -1349,6 +1296,12 @@ export function MapView({
         onRemoveOverlay={handleRemoveOverlay}
         onReorderOverlays={handleReorderOverlays}
         isLoading={overlayLoadingState}
+        minYear={minYear}
+        maxYear={maxYear}
+        timelineRange={timelineRange}
+        onTimelineRangeChange={setTimelineRange}
+        isTimelineEnabled={isTimelineEnabled}
+        onTimelineToggle={setIsTimelineEnabled}
       />
 
       {/* Popup */}

@@ -1,4 +1,4 @@
-@import 'tailwindcss';
+@import "tailwindcss";
 
 /* Blue/Purple Theme Color System */
 :root {
@@ -111,7 +111,8 @@
   }
 
   .flame-glow:hover {
-    filter: drop-shadow(0 0 12px var(--color-flame)) drop-shadow(0 0 20px var(--color-ember));
+    filter: drop-shadow(0 0 12px var(--color-flame))
+      drop-shadow(0 0 20px var(--color-ember));
   }
 
   /* Animations */
@@ -136,7 +137,8 @@
   }
 
   @keyframes flicker {
-    0%, 100% {
+    0%,
+    100% {
       opacity: 1;
       transform: scale(1);
     }
@@ -160,13 +162,15 @@
   }
 
   @keyframes flamePulse {
-    0%, 100% {
+    0%,
+    100% {
       opacity: 0.8;
       filter: drop-shadow(0 0 4px var(--color-flame));
     }
     50% {
       opacity: 1;
-      filter: drop-shadow(0 0 12px var(--color-flame)) drop-shadow(0 0 20px var(--color-ember));
+      filter: drop-shadow(0 0 12px var(--color-flame))
+        drop-shadow(0 0 20px var(--color-ember));
     }
   }
 
@@ -184,7 +188,9 @@
   }
 
   .hover-lift {
-    transition: transform 0.2s ease, box-shadow 0.2s ease;
+    transition:
+      transform 0.2s ease,
+      box-shadow 0.2s ease;
   }
 
   .hover-lift:hover {
@@ -230,7 +236,7 @@ html {
 
 .prose .anchor:after {
   @apply text-neutral-300 dark:text-neutral-700;
-  content: '#';
+  content: "#";
 }
 
 .prose *:hover > .anchor {
@@ -318,8 +324,8 @@ pre {
 }
 
 /* Remove Safari input shadow on mobile */
-input[type='text'],
-input[type='email'] {
+input[type="text"],
+input[type="email"] {
   -webkit-appearance: none;
   -moz-appearance: none;
   appearance: none;
@@ -418,7 +424,6 @@ button:focus-visible {
   }
 }
 
-
 /* OpenLayers attribution — OSM's ODbL requires visible, user-dismissible credit.
    Stacked directly above the LayerControl button (fixed bottom-4 right-4)
    rather than beside it, so the collapsed "i" can't be overlapped when that
@@ -449,4 +454,16 @@ button:focus-visible {
 .ol-attribution.map-attribution button {
   background: transparent;
   color: #e5e5e5;
+}
+
+/* Grab cursor while panning. Safe against the pin-hover cursor logic in
+   MapView.tsx's pointermove handler: that handler no-ops entirely while
+   evt.dragging is true, and its no-hover branch clears the inline cursor
+   style, letting this take over. */
+.ol-viewport {
+  cursor: grab;
+}
+
+.ol-viewport:active {
+  cursor: grabbing;
 }

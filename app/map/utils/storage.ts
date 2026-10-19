@@ -277,3 +277,40 @@ export function acknowledgeEvent(eventId: string): MapProgress {
   }
   return { ...progress };
 }
+
+// --- Default map view ---
+
+const VIEW_KEY = "map-view-settings";
+
+export interface MapViewSettings {
+  center: [number, number]; // [lon, lat]
+  zoom: number;
+}
+
+// Whole world: sources span several continents, so a regional default hides
+// most of the map. Kept here as the single source of truth so MapView.tsx
+// never has its own copy to drift out of sync with.
+export const DEFAULT_VIEW: MapViewSettings = {
+  center: [0, 20],
+  zoom: 2,
+};
+
+export function getDefaultView(): MapViewSettings {
+  if (typeof window === "undefined") return DEFAULT_VIEW;
+  try {
+    const stored = localStorage.getItem(VIEW_KEY);
+    if (!stored) return DEFAULT_VIEW;
+    return JSON.parse(stored) as MapViewSettings;
+  } catch {
+    return DEFAULT_VIEW;
+  }
+}
+
+export function saveDefaultView(view: MapViewSettings): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(VIEW_KEY, JSON.stringify(view));
+  } catch (error) {
+    console.error("Failed to save default map view to localStorage:", error);
+  }
+}

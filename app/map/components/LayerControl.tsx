@@ -8,6 +8,7 @@ import type {
   OverlaySource,
 } from "../types";
 import { generateOverlayId, getSourceAttribution } from "../utils/overlays";
+import { TimelineSlider } from "./TimelineSlider";
 
 interface LayerControlProps {
   overlays: HistoricalOverlay[];
@@ -24,6 +25,13 @@ interface LayerControlProps {
   eventGroups?: EventGroup[];
   selectedGroupId?: string | null;
   onSelectGroup?: (id: string | null) => void;
+  /** Timeline filter, rendered as a section above Event Sources. */
+  minYear: number;
+  maxYear: number;
+  timelineRange: [number, number];
+  onTimelineRangeChange: (range: [number, number]) => void;
+  isTimelineEnabled: boolean;
+  onTimelineToggle: (enabled: boolean) => void;
 }
 
 export function LayerControl({
@@ -39,6 +47,12 @@ export function LayerControl({
   eventGroups = [],
   selectedGroupId = null,
   onSelectGroup,
+  minYear,
+  maxYear,
+  timelineRange,
+  onTimelineRangeChange,
+  isTimelineEnabled,
+  onTimelineToggle,
 }: LayerControlProps): JSX.Element {
   const [isExpanded, setIsExpanded] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
@@ -211,6 +225,21 @@ export function LayerControl({
           data-testid="layer-panel"
           className="absolute bottom-12 right-0 w-80 max-h-[calc(100vh-5rem)] overflow-y-auto overscroll-contain bg-slate-900/95 backdrop-blur-sm rounded-lg shadow-xl border border-slate-700"
         >
+          {/* Timeline — a cross-cutting filter over everything below it. */}
+          <div className="border-b border-slate-700">
+            <div className="px-4 py-3 border-b border-slate-700">
+              <h3 className="text-white font-medium">Timeline</h3>
+            </div>
+            <TimelineSlider
+              minYear={minYear}
+              maxYear={maxYear}
+              range={timelineRange}
+              onRangeChange={onTimelineRangeChange}
+              isEnabled={isTimelineEnabled}
+              onToggle={onTimelineToggle}
+            />
+          </div>
+
           {/* Event layers — one per publisher. `kind` is surfaced so it's
               obvious which is live PostGIS and which is the static demo. */}
           {eventLayers.length > 0 && (
