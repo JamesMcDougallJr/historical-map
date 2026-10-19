@@ -406,8 +406,10 @@ export interface MapViewProps {
   highlightDimsOthers?: boolean;
   /** The location of the focused search result row, drawn pulsed. */
   pulseLocationId?: string | null;
-  /** Rendered first in the top-left control row — where /map puts its search bar. */
+  /** Rendered first in the top-left control row — /map's search bar on narrower screens. */
   topLeftSlot?: ReactNode;
+  /** Rendered centred at the top of the map — /map's search bar on wide screens. */
+  topCenterSlot?: ReactNode;
 }
 
 /**
@@ -476,6 +478,7 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     highlightDimsOthers = true,
     pulseLocationId = null,
     topLeftSlot,
+    topCenterSlot,
   },
   ref,
 ): JSX.Element {
@@ -1689,6 +1692,12 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           >
             Import Events
           </a>
+        </div>
+      )}
+
+      {showNav && topCenterSlot && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20">
+          {topCenterSlot}
         </div>
       )}
 

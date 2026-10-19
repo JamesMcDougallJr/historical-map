@@ -74,6 +74,24 @@ export interface MapWithSearchProps {
   onRefresh?: () => void;
 }
 
+/**
+ * The search bar sits centred at the top of the map from 1280px up. Narrower,
+ * a centred 26rem bar would run into the stats/score/fullscreen row on the
+ * right, so it stays first in the top-left control row (and phones have their
+ * own search button there regardless).
+ */
+function useWideEnoughToCentre(): boolean {
+  const [wide, setWide] = useState(false);
+  useEffect(() => {
+    const query = window.matchMedia("(min-width: 1280px)");
+    const update = () => setWide(query.matches);
+    update();
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
+  return wide;
+}
+
 export function MapWithSearch({
   locations,
   initialEventLayers,
@@ -82,6 +100,7 @@ export function MapWithSearch({
 }: MapWithSearchProps): JSX.Element {
   const mapRef = useRef<MapViewHandle>(null);
   const layout = useSearchLayout();
+  const centred = useWideEnoughToCentre();
 
   // The timeline, lifted out of MapView: search follows it.
   const [timelineRange, setTimelineRange] = useState<[number, number]>([
@@ -434,7 +453,9 @@ export function MapWithSearch({
         highlightLocationIds={highlight?.ids ?? null}
         highlightDimsOthers={highlight?.dimOthers ?? true}
         pulseLocationId={pulseLocationId}
-        topLeftSlot={searchBox}
+        {...(centred
+          ? { topCenterSlot: searchBox }
+          : { topLeftSlot: searchBox })}
       />
       {panel?.kind === "document" && (
         <DocumentPanel
