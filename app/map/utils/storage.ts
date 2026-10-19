@@ -287,11 +287,12 @@ export interface MapViewSettings {
   zoom: number;
 }
 
-// The map's original hardcoded center/zoom, kept here as the single source
-// of truth so MapView.tsx never has its own copy to drift out of sync with.
+// Whole world: sources span several continents, so a regional default hides
+// most of the map. Kept here as the single source of truth so MapView.tsx
+// never has its own copy to drift out of sync with.
 export const DEFAULT_VIEW: MapViewSettings = {
-  center: [-111.8881, 40.7606],
-  zoom: 8,
+  center: [0, 20],
+  zoom: 2,
 };
 
 export function getDefaultView(): MapViewSettings {

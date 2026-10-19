@@ -63,6 +63,9 @@ working agreement as `~/Code/StateAffairs/plans/00-README.md`.
     LLM judge disposes, assertions fuse into clusters. Answers the gaps in 11.
 14. [14-source-retrieval-and-rag.md](./14-source-retrieval-and-rag.md) — anchors, "view the
     source" deep links, and RAG with citations across multiple sources.
+15. [19-search.md](./19-search.md) — **search track, design only.** Full-text search over
+    events, sequences and source text (20), the typed search bar (21), people (22), and
+    semantic/hybrid search on plan 12's substrate (23). Stretch goals: people (22), MCP (24).
 
 > **Groq cannot embed, and Bedrock is not in the default region.** Groq exposes no embedding
 > models at all, so 12 adds AWS Bedrock alongside it — and the account's configured region

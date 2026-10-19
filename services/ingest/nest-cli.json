@@ -111,6 +111,15 @@
         "tsConfigPath": "libs/geocoding/tsconfig.lib.json"
       }
     },
+    "jev": {
+      "type": "library",
+      "root": "libs/jev",
+      "entryFile": "index",
+      "sourceRoot": "libs/jev/src",
+      "compilerOptions": {
+        "tsConfigPath": "libs/jev/tsconfig.lib.json"
+      }
+    },
     "storage": {
       "type": "library",
       "root": "libs/storage",

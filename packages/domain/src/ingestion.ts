@@ -192,4 +192,72 @@ export interface ValidationCheck {
   /** Whether failing this check forces `review`, or is merely recorded. */
   gating: boolean;
   detail?: string;
+  /**
+   * Structured evidence for checks a program (not just a person) has to read
+   * back — currently the cross-document duplicate decision: the matched event
+   * id, both probabilities, the outcome and whether it was decided automatically.
+   */
+  data?: Record<string, unknown>;
+}
+
+/**
+ * An event `publish` did not put on the map because Jev judged it against one
+ * already there. `held`: not sure either way, waiting for a person. `auto-resolved`:
+ * confident it is the same event, so it was left off without one — shown so a wrong
+ * call can be overturned.
+ */
+export interface DuplicateItem {
+  eventKey: string;
+  documentId: string;
+  status: "held" | "auto-resolved";
+  event: {
+    title: string;
+    dateText: string;
+    placeName: string | null;
+    description: string;
+    sourceText: string;
+  };
+  /** `P(same)` with the best match and `P(distinct from all)`, as Jev answered. */
+  pSame: number | null;
+  pDistinct: number | null;
+  /** Jev's recorded reasoning (the check's `detail`). */
+  detail: string;
+  /** The published event it was compared with; null if it has since been deleted. */
+  match: {
+    id: string;
+    title: string;
+    date: string;
+    dateText: string | null;
+    placeName: string;
+    sourceId: string;
+    description: string;
+    quote: string | null;
+  } | null;
+  createdAt: string;
+}
+
+/**
+ * A place whose pin a model chose (or a person has reviewed), with what it
+ * would take back. `auto`: decided without a person — shown so a wrong call
+ * can be rejected. `confirmed`/`rejected`: a person's verdict, which no
+ * refresh overrides.
+ */
+export interface GeocodeReviewItem {
+  id: string;
+  placeName: string;
+  status: "auto" | "confirmed" | "rejected";
+  /** Where the place is pinned now; null once rejected. */
+  pinned: { lon: number; lat: number; displayName: string } | null;
+  provider: string | null;
+  confidence: number | null;
+  /** The minimum the decision was held to, when a model made it. */
+  threshold: number | null;
+  /** The gazetteer tiers' own answer, before the model overrode or confirmed it. */
+  tierAnswer: { lon: number; lat: number; displayName: string } | null;
+  /** The event text the model judged the place against. */
+  context: { title: string; description?: string } | null;
+  /** Published events currently pinned from this place — what a rejection removes. */
+  publishedEvents: number;
+  reviewedAt: string | null;
+  createdAt: string;
 }

@@ -1,14 +1,96 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import type {
-  GeocodeCandidate,
-  GeocodeHit,
-  Geocoder,
+import {
+  distanceKm,
+  type GeocodeCandidate,
+  type GeocodeHints,
+  type GeocodeHit,
+  type GeocodeOutcome,
+  type Geocoder,
 } from "./geocoder.interface";
 import { RateLimiterService } from "@app/common/ratelimit/rate-limiter.service";
+import { JevClient, choice, isJevFeatureEnabled } from "@app/jev";
 
 const NOMINATIM_URL = "https://nominatim.openstreetmap.org/search";
 const REQUEST_TIMEOUT_MS = 15_000;
+/** Reranking only ever considers this many candidates, bounding call cost. */
+const MAX_RERANK_CANDIDATES = 5;
+
+interface NominatimResult {
+  lon?: string;
+  lat?: string;
+  name?: string;
+  display_name?: string;
+  category?: string;
+  importance?: number;
+  /** Every name OSM knows it by (`name:en`, `alt_name`, `old_name`, …). */
+  namedetails?: Record<string, string>;
+  /** `[minLat, maxLat, minLon, maxLon]`, as strings. */
+  boundingbox?: [string, string, string, string];
+}
+
+/** Whether `point` lies inside the result's own extent. */
+function withinExtent(
+  r: NominatimResult,
+  point: { lon: number; lat: number },
+): boolean {
+  if (!r.boundingbox) return false;
+  const [minLat, maxLat, minLon, maxLon] = r.boundingbox.map(Number);
+  return (
+    point.lat >= minLat! &&
+    point.lat <= maxLat! &&
+    point.lon >= minLon! &&
+    point.lon <= maxLon!
+  );
+}
+
+/** Two results within this distance are the same place, not a tie. */
+const SAME_PLACE_KM = 25;
+
+/**
+ * Lowercased, accent-folded word set. Accents matter: documents write
+ * "Tenochtitlan" and "Yucatan", OSM "Tenochtitlán" and "Yucatán".
+ */
+function nameTokens(name: string): Set<string> {
+  return new Set(
+    name
+      .normalize("NFD")
+      .replace(/\p{M}/gu, "")
+      .toLowerCase()
+      .split(/[^\p{L}\p{N}]+/u)
+      .filter(Boolean),
+  );
+}
+
+function isSubset(a: Set<string>, b: Set<string>): boolean {
+  return a.size > 0 && [...a].every((t) => b.has(t));
+}
+
+/**
+ * Whether any of the result's names is the place asked for. Either side may
+ * carry extra words — "Mexico, Michoacán" → "Michoacán" is fine — but every
+ * word of one must appear in the other, which rules out a result merely
+ * sharing a word: "New Spain" → "Spain Reserve" (a park in Sydney).
+ */
+function namesMatch(query: string, result: NominatimResult): boolean {
+  const asked = nameTokens(query);
+  const names = [
+    result.name,
+    ...Object.values(result.namedetails ?? {}).flatMap((v) => v.split(";")),
+  ].filter((n): n is string => !!n);
+  return names.some((n) => {
+    const t = nameTokens(n);
+    return isSubset(t, asked) || isSubset(asked, t);
+  });
+}
+
+function toCandidate(r: NominatimResult): GeocodeCandidate {
+  return {
+    lon: Number(r.lon),
+    lat: Number(r.lat),
+    displayName: r.display_name ?? r.name ?? "(no label)",
+  };
+}
 
 /**
  * OSM categories a historical place is never in. Everything else is allowed,
@@ -41,8 +123,10 @@ const REJECTED_CATEGORIES = new Set([
  * that bears a name today, which for a 19th-century document may be the wrong
  * place, or a place that did not exist. Historical names that have since been
  * reused are the dangerous case, because the result looks perfectly plausible.
- * A gazetteer with historical coverage would be the real fix; until then
- * `displayName` is stored precisely so a wrong match can be spotted.
+ * That is why it runs second, after WHG, and why its top result is only
+ * trusted when it passes `confidenceProblem` — otherwise the place goes to
+ * review with the reason recorded, rather than being pinned somewhere
+ * plausible-looking and wrong.
  */
 @Injectable()
 export class NominatimGeocoder implements Geocoder {
@@ -52,10 +136,14 @@ export class NominatimGeocoder implements Geocoder {
   private readonly userAgent: string;
   private readonly minIntervalMs: number;
   private readonly countryCodes: string | undefined;
+  private readonly minImportance: number;
+  private readonly tieMargin: number;
+  private readonly corroborationKm: number;
 
   constructor(
-    config: ConfigService,
+    private readonly config: ConfigService,
     private readonly rateLimiter: RateLimiterService,
+    private readonly jev: JevClient,
   ) {
     this.userAgent =
       config.get<string>("GEOCODER_USER_AGENT") ??
@@ -65,10 +153,35 @@ export class NominatimGeocoder implements Geocoder {
     // it is per-corpus knowledge, so it stays configuration rather than a
     // hardcoded assumption about what any source contains.
     this.countryCodes = config.get<string>("GEOCODER_COUNTRY_CODES");
+    // Defaults measured on the first production corpus: every correct answer
+    // scored ≥ 0.43, every hamlet/neighbourhood namesake ≤ 0.14; the one true
+    // tie ("Vera Cruz", four Brazilian towns) was 0.002 apart, the closest
+    // non-tie (Yucatán state vs peninsula) 0.03. A region's point differs by
+    // up to ~50 km between gazetteers; a modern namesake is typically 200+.
+    this.minImportance = Number(config.get("GEOCODER_MIN_IMPORTANCE") ?? 0.2);
+    this.tieMargin = Number(config.get("GEOCODER_TIE_MARGIN") ?? 0.02);
+    this.corroborationKm = Number(
+      config.get("GEOCODER_CORROBORATION_KM") ?? 100,
+    );
     this.rateLimiter.registerRateLimit("nominatim", 30);
   }
 
-  async geocode(placeName: string): Promise<GeocodeHit | null> {
+  async geocode(
+    placeName: string,
+    hints?: GeocodeHints,
+  ): Promise<GeocodeHit | null> {
+    return (await this.lookup(placeName, hints)).hit;
+  }
+
+  /**
+   * Tier 2. Nominatim always has *an* answer, so its top result is only
+   * trusted when it passes `confidenceProblem`; otherwise this declines and
+   * the event goes to review rather than onto the wrong spot on the map.
+   */
+  async lookup(
+    placeName: string,
+    hints: GeocodeHints = {},
+  ): Promise<GeocodeOutcome> {
     await this.respectRateLimit();
 
     const url = new URL(NOMINATIM_URL);
@@ -78,6 +191,9 @@ export class NominatimGeocoder implements Geocoder {
     // be chosen after the junk categories are filtered out.
     url.searchParams.set("limit", "5");
     url.searchParams.set("addressdetails", "0");
+    // Other-language and former names, for `namesMatch`: "Mexico City" is
+    // `name:en` of a result whose `name` is "Ciudad de México".
+    url.searchParams.set("namedetails", "1");
     if (this.countryCodes) {
       url.searchParams.set("countrycodes", this.countryCodes);
     }
@@ -104,13 +220,7 @@ export class NominatimGeocoder implements Geocoder {
       throw new Error(`geocoder returned ${response.status}`);
     }
 
-    const results = (await response.json()) as Array<{
-      lon?: string;
-      lat?: string;
-      display_name?: string;
-      category?: string;
-      importance?: number;
-    }>;
+    const results = (await response.json()) as NominatimResult[];
 
     // A historical place is a settlement, region, natural feature or historic
     // site — never a road, shop or office. Without this filter "Salt Lake
@@ -120,12 +230,40 @@ export class NominatimGeocoder implements Geocoder {
       (r) =>
         r.lon && r.lat && (!r.category || !REJECTED_CATEGORIES.has(r.category)),
     );
-    const best = usable[0];
-    if (!best?.lon || !best?.lat) return null;
+    // Behind JEV_GEOCODE_RERANK_ENABLED: today's default is "take Nominatim's
+    // own top-ranked result, full stop" — which is exactly how "Sutter's
+    // Mill" resolves to a ranch in Idaho (see class doc). Disabled, missing
+    // credentials, or a failed call all fall back to that unchanged.
+    const reranked = await this.rerank(placeName, usable);
+    const best = reranked ?? usable[0];
+    const considered = usable
+      .slice(0, MAX_RERANK_CANDIDATES)
+      .map(toCandidate)
+      .filter((c) => Number.isFinite(c.lon) && Number.isFinite(c.lat));
+    if (!best?.lon || !best?.lat) return { hit: null, considered };
 
     const lon = Number(best.lon);
     const lat = Number(best.lat);
-    if (!Number.isFinite(lon) || !Number.isFinite(lat)) return null;
+    if (!Number.isFinite(lon) || !Number.isFinite(lat)) {
+      return { hit: null, considered };
+    }
+
+    const problem = this.confidenceProblem(placeName, best, usable, hints, {
+      // A confident Jev pick is a deliberate choice among the results, so a
+      // near-tie in Nominatim's own ranking no longer means a coin flip.
+      checkTies: !reranked,
+    });
+    if (problem) {
+      return {
+        hit: null,
+        considered,
+        declined: {
+          provider: this.providerName,
+          reason: problem,
+          candidates: considered,
+        },
+      };
+    }
 
     // Ties on Nominatim's own `importance` score are real, but rarer than
     // WHG's — exact float equality is the honest bar here, not an invented
@@ -152,11 +290,142 @@ export class NominatimGeocoder implements Geocoder {
     }
 
     return {
-      lon,
-      lat,
-      displayName: best.display_name ?? placeName,
-      ...(alternates.length ? { alternates } : {}),
+      hit: {
+        lon,
+        lat,
+        displayName: best.display_name ?? placeName,
+        ...(alternates.length ? { alternates } : {}),
+      },
+      considered,
     };
+  }
+
+  /**
+   * Why `best` should not be trusted as *the* place named, or `null` if it
+   * can. Each check is a way Nominatim has been confidently wrong on real
+   * historical text:
+   *
+   * - **name**: the result isn't called that at all — "New Spain" matched a
+   *   park named "Spain Reserve" in Sydney.
+   * - **importance**: a hamlet or neighbourhood that merely shares the name —
+   *   "Santiago‑Tlatelolco" (in Mexico City) matched a Jalisco hamlet, 0.133.
+   * - **tie**: several equally prominent places of that name, far apart —
+   *   "Vera Cruz" matched three Brazilian towns within 0.004 of each other.
+   * - **historical**: no historical record of the name lies inside the
+   *   result or near it — "Tenochtitlan" matched a Veracruz town ~190 km from
+   *   every historical source's point.
+   *
+   * `importance` is missing on some responses; then neither the importance
+   * nor the tie check has anything to go on, and both are skipped.
+   */
+  private confidenceProblem(
+    placeName: string,
+    best: NominatimResult,
+    usable: NominatimResult[],
+    hints: GeocodeHints,
+    { checkTies }: { checkTies: boolean },
+  ): string | null {
+    const label = best.display_name ?? best.name ?? "(no label)";
+    if (!namesMatch(placeName, best)) {
+      return `name mismatch: matched "${label}"`;
+    }
+
+    if (best.importance !== undefined) {
+      if (best.importance < this.minImportance) {
+        return (
+          `low importance ${best.importance.toFixed(3)} ` +
+          `(< ${this.minImportance}): "${label}"`
+        );
+      }
+      if (checkTies) {
+        const rival = usable.find(
+          (r) =>
+            r !== best &&
+            r.importance !== undefined &&
+            best.importance! - r.importance <= this.tieMargin &&
+            distanceKm(toCandidate(r), toCandidate(best)) > SAME_PLACE_KM,
+        );
+        if (rival) {
+          return (
+            `tie: "${label}" and "${rival.display_name ?? rival.name}" ` +
+            `are equally prominent`
+          );
+        }
+      }
+    }
+
+    // Agreement means a historical record lies inside the modern place, or
+    // near its point. The extent matters for large places: a country's
+    // representative point differs by hundreds of km between gazetteers
+    // ("Peru": 367 km), while a town-sized namesake's extent stays small.
+    const historical = hints.historical ?? [];
+    if (historical.length && !historical.some((h) => withinExtent(best, h))) {
+      const nearest = Math.min(
+        ...historical.map((h) => distanceKm(h, toCandidate(best))),
+      );
+      if (nearest > this.corroborationKm) {
+        return (
+          `contradicts historical gazetteers: "${label}" is ` +
+          `${Math.round(nearest)} km from the nearest historical record`
+        );
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Picks the best of `usable`'s results with a Jev Choice question, given the
+   * historical place name as written. Returns `null` (meaning "use
+   * `usable[0]` as before") when the flag is off, there's nothing to choose
+   * between, or the call fails — reranking only ever narrows toward a better
+   * pick, it never produces a result the unmodified path wouldn't accept.
+   */
+  private async rerank(
+    placeName: string,
+    usable: NominatimResult[],
+  ): Promise<NominatimResult | null> {
+    if (usable.length < 2) return null;
+    if (!isJevFeatureEnabled(this.config, this.jev, "JEV_GEOCODE_RERANK_ENABLED"))
+      return null;
+
+    const candidates = usable.slice(0, MAX_RERANK_CANDIDATES);
+    const criteria: Record<string, string> = {};
+    candidates.forEach((c, i) => {
+      criteria[`result_${i}`] =
+        `${c.display_name ?? "(no label)"} [${c.category ?? "unknown category"}]`;
+    });
+    // Without this the model is forced to pick one even when every result is a
+    // modern namesake of the wrong place — the exact failure being guarded.
+    criteria["none"] = "None of these results plausibly refers to the historical place.";
+
+    const answers = await this.jev.tryAsk(
+      {
+        historical_place_name: placeName,
+        note:
+          "These are modern OpenStreetMap results for that name. A modern gazetteer " +
+          "can confidently match the wrong modern place that happens to share a " +
+          "historical name (e.g. a historical \"Sutter's Mill\" resolving to an " +
+          "unrelated modern town also named Sutter).",
+      },
+      {
+        best: choice(
+          "Which result most plausibly refers to the historical place named above?",
+          criteria,
+        ),
+      },
+    );
+    const answer = answers?.best;
+    if (!answer || answer.choice === "none") return null;
+
+    // A pick Jev is unsure of is no better than Nominatim's own ranking, so
+    // below the bar keep `usable[0]` (TypeSafe's guidance: low confidence →
+    // "fall back to a different system"). Higher = trust Jev less; set it to
+    // 0 to always take Jev's pick, or turn JEV_GEOCODE_RERANK_ENABLED off.
+    const minConfidence = this.config.get<number>("JEV_GEOCODE_MIN_CONFIDENCE") ?? 0.8;
+    if (answer.confidence < minConfidence) return null;
+
+    return candidates[Number(answer.choice.replace("result_", ""))] ?? null;
   }
 
   private async respectRateLimit(): Promise<void> {

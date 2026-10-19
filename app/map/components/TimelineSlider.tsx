@@ -113,6 +113,7 @@ export function TimelineSlider({
       {/* Toggle Button */}
       <button
         onClick={() => setIsExpanded(!isExpanded)}
+        data-testid="timeline-toggle-button"
         className={`flex items-center gap-2 px-4 py-2 backdrop-blur-sm rounded-lg text-white shadow-lg transition-colors ${
           isEnabled
             ? "bg-blue-600/80 hover:bg-blue-600"
@@ -150,6 +151,7 @@ export function TimelineSlider({
                 type="checkbox"
                 checked={isEnabled}
                 onChange={(e) => onToggle?.(e.target.checked)}
+                data-testid="timeline-enable-checkbox"
                 className="sr-only peer"
               />
               <div className="w-9 h-5 bg-slate-600 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600" />
@@ -189,6 +191,7 @@ export function TimelineSlider({
 
                 {/* Low thumb */}
                 <div
+                  data-testid="timeline-thumb-low"
                   className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-5 h-5 bg-white rounded-full shadow-md border-2 border-blue-500 cursor-grab active:cursor-grabbing hover:scale-110 transition-transform touch-none"
                   style={{ left: `${lowPct}%` }}
                   onMouseDown={(e) => {
@@ -203,6 +206,7 @@ export function TimelineSlider({
 
                 {/* High thumb */}
                 <div
+                  data-testid="timeline-thumb-high"
                   className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-5 h-5 bg-white rounded-full shadow-md border-2 border-purple-500 cursor-grab active:cursor-grabbing hover:scale-110 transition-transform touch-none"
                   style={{ left: `${highPct}%` }}
                   onMouseDown={(e) => {
@@ -224,6 +228,7 @@ export function TimelineSlider({
                   return (
                     <button
                       key={decade}
+                      data-testid={`timeline-decade-${decade}`}
                       onClick={() => {
                         // Snap nearest thumb to decade
                         const distLow = Math.abs(decade - range[0]);
@@ -264,6 +269,7 @@ export function TimelineSlider({
               <button
                 onClick={() => onRangeChange([minYear, 1850])}
                 disabled={!isEnabled}
+                data-testid="timeline-preset-pre-1850"
                 className="flex-1 px-2 py-1.5 bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:text-slate-600 text-white text-xs rounded transition-colors"
               >
                 Pre-1850
@@ -271,6 +277,7 @@ export function TimelineSlider({
               <button
                 onClick={() => onRangeChange([1850, 1920])}
                 disabled={!isEnabled}
+                data-testid="timeline-preset-1850-1920"
                 className="flex-1 px-2 py-1.5 bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:text-slate-600 text-white text-xs rounded transition-colors"
               >
                 1850–1920
@@ -278,6 +285,7 @@ export function TimelineSlider({
               <button
                 onClick={() => onRangeChange([1920, maxYear])}
                 disabled={!isEnabled}
+                data-testid="timeline-preset-post-1920"
                 className="flex-1 px-2 py-1.5 bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:text-slate-600 text-white text-xs rounded transition-colors"
               >
                 Post-1920
@@ -285,6 +293,7 @@ export function TimelineSlider({
               <button
                 onClick={() => onRangeChange([minYear, maxYear])}
                 disabled={!isEnabled}
+                data-testid="timeline-preset-all"
                 className="flex-1 px-2 py-1.5 bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:text-slate-600 text-white text-xs rounded transition-colors"
               >
                 All

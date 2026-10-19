@@ -47,6 +47,9 @@ export function eventLayersFromSources(sources: EventSource[]): EventLayer[] {
           sourceIds: [source.id],
           ...(source.attribution ? { attribution: source.attribution } : {}),
           ...(source.color ? { color: source.color } : {}),
+          // A tile layer cannot count its own pins; carry the server's totals.
+          ...(source.locationCount !== undefined ? { locationCount: source.locationCount } : {}),
+          ...(source.eventCount !== undefined ? { eventCount: source.eventCount } : {}),
           enabled: true,
         }
       : {

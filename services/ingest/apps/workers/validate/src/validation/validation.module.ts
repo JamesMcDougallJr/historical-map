@@ -9,6 +9,7 @@ import {
 } from "@app/database";
 import { PUBLISH_JOB_OPTIONS, QUEUE_NAMES } from "@app/queue";
 import { StorageModule } from "@app/storage";
+import { JevModule } from "@app/jev";
 import { ValidationProcessor } from "./validation.processor";
 import { ValidationService } from "./validation.service";
 
@@ -21,6 +22,7 @@ import { ValidationService } from "./validation.service";
       IngestSource,
     ]),
     StorageModule,
+    JevModule,
     BullModule.registerQueue(
       { name: QUEUE_NAMES.VALIDATE },
       { name: QUEUE_NAMES.PUBLISH, defaultJobOptions: PUBLISH_JOB_OPTIONS },

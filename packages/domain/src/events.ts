@@ -67,6 +67,14 @@ export interface EventSource {
   attribution?: string;
   /** Pin colour, so layers are visually distinguishable. */
   color?: string;
+  /**
+   * Distinct locations and total events published under this source. Only the
+   * Postgres store fills these. A tiled (MVT) layer streams pins per tile and has
+   * no total of its own, so the map's "N locations, M events" chip and the score
+   * badge's denominator read these instead — without them both showed 0.
+   */
+  locationCount?: number;
+  eventCount?: number;
 }
 
 export interface HistoricalLocation {

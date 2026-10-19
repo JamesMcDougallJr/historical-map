@@ -75,7 +75,12 @@ export function EventForm({
     <form onSubmit={handleSubmit} className="card">
       <div className="field">
         <label>Title</label>
-        <input value={title} onChange={(e) => setTitle(e.target.value)} required />
+        <input
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          required
+          data-testid="event-form-title"
+        />
       </div>
 
       <div className="row">
@@ -86,6 +91,7 @@ export function EventForm({
             value={date}
             onChange={(e) => setDate(e.target.value)}
             required
+            data-testid="event-form-date"
           />
         </div>
         <div className="field">
@@ -93,6 +99,7 @@ export function EventForm({
           <select
             value={datePrecision}
             onChange={(e) => setDatePrecision(e.target.value as DatePrecision | "")}
+            data-testid="event-form-date-precision"
           >
             <option value="">(day — default)</option>
             {DATE_PRECISIONS.map((p) => (
@@ -120,6 +127,7 @@ export function EventForm({
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           required
+          data-testid="event-form-description"
         />
       </div>
 
@@ -144,11 +152,19 @@ export function EventForm({
       <div className="row">
         <div className="field">
           <label>Tags (comma-separated)</label>
-          <input value={tags} onChange={(e) => setTags(e.target.value)} />
+          <input
+            value={tags}
+            onChange={(e) => setTags(e.target.value)}
+            data-testid="event-form-tags"
+          />
         </div>
         <div className="field">
           <label>Image URL</label>
-          <input value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} />
+          <input
+            value={imageUrl}
+            onChange={(e) => setImageUrl(e.target.value)}
+            data-testid="event-form-image-url"
+          />
         </div>
       </div>
 
@@ -162,7 +178,12 @@ export function EventForm({
       {error && <p style={{ color: "var(--danger)" }}>{error}</p>}
 
       <div className="row">
-        <button type="submit" className="primary" disabled={saving}>
+        <button
+          type="submit"
+          className="primary"
+          disabled={saving}
+          data-testid="event-form-submit"
+        >
           {saving ? "Saving…" : submitLabel}
         </button>
         {onCancel && (

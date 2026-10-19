@@ -1,5 +1,12 @@
 import { Logger } from "@nestjs/common";
-import type { GeocodeHit, Geocoder } from "./geocoder.interface";
+import type {
+  GeocodeCandidate,
+  GeocodeDecline,
+  GeocodeHints,
+  GeocodeHit,
+  GeocodeOutcome,
+  Geocoder,
+} from "./geocoder.interface";
 
 /**
  * Tries each provider in order until one resolves the place.
@@ -23,12 +30,46 @@ export class FallbackGeocoder implements Geocoder {
   }
 
   async geocode(placeName: string): Promise<GeocodeHit | null> {
+    return (await this.lookup(placeName)).hit;
+  }
+
+  /**
+   * Each tier's hints are passed to the tiers after it, so a later, less
+   * historically-aware provider can be held to what an earlier one learned.
+   * When every tier comes up empty, their decline reasons are combined: that
+   * is what `geocode_cache` records and `geocode:review` shows for a place
+   * with no pin.
+   */
+  async lookup(placeName: string): Promise<GeocodeOutcome> {
     let lastError: unknown;
+    let hints: GeocodeHints = {};
+    const declines: GeocodeDecline[] = [];
+    const considered: GeocodeCandidate[] = [];
 
     for (const provider of this.providers) {
       try {
-        const hit = await provider.geocode(placeName);
-        if (hit) return { ...hit, provider: hit.provider ?? provider.providerName };
+        const outcome: GeocodeOutcome = provider.lookup
+          ? await provider.lookup(placeName, hints)
+          : { hit: await provider.geocode(placeName, hints) };
+        considered.push(...(outcome.considered ?? []));
+        if (outcome.hit) {
+          return {
+            hit: {
+              ...outcome.hit,
+              provider: outcome.hit.provider ?? provider.providerName,
+            },
+            considered,
+          };
+        }
+        if (outcome.hints?.historical?.length) {
+          hints = {
+            historical: [
+              ...(hints.historical ?? []),
+              ...outcome.hints.historical,
+            ],
+          };
+        }
+        if (outcome.declined) declines.push(outcome.declined);
         // A clean miss — move on to the next provider, no error to track.
         lastError = undefined;
       } catch (error) {
@@ -42,6 +83,15 @@ export class FallbackGeocoder implements Geocoder {
     }
 
     if (lastError !== undefined) throw lastError;
-    return null;
+    if (declines.length === 0) return { hit: null, considered };
+    return {
+      hit: null,
+      considered,
+      declined: {
+        provider: this.providerName,
+        reason: declines.map((d) => `${d.provider}: ${d.reason}`).join("; "),
+        candidates: declines.flatMap((d) => d.candidates),
+      },
+    };
   }
 }

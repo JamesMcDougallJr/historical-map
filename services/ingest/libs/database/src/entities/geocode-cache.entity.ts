@@ -5,6 +5,28 @@ import {
   PrimaryGeneratedColumn,
 } from "typeorm";
 
+export type GeocodeReviewStatus = "auto" | "confirmed" | "rejected";
+
+/**
+ * The audit trail of a model-made geocode: enough to judge a rejection
+ * against what was actually asked.
+ */
+export interface GeocodeDecision {
+  /** Which step decided: `jev-context` today. */
+  method: string;
+  /** The gazetteer tiers' own answer, before Jev — null if they declined. */
+  tierHit: { lon: number; lat: number; displayName: string } | null;
+  /** Jev's pick; null when it answered "none of these". */
+  picked: { lon: number; lat: number; displayName: string } | null;
+  confidence: number;
+  threshold: number;
+  /** Whether Jev's pick was applied (it cleared the threshold and differed). */
+  applied: boolean;
+  /** The event text Jev judged the place against. */
+  context: { title: string; description?: string };
+  candidates: Array<{ lon: number; lat: number; displayName: string }>;
+}
+
 /**
  * Resolved place names, keyed on a normalised form.
  *
@@ -57,6 +79,27 @@ export class GeocodeCache {
    */
   @Column({ type: "jsonb", nullable: true })
   candidates!: Array<{ lon: number; lat: number; displayName: string }> | null;
+
+  /**
+   * How sure the deciding step was, 0–1. Set by a Jev context decision; null
+   * for the deterministic tiers, which either pass their checks or decline.
+   */
+  @Column({ type: "double precision", nullable: true })
+  confidence!: number | null;
+
+  /**
+   * `auto` until a person reviews it. `confirmed` pins the answer so no
+   * refresh changes it; `rejected` makes it a miss that nothing re-pins.
+   */
+  @Column({ name: "review_status", type: "text", default: "auto" })
+  reviewStatus!: GeocodeReviewStatus;
+
+  @Column({ name: "reviewed_at", type: "timestamptz", nullable: true })
+  reviewedAt!: Date | null;
+
+  /** What each tier said and what Jev picked — see `GeocodeDecision`. */
+  @Column({ type: "jsonb", nullable: true })
+  decision!: GeocodeDecision | null;
 
   @CreateDateColumn({ name: "created_at", type: "timestamptz" })
   createdAt!: Date;
