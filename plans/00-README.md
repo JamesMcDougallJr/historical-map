@@ -66,6 +66,13 @@ working agreement as `~/Code/StateAffairs/plans/00-README.md`.
 15. [19-search.md](./19-search.md) — **search track, design only.** Full-text search over
     events, sequences and source text (20), the typed search bar (21), people (22), and
     semantic/hybrid search on plan 12's substrate (23). Stretch goals: people (22), MCP (24).
+16. [25-product-backlog.md](./25-product-backlog.md) — **product track.** The living backlog
+    James works from: land the second source, build web ingest, retire the curated seed.
+17. [26-wikidata-pilot.md](./26-wikidata-pilot.md) — Wikidata as the first ingestion source,
+    **GLOBAL** scope. The 44 curated events are a transient spot-check set, deleted once
+    ingestion is validated (James, 2026-10-20).
+18. [27-web-ingestor.md](./27-web-ingestor.md) — curl/HTTP fetcher so sources come over the
+    web: JSON APIs, HTML, sitemaps — not PDFs only.
 
 > **Groq cannot embed, and Bedrock is not in the default region.** Groq exposes no embedding
 > models at all, so 12 adds AWS Bedrock alongside it — and the account's configured region
