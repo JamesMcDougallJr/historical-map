@@ -73,6 +73,9 @@ working agreement as `~/Code/StateAffairs/plans/00-README.md`.
     ingestion is validated (James, 2026-10-20).
 18. [27-web-ingestor.md](./27-web-ingestor.md) — curl/HTTP fetcher so sources come over the
     web: JSON APIs, HTML, sitemaps — not PDFs only.
+19. [28-britannica-link-only.md](./28-britannica-link-only.md) - Britannica "On This Day"
+    as a LINK-ONLY source: date + short factual identifier + link back, never the text
+    (James, 2026-10-21). Server-rendered day pages; per-date discovery via sitemap scan.
 
 > **Groq cannot embed, and Bedrock is not in the default region.** Groq exposes no embedding
 > models at all, so 12 adds AWS Bedrock alongside it — and the account's configured region
