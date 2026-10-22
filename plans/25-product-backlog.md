@@ -1,1 +1,56 @@
-IyBQcm9kdWN0IGJhY2tsb2cg4oCUIG5leHQgc3RlcHMgYW5kIGJ1ZyBmaXhlcwoKU3RhbmRpbmcgYmFja2xvZyBvZiBjYW5kaWRhdGUgcHJvZHVjdCBzdGVwcyBhbmQgYnVnIGZpeGVzIGZvciBoaXN0b3JpY2FsLW1hcCwKbWFpbnRhaW5lZCBieSB0aGUgZGFpbHkgcmVzZWFyY2ggbG9vcC4gQ29kaW5nIGFnZW50czogcGljayB0aGUgdG9wIHVuY2xhaW1lZAppdGVtOyBub3RlIHlvdXIgYnJhbmNoIGluIHRoZSBpdGVtIHdoZW4geW91IHN0YXJ0IHNvIHR3byBhZ2VudHMgZG9uJ3QgY29sbGlkZS4KCiMjIFdoYXQncyB0aGVyZSB0b2RheQoKLSBUaGUgbWFwIGF0IGAvbWFwYCBzZXJ2ZXMgKio0NCBoYW5kLWN1cmF0ZWQgZXZlbnRzIGFjcm9zcyAzNCBsb2NhdGlvbnMgZnJvbSBvbmUKICBzb3VyY2UqKiAoYHV0YWgtaGlzdG9yaWNhbGAsIHNlZWRlZCBmcm9tIGBkYXRhL21hcC1kYXRhLmpzb25gKS4gRXZlcnl0aGluZyB3YXMKICBlbnRlcmVkIGJ5IGhhbmQgb3IgcGFzdGVkIHRocm91Z2ggYC9tYXAvaW1wb3J0YC4KLSBQbGFucyAwMeKAkzI0IGRlc2lnbiB0aGUgaW5nZXN0aW9uIGVuZ2luZSAoZGV0ZWN0IOKGkiBmZXRjaCDihpIgZXh0cmFjdCDihpIgcHVibGlzaCkKICB0aGF0IHJlcGxhY2VzIG1hbnVhbCBlbnRyeSDigJQgYSBwb3J0IG9mIHRoZSBTdGF0ZSBBZmZhaXJzIHZpZGVvIHBpcGVsaW5lLgotIExhdGVzdCBvbiBtYWluOiBtYXAgY29udHJvbHMgY29uc29saWRhdGVkIGludG8gYSB0b3AtcmlnaHQgbWVudSAoT2N0IDE5KTsKICBwcm9kdWN0aW9uIGRvY3VtZW50cyBtb3ZlZCB0byBTMyBzbyAidmlldyBzb3VyY2UiIGxpbmtzIHdvcmsgKFBSICMxOSwgT2N0IDE1KTsKICBnZW9jb2RlciB0aWVycyB3aXRoIHJldmlld2FibGUgZGVjaXNpb25zIChQUiAjMTgsIE9jdCAxNCkuCgojIyBCdWcgZml4ZXMgKHRyaWFnZSBmaXJzdCkKCjEuICoqUmVhbC1iYWNrZW5kIEUyRSBzdWl0ZSByZWQgb24gbWFpbi4qKiBPYnNlcnZlZCBPY3QgMTk6IHRoZSBtb2NrZWQgRTJFIHN1aXRlCiAgIHBhc3NlcywgdGhlIGBlMmUtcmVhbGAgc3VpdGUgZmFpbHMgYWZ0ZXIgUFIgIzE5ICh0aGUgUzMgcHJvZHVjdGlvbi1kb2N1bWVudAogICBjaGFuZ2UpLiBTdXNwZWN0IHRoZSBTMyBjaGFuZ2UuIFJlcHJvOiBydW4gdGhlIGBlMmUtcmVhbGAgc3VpdGUgYWdhaW5zdCBtYWluLgogICBGaXggYmVmb3JlIGl0IHJvdHMg4oCUIGEgcmVkIHJlYWwtYmFja2VuZCBzdWl0ZSBtYXNrcyBldmVyeSBsYXRlciByZWdyZXNzaW9uLgoKIyMgUHJvZHVjdCBzdGVwcyAocmFua2VkKQoKMS4gKipMYW5kIHRoZSBzZWNvbmQgc291cmNlLioqIFVudGlsIGEgc2Vjb25kIHNvdXJjZSBpcyBsaXZlLCB0aGUgaW5nZXN0aW9uCiAgIHBpcGVsaW5lIGlzIHVucHJvdmVuIGVuZC10by1lbmQuIFRoZSBvbmUtZmlsZS1wZXItc291cmNlIGBTb3VyY2VBZGFwdGVyYAogICBkZXNpZ24gc2hvdWxkIG1ha2UgdGhpcyB0aGUgcHJvb2YgcG9pbnQsIG5vdCBhbm90aGVyIGluZnJhIHBsYW4uCjIuICoqVGltZWxpbmUgVVguKiogVGhlIE9jdCAxOSBjb21taXQgbW92ZWQgdGhlIHRpbWVsaW5lIGFuZCB0aGUgbWFwIG5vdyBvcGVucwogICBvbiB0aGUgd2hvbGUgd29ybGQgKE9jdCAxNCkuIFdpdGggNDQgZXZlbnRzIHRoZSBtYXAgaXMgbmF2aWdhYmxlOyBhdCA0LDQwMAogICBpdCB3b24ndCBiZSDigJQgY2x1c3RlcmluZyBvciBkZW5zaXR5LWF3YXJlIHpvb20gaXMgdGhlIG5leHQgVVggY2xpZmYuCgojIyBPcGVuIHF1ZXN0aW9ucyBmb3IgSmFtZXMKCjEuIFdoaWNoIHNvdXJjZSBzaG91bGQgYmUgIzI/IChVdGFoIGNvdmVyYWdlIHdpdGggdGhlIGxlYXN0IG92ZXJsYXAgd2l0aCB0aGUKICAgaGFuZC1jdXJhdGVkIHNldD8pCjIuIElzIHRoZSBoYW5kLWN1cmF0ZWQgc2V0IG1lYW50IHRvIHN0YXkgYXMgYSAiZ29sZGVuIiB2YWxpZGF0aW9uIHNldCBvbmNlCiAgIGluZ2VzdGlvbiBpcyBsaXZlLCBvciBkb2VzIGl0IGdldCBhYnNvcmJlZD8K
+# Product backlog - next steps and bug fixes
+
+Standing backlog of candidate product steps and bug fixes for historical-map,
+maintained by the daily research loop. Coding agents: pick the top unclaimed
+item; note your branch in the item when you start so two agents don't collide.
+
+## What's there today
+
+- The map at `/map` serves **44 hand-curated events across 34 locations from one
+  source** (`utah-historical`, seeded from `data/map-data.json`). Everything was
+  entered by hand or pasted through `/map/import`.
+- Plans 01-24 design the ingestion engine (detect -> fetch -> extract -> publish)
+  that replaces manual entry - a port of the State Affairs video pipeline.
+- Latest on main (Oct 22): research-loop plans 25-27 added (Oct 20-21); plan 26
+  (Wikidata pilot) widened to GLOBAL scope and the 44 curated events demoted to a
+  transient spot-check set slated for deletion (Oct 21); PR #20 (search) and
+  PR #12 (event sequences) still open; zero open issues.
+
+## Bug fixes (triage first)
+
+1. **Real-backend E2E suite red on main.** Observed Oct 19: the mocked E2E suite
+   passes, the `e2e-real` suite fails after PR #19 (the S3 production-document
+   change). Suspect the S3 change. Repro: run the `e2e-real` suite against main.
+   Fix before it rots - a red real-backend suite masks every later regression.
+
+## Product steps (ranked)
+
+1. **Land the second source.** Wikidata pilot (plan 26), GLOBAL scope, is the
+   named second source - it validates detect -> fetch -> extract -> validate ->
+   publish end to end. The one-file-per-source `SourceAdapter` design should
+   make this the proof point, not another infra plan.
+2. **Timeline UX.** The Oct 19 commit moved the timeline and the map now opens
+   on the whole world (Oct 14). With 44 events the map is navigable; at 4,400
+   it won't be - clustering or density-aware zoom is the next UX cliff.
+3. **Britannica "On This Day" link-only adapter (plan 28).** Editorial curation
+   as a link layer: date + short factual identifier + link back, never the
+   text. Pending James's call on coordinate enrichment via Wikidata matching.
+4. **Retire the curated seed.** Once plan 26's spot-check passes, the 44 curated
+   rows leave `data/map-data.json` (keep a snapshot as a test fixture only).
+   Standing directive from James (2026-10-20) - do not re-propose keeping them.
+5. **Geocoder: evaluate HistGeocoder as a temporal tier.** Confirmed live
+   2026-10-22 at histgeocoder.app: Postgres-native, `valid_from`/`valid_to`
+   ("did this place exist in 1906"), GNIS public-domain + GeoNames CC BY +
+   Wikidata CC0 with the OSM layer switchable off. For the text sources, after
+   plan 26 proves the pipeline.
+
+## Open questions for James
+
+1. Britannica: coordinate enrichment via Wikidata matching (pins), or
+   display-layer links only?
+2. Competitor check: Globe of History runs collector -> generator -> verifier
+   (a verifier checks generated summaries against source anchors). Should our
+   extract stage (plan 08) get a formal verify-against-source step, or is
+   plan 14's RAG-with-citations the grounding story?
+3. The red e2e-real suite (bug fix #1, since Oct 19): fix this week, or let it
+   ride while ingestion work proceeds?
