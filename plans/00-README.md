@@ -78,7 +78,7 @@ working agreement as `~/Code/StateAffairs/plans/00-README.md`.
     (James, 2026-10-21). Server-rendered day pages; per-date discovery via sitemap scan.
 20. [29-source-expansion-dedup.md](./29-source-expansion-dedup.md) - source expansion
     pass (2026-10-23): Muffinlabs Today-in-History API as source #3, OpenHistoricalMap
-    as boundary layer, GDELT 2.0 deferred; Splink named as the dedup-engine candidate
+    as boundary layer, GDELT 2.0 deferred; dedup via Jev pairwise judging (settled 2026-10-23)
     inside plan 13's design; WHG v4 as temporal-gazetteer tier alongside HistGeocoder.
 
 > **Groq cannot embed, and Bedrock is not in the default region.** Groq exposes no embedding
