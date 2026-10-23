@@ -11,10 +11,12 @@ item; note your branch in the item when you start so two agents don't collide.
   entered by hand or pasted through `/map/import`.
 - Plans 01-24 design the ingestion engine (detect -> fetch -> extract -> publish)
   that replaces manual entry - a port of the State Affairs video pipeline.
-- Latest on main (Oct 22): research-loop plans 25-27 added (Oct 20-21); plan 26
-  (Wikidata pilot) widened to GLOBAL scope and the 44 curated events demoted to a
-  transient spot-check set slated for deletion (Oct 21); PR #20 (search) and
-  PR #12 (event sequences) still open; zero open issues.
+- Latest on main (Oct 23): plan 29 added (source expansion pass: Muffinlabs
+  Today-in-History API as source #3, OpenHistoricalMap boundary layer, GDELT
+  deferred; Splink named as dedup-engine candidate inside plan 13's design;
+  WHG v4 as temporal-gazetteer tier alongside HistGeocoder); plan 28
+  (Britannica link-only adapter) and plan 26 (Wikidata pilot, GLOBAL) on deck;
+  PR #20 (search) and PR #12 (event sequences) still open; zero open issues.
 
 ## Bug fixes (triage first)
 
@@ -43,6 +45,15 @@ item; note your branch in the item when you start so two agents don't collide.
    ("did this place exist in 1906"), GNIS public-domain + GeoNames CC BY +
    Wikidata CC0 with the OSM layer switchable off. For the text sources, after
    plan 26 proves the pipeline.
+6. **Source #3 and the dedup story (plan 29).** Muffinlabs Today-in-History API
+   (keyless JSON, daily refresh, CC BY-SA via Wikipedia) is the named third
+   source - it forces the first real geoparsing test since it ships no
+   coordinates. Before its overlap analysis runs, adopt or borrow Splink
+   (open-source probabilistic record linkage) for blocking/scoring inside
+   plan 13's vector + judge fusion, or keep the bespoke build - open question
+   below. OpenHistoricalMap (CC0) lands as a boundary/historical-geography
+   layer, not an event adapter; GDELT 2.0 stays deferred (post-1979 news
+   coding, needs its own CAMEO mapping).
 
 ## Open questions for James
 
@@ -54,3 +65,9 @@ item; note your branch in the item when you start so two agents don't collide.
    plan 14's RAG-with-citations the grounding story?
 3. The red e2e-real suite (bug fix #1, since Oct 19): fix this week, or let it
    ride while ingestion work proceeds?
+4. Source #3: Muffinlabs daily feed (needs geoparsing) first, or hold out for a
+   second structured source that ships coordinates?
+5. Dedup: adopt Splink for blocking/scoring inside plan 13's design, or keep
+   the bespoke vector + LLM-judge build?
+6. GDELT as a modern-history freshness layer: worth the CAMEO mapping work,
+   or does the map stay pre-1979 deep history?
