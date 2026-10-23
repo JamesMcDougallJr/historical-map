@@ -5,8 +5,13 @@
 **Changelog:**
 - 2026-10-23 - Created from the standing directives (2026-10-20: more ingest
   sources, curl/web ingestor; 2026-10-21: Britannica link-only). Catalogs three
-  new concrete sources vetted 2026-10-23 and names Splink as the dedup-engine
-  candidate for the coming multi-source overlap problem.
+  new concrete sources vetted 2026-10-23.
+- 2026-10-23 - Dedup engine settled by James: **Jev** (TypeSafe AI decision
+  model) makes the pairwise same-event calls, per plan 11's
+  `JEV_PUBLISH_DEDUP_ENABLED` design and plan 13's judge stage, behind cheap
+  deterministic blocking. The probabilistic-linkage engine previously
+  considered for the scoring stage was removed at James's direction and is
+  not part of the design.
 
 ## Why this plan exists
 
@@ -54,22 +59,19 @@ Also noted but not recommended for now: API Ninjas Historical Events API
 commercial use) and the Edinburgh Geoparser pipeline docs (a reference
 architecture for the curl ingestor's geoparsing stage, not a tool to install).
 
-## Dedup engine: Splink
+## Dedup engine: Jev
 
 The overlap problem (Britannica vs Wikidata vs Muffinlabs describing the same
-event) is a probabilistic record-linkage problem, and plan 13's vector +
-LLM-judge design is the right shape but a bespoke build. **Splink**
-(github.com/moj-analytical-services/splink) is the candidate engine to adopt
-or borrow from: free, open-source Python probabilistic record linkage
-(Fellegi-Sunter EM), built by the UK Ministry of Justice, v5 handles 1B+
-records across multiple SQL backends, with cluster-visualization tools.
-Because the adapters land in Postgres, Splink's DuckDB/Postgres backends let
-linkage run against the ingestion tables without moving data. Fit to the
-existing design: use Splink for the deterministic blocking and
-candidate-pair scoring stage, keep plan 13's LLM judge as the arbiter on
-ambiguous pairs (the "Bosphore 1819" pattern from plan 26: uncertain readings
-flagged, not silently dropped). Splink does not replace plan 13 - it replaces
-the hand-rolled blocking/scoring inside it.
+event) is a pairwise same-event judgment problem. The engine is **Jev**
+(TypeSafe AI's decision model), as already designed in plan 11
+(`JEV_PUBLISH_DEDUP_ENABLED`) and plan 13's judge stage: deterministic
+blocking first (place within 5 km + date), then a per-pair Jev "same event?"
+call that returns a probability. High-confidence pairs merge, low-confidence
+pairs stay separate, and the ambiguous middle is held for review (the
+"Bosphore 1819" pattern from plan 26: uncertain readings flagged, not
+silently dropped). Jev is not deterministic, so every pair decision is
+cached and never re-asked. No separate probabilistic-linkage engine is used:
+blocking is hand-rolled SQL/vector work, and Jev makes the calls.
 
 ## Gazetteer note: World Historical Gazetteer
 
@@ -100,8 +102,9 @@ CC BY 4.0 for contributed datasets - attribute in the data layer.
    before that.
 2. Source #3: Muffinlabs adapter. Exercises geoparsing (no coordinates) -
    the first real test of the plan 09 geocoder tiers.
-3. Dedup work queue: adopt Splink for blocking/scoring inside plan 13's
-   design before sources 3+4 overlap analysis runs.
+3. Dedup work queue: wire Jev pairwise judging (plan 11's
+   `JEV_PUBLISH_DEDUP_ENABLED`, plan 13's judge stage) behind the
+   deterministic blocking rules before sources 3+4 overlap analysis runs.
 4. Source #4: pick between GDELT (modern freshness) and a second text source;
    Britannica coordinate enrichment (plan 28, option b) is the first consumer
    of the dedup story.
@@ -111,8 +114,10 @@ CC BY 4.0 for contributed datasets - attribute in the data layer.
 - Each new adapter: fixture-driven per 05 (recorded API responses under
   `__fixtures__/`; no network in CI), plus a manual `*:verify` network script.
 - Dedup: a fixture set of intentionally overlapping events across
-  Wikidata/Muffinlabs/Britannica-shaped records; assert Splink's linkage
-  merges true duplicates without merging same-place-different-event pairs.
+  Wikidata/Muffinlabs/Britannica-shaped records; assert the blocking + Jev
+  pipeline merges true duplicates without merging
+  same-place-different-event pairs, with cached pair decisions so reruns
+  are stable.
 - License guard tests: Muffinlabs records assert Wikipedia attribution is
   stored; Britannica guard test from plan 28 stays green.
 
@@ -120,8 +125,8 @@ CC BY 4.0 for contributed datasets - attribute in the data layer.
 
 - Muffinlabs adapter file + factory line exist; daily `/date` fetch runs
   through plan 27's fetcher with fixtures green.
-- Splink evaluated against the overlap fixture set; the plan 13 design notes
-  which blocking/scoring stage it owns.
+- Jev dedup evaluated against the overlap fixture set; the plan 13 design
+  notes the blocking rules and the merge/hold/reject confidence thresholds.
 - WHG evaluated as a geocoder-tier candidate alongside HistGeocoder; the
   decision recorded in plan 09's tier notes.
 - 00-README index and plan 25 backlog reference this plan.
@@ -130,7 +135,5 @@ CC BY 4.0 for contributed datasets - attribute in the data layer.
 
 - Source #3: Muffinlabs daily feed (needs geoparsing), or hold for a second
   structured source with coordinates?
-- Splink as the dedup engine inside plan 13's design - adopt, or keep the
-  bespoke vector + judge build?
 - GDELT as the modern-history freshness layer: worth the CAMEO mapping work,
   or does the map stay pre-1979 deep history?
