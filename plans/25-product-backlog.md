@@ -11,9 +11,11 @@ item; note your branch in the item when you start so two agents don't collide.
   entered by hand or pasted through `/map/import`.
 - Plans 01-24 design the ingestion engine (detect -> fetch -> extract -> publish)
   that replaces manual entry - a port of the State Affairs video pipeline.
-- Latest on main (Oct 25): plan 30 added (map UX at scale: OpenLayers
-  clustering, density-aware zoom/default view, timeline semantic zoom, viewport
-  + time-window fetching gated on e2e-real going green); plan 29 (source
+- Latest on main (Oct 25): plan 31 added (shareable map state: deep links for
+  viewport, timeline window, search, selected event) and plan 30 (map UX at
+  scale: OpenLayers clustering, density-aware zoom/default view, timeline
+  semantic zoom, viewport + time-window fetching gated on e2e-real going
+  green); plan 29 (source
   expansion pass, dedup settled as Jev pairwise judging 2026-10-23) and plan 28
   (Britannica link-only adapter) and plan 26 (Wikidata pilot, GLOBAL) on deck;
   PR #20 (search) and PR #12 (event sequences) still open; zero open issues.
@@ -57,6 +59,10 @@ item; note your branch in the item when you start so two agents don't collide.
    boundary/historical-geography
    layer, not an event adapter; GDELT 2.0 stays deferred (post-1979 news
    coding, needs its own CAMEO mapping).
+7. **Shareable map state (plan 31).** Deep links for viewport, timeline window,
+   search query, and selected event (popup). URL is the single restorable
+   state via replaceState + popstate; merged/deleted event ids degrade to the
+   described view instead of erroring. Open Graph event previews as a stretch.
 
 ## Open questions for James
 

@@ -84,6 +84,10 @@ working agreement as `~/Code/StateAffairs/plans/00-README.md`.
     (2026-10-24, drafted; pushed 2026-10-25): clustering, density-aware zoom and
     default view, timeline semantic zoom, viewport + time-window fetching gated on
     e2e-real going green. Display-side counterpart to the ingestion plans.
+22. [31-shareable-map-state.md](./31-shareable-map-state.md) - shareable map state
+    (2026-10-25): deep links for viewport, timeline window, search, and selected
+    event; URL as the single restorable state, with graceful degradation for
+    merged/deleted event ids.
 
 > **Groq cannot embed, and Bedrock is not in the default region.** Groq exposes no embedding
 > models at all, so 12 adds AWS Bedrock alongside it — and the account's configured region
