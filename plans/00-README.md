@@ -80,6 +80,10 @@ working agreement as `~/Code/StateAffairs/plans/00-README.md`.
     pass (2026-10-23): Muffinlabs Today-in-History API as source #3, OpenHistoricalMap
     as boundary layer, GDELT 2.0 deferred; dedup via Jev pairwise judging (settled 2026-10-23)
     inside plan 13's design; WHG v4 as temporal-gazetteer tier alongside HistGeocoder.
+21. [30-map-ux-at-scale.md](./30-map-ux-at-scale.md) - map UX at scale
+    (2026-10-24, drafted; pushed 2026-10-25): clustering, density-aware zoom and
+    default view, timeline semantic zoom, viewport + time-window fetching gated on
+    e2e-real going green. Display-side counterpart to the ingestion plans.
 
 > **Groq cannot embed, and Bedrock is not in the default region.** Groq exposes no embedding
 > models at all, so 12 adds AWS Bedrock alongside it — and the account's configured region

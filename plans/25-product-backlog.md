@@ -11,11 +11,10 @@ item; note your branch in the item when you start so two agents don't collide.
   entered by hand or pasted through `/map/import`.
 - Plans 01-24 design the ingestion engine (detect -> fetch -> extract -> publish)
   that replaces manual entry - a port of the State Affairs video pipeline.
-- Latest on main (Oct 23): plan 29 added (source expansion pass: Muffinlabs
-  Today-in-History API as source #3, OpenHistoricalMap boundary layer, GDELT
-  deferred; dedup engine settled 2026-10-23: Jev pairwise judging per
-  plans 11/13, no separate linkage engine; WHG v4 as temporal-gazetteer
-  tier alongside HistGeocoder); plan 28
+- Latest on main (Oct 25): plan 30 added (map UX at scale: OpenLayers
+  clustering, density-aware zoom/default view, timeline semantic zoom, viewport
+  + time-window fetching gated on e2e-real going green); plan 29 (source
+  expansion pass, dedup settled as Jev pairwise judging 2026-10-23) and plan 28
   (Britannica link-only adapter) and plan 26 (Wikidata pilot, GLOBAL) on deck;
   PR #20 (search) and PR #12 (event sequences) still open; zero open issues.
 
@@ -32,9 +31,11 @@ item; note your branch in the item when you start so two agents don't collide.
    named second source - it validates detect -> fetch -> extract -> validate ->
    publish end to end. The one-file-per-source `SourceAdapter` design should
    make this the proof point, not another infra plan.
-2. **Timeline UX.** The Oct 19 commit moved the timeline and the map now opens
-   on the whole world (Oct 14). With 44 events the map is navigable; at 4,400
-   it won't be - clustering or density-aware zoom is the next UX cliff.
+2. **Map UX at scale (plan 30).** The Oct 19 commit moved the timeline and the
+   map now opens on the whole world (Oct 14). With 44 events the map is
+   navigable; at 4,400 it won't be - plan 30 covers clustering, density-aware
+   zoom/default view, timeline semantic zoom, and viewport + time-window
+   fetching (gated on e2e-real going green).
 3. **Britannica "On This Day" link-only adapter (plan 28).** Editorial curation
    as a link layer: date + short factual identifier + link back, never the
    text. Pending James's call on coordinate enrichment via Wikidata matching.
