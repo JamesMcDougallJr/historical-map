@@ -11,13 +11,15 @@ item; note your branch in the item when you start so two agents don't collide.
   entered by hand or pasted through `/map/import`.
 - Plans 01-24 design the ingestion engine (detect -> fetch -> extract -> publish)
   that replaces manual entry - a port of the State Affairs video pipeline.
-- Latest on main (Oct 25): plan 31 added (shareable map state: deep links for
-  viewport, timeline window, search, selected event) and plan 30 (map UX at
-  scale: OpenLayers clustering, density-aware zoom/default view, timeline
-  semantic zoom, viewport + time-window fetching gated on e2e-real going
-  green); plan 29 (source
-  expansion pass, dedup settled as Jev pairwise judging 2026-10-23) and plan 28
-  (Britannica link-only adapter) and plan 26 (Wikidata pilot, GLOBAL) on deck;
+- Latest on main (Oct 26): plan 32 added (fuzzy dates: EDTF Level 1 date
+  model with strict bounds and display string; Wikidata precision/circa
+  mapping; fuzzy events as timeline spans) and plan 31 (shareable map state:
+  deep links for viewport, timeline window, search, selected event) and plan 30
+  (map UX at scale: OpenLayers clustering, density-aware zoom/default view,
+  timeline semantic zoom, viewport + time-window fetching gated on e2e-real
+  going green); plan 29 (source expansion pass, dedup settled as Jev pairwise
+  judging 2026-10-23) and plan 28 (Britannica link-only adapter) and plan 26
+  (Wikidata pilot, GLOBAL) on deck;
   PR #20 (search) and PR #12 (event sequences) still open; zero open issues.
 
 ## Bug fixes (triage first)
@@ -64,6 +66,14 @@ item; note your branch in the item when you start so two agents don't collide.
    state via replaceState + popstate; merged/deleted event ids degrade to the
    described view instead of erroring. Open Graph event previews as a stretch.
 
+8. **Fuzzy dates (plan 32).** No source ships clean day-precision dates, so
+   events get an EDTF Level 1 string plus strict start/end bounds plus a
+   display string ("circa 1850", "Spring 1850") instead of a coerced fake
+   day. Lands with the plan 26 pilot: its adapter implements the Wikidata
+   precision/circa/earliest/latest mapping table, dedup blocking switches
+   to interval overlap, and plan 30's timeline renders fuzzy events as
+   spans with distinct uncertain markers.
+
 ## Open questions for James
 
 1. Britannica: coordinate enrichment via Wikidata matching (pins), or
@@ -76,5 +86,11 @@ item; note your branch in the item when you start so two agents don't collide.
    ride while ingestion work proceeds?
 4. Source #3: Muffinlabs daily feed (needs geoparsing) first, or hold out for a
    second structured source that ships coordinates?
-6. GDELT as a modern-history freshness layer: worth the CAMEO mapping work,
+5. GDELT as a modern-history freshness layer: worth the CAMEO mapping work,
    or does the map stay pre-1979 deep history?
+6. Fuzzy dates: show uncertainty on the map pin itself (hollow/dashed), or
+   keep pins uniform and show it only in the popup?
+7. Timeline filtering: interval intersection (a circa-1850 event shows in an
+   1849-1851 window) or nominal-date only?
+8. BCE scope: is pre-1 CE in scope for v1, or does the pilot clamp to CE
+   dates and defer BCE handling?

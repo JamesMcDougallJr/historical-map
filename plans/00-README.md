@@ -89,6 +89,12 @@ working agreement as `~/Code/StateAffairs/plans/00-README.md`.
     event; URL as the single restorable state, with graceful degradation for
     merged/deleted event ids.
 
+23. [32-fuzzy-dates.md](./32-fuzzy-dates.md) - fuzzy dates (2026-10-26):
+    EDTF Level 1 date model for events - canonical EDTF string plus strict
+    start/end bounds plus a display string; Wikidata precision/circa/
+    earliest/latest mapping table; fuzzy events render as timeline spans
+    with distinct uncertain markers; dedup blocking uses interval overlap.
+
 > **Groq cannot embed, and Bedrock is not in the default region.** Groq exposes no embedding
 > models at all, so 12 adds AWS Bedrock alongside it — and the account's configured region
 > (`us-west-1`) carries only one embedding model against us-west-2's five. Both verified
