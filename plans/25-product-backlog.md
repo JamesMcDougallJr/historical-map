@@ -11,7 +11,9 @@ item; note your branch in the item when you start so two agents don't collide.
   entered by hand or pasted through `/map/import`.
 - Plans 01-24 design the ingestion engine (detect -> fetch -> extract -> publish)
   that replaces manual entry - a port of the State Affairs video pipeline.
-- Latest on main (Oct 26): plan 32 added (fuzzy dates: EDTF Level 1 date
+- Latest on main (Oct 28): plan 34 added (pipeline observability and publish review queue: Bull Board admin, DLQs with replay, durable review queue with fingerprint-verified approval, alerts, LLM cost ledger) and plan 33 registered (source licensing and attribution:
+  adapter license declarations, publish gate, merged-event attribution union,
+  popup Sources line and /sources page) and plan 32 (fuzzy dates: EDTF Level 1 date
   model with strict bounds and display string; Wikidata precision/circa
   mapping; fuzzy events as timeline spans) and plan 31 (shareable map state:
   deep links for viewport, timeline window, search, selected event) and plan 30
@@ -74,6 +76,25 @@ item; note your branch in the item when you start so two agents don't collide.
    to interval overlap, and plan 30's timeline renders fuzzy events as
    spans with distinct uncertain markers.
 
+9. **Source licensing and attribution (plan 33).** Every adapter declares
+   its license at the boundary (Wikidata CC0, GeoNames CC BY 4.0, OHM
+   CC0 with per-element exceptions, Muffinlabs CC BY-SA, Britannica
+   link-only with no grant); publish rejects undeclared licenses to the
+   review queue; merged events carry the union of attributions; popups
+   get a Sources line and the map gets a /sources page. Lands with the
+   plan 26 pilot.
+
+10. **Pipeline observability and publish review queue (plan 34).**
+    Bull Board admin on the ingest service (auth-gated, truncated
+    payloads), per-stage dead-letter queues with a replay script,
+    a durable Postgres review queue for everything publish refuses
+    to auto-approve (plan 33 license rejects, Jev uncertain band)
+    with flagged-field highlighting, source anchors, batch-by-reason
+    review, and fingerprint-verified approval; alert thresholds for
+    backlog, failures, stalls, silent sources, and review age; a
+    per-source LLM cost ledger. The review queue must exist before
+    the plan 26 pilot publishes anything.
+
 ## Open questions for James
 
 1. Britannica: coordinate enrichment via Wikidata matching (pins), or
@@ -94,3 +115,16 @@ item; note your branch in the item when you start so two agents don't collide.
    1849-1851 window) or nominal-date only?
 8. BCE scope: is pre-1 CE in scope for v1, or does the pilot clamp to CE
    dates and defer BCE handling?
+9. Attribution display: per-event Sources line in the popup plus a
+   /sources page, or is the popup line alone enough for v1?
+10. Share-alike text: if Muffinlabs/Wikipedia-derived descriptions are
+    adapted, show them verbatim with CC BY-SA credit, or stay facts-only
+    to keep share-alike out of event records?
+11. OHM per-element exceptions: exclude non-CC0 elements outright, or
+    carry their individual licenses through like any other source?
+
+12. Review queue: James-only for v1, or built for a second reviewer
+    from the start?
+13. LLM cost: should a daily budget cap hard-pause detect, or alert
+    only?
+14. Pipeline alerts: which channel should they go to?

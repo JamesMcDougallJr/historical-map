@@ -95,6 +95,20 @@ working agreement as `~/Code/StateAffairs/plans/00-README.md`.
     earliest/latest mapping table; fuzzy events render as timeline spans
     with distinct uncertain markers; dedup blocking uses interval overlap.
 
+24. [33-source-licensing-attribution.md](./33-source-licensing-attribution.md)
+    - source licensing and attribution (2026-10-27): every adapter declares
+    its license (SPDX) at the boundary; publish rejects undeclared licenses;
+    merged events carry the union of attributions; link-only records stay
+    link-only through fusion; popup Sources line plus a /sources page;
+    OHM is CC0 by default with per-element license exceptions, not ODbL.
+
+25. [34-pipeline-observability-review-queue.md](./34-pipeline-observability-review-queue.md)
+    - pipeline observability and publish review queue (2026-10-28):
+    Bull Board admin on the ingest service, per-stage dead-letter
+    queues with replay, a durable Postgres review queue with
+    approve-fingerprint verification and TTL escalation, alert
+    thresholds, and a per-source LLM cost ledger.
+
 > **Groq cannot embed, and Bedrock is not in the default region.** Groq exposes no embedding
 > models at all, so 12 adds AWS Bedrock alongside it — and the account's configured region
 > (`us-west-1`) carries only one embedding model against us-west-2's five. Both verified
