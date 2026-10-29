@@ -11,7 +11,15 @@ item; note your branch in the item when you start so two agents don't collide.
   entered by hand or pasted through `/map/import`.
 - Plans 01-24 design the ingestion engine (detect -> fetch -> extract -> publish)
   that replaces manual entry - a port of the State Affairs video pipeline.
-- Latest on main (Oct 28): plan 34 added (pipeline observability and publish review queue: Bull Board admin, DLQs with replay, durable review queue with fingerprint-verified approval, alerts, LLM cost ledger) and plan 33 registered (source licensing and attribution:
+- Latest on main (Oct 29): plan 35 added (repair the real-backend E2E
+  suite and make it a merge gate: triage the red-since-Oct-19 suite with a
+  PR #19 bisect before touching anything, fix the proven cause, give the
+  suite its own test database so local runs stop truncating the dev
+  database, split the CI job, quarantine flaky specs with a 14-day expiry,
+  required check only after a green streak) and plan 34 (pipeline
+  observability and publish review queue: Bull Board admin, DLQs with
+  replay, durable review queue with fingerprint-verified approval, alerts,
+  LLM cost ledger) and plan 33 (source licensing and attribution:
   adapter license declarations, publish gate, merged-event attribution union,
   popup Sources line and /sources page) and plan 32 (fuzzy dates: EDTF Level 1 date
   model with strict bounds and display string; Wikidata precision/circa
@@ -28,8 +36,10 @@ item; note your branch in the item when you start so two agents don't collide.
 
 1. **Real-backend E2E suite red on main.** Observed Oct 19: the mocked E2E suite
    passes, the `e2e-real` suite fails after PR #19 (the S3 production-document
-   change). Suspect the S3 change. Repro: run the `e2e-real` suite against main.
+   change). Suspect the S3 change - not yet proven; plan 35 step 0 bisects
+   it before any fix. Repro: run the `e2e-real` suite against main.
    Fix before it rots - a red real-backend suite masks every later regression.
+   Plan 35 owns the fix and the merge-gate flip.
 
 ## Product steps (ranked)
 
@@ -95,6 +105,17 @@ item; note your branch in the item when you start so two agents don't collide.
     per-source LLM cost ledger. The review queue must exist before
     the plan 26 pilot publishes anything.
 
+11. **Repair the real-backend E2E suite; make it a merge gate (plan 35).**
+    Triage first (read the latest e2e.yml run, bisect PR #19), fix the
+    proven cause in the smallest diff, give the suite an isolated test
+    database (Martin's DATABASE_URL is currently hardcoded to the dev
+    database, so the E2E_POSTGRES_URL override cannot deliver isolation
+    today), split the CI job so failures name their suite, upload
+    failure artifacts, quarantine intermittent specs with a 14-day
+    expiry (deterministic failures never quarantined), and flip the
+    real suite to a required check only after a green streak. Closes
+    bug fix #1 and open question 3, and unblocks plan 30's gate.
+
 ## Open questions for James
 
 1. Britannica: coordinate enrichment via Wikidata matching (pins), or
@@ -128,3 +149,11 @@ item; note your branch in the item when you start so two agents don't collide.
 13. LLM cost: should a daily budget cap hard-pause detect, or alert
     only?
 14. Pipeline alerts: which channel should they go to?
+15. E2E test database: isolated test stack locally (second PostGIS +
+    Martin on distinct ports) vs keeping the shared dev database with
+    the backup ritual?
+16. E2E quarantine: 14-day expiry, or a shorter fuse, and who owns
+    triaging a quarantined spec when it expires?
+17. Merge gate: required check immediately once green, or after a
+    five-run green streak - and should the mocked suite become
+    required at the same time?

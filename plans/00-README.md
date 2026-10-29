@@ -109,6 +109,16 @@ working agreement as `~/Code/StateAffairs/plans/00-README.md`.
     approve-fingerprint verification and TTL escalation, alert
     thresholds, and a per-source LLM cost ledger.
 
+26. [35-e2e-real-repair-merge-gate.md](./35-e2e-real-repair-merge-gate.md)
+    - repair the real-backend E2E suite and make it a merge gate
+    (2026-10-29): triage the red-since-Oct-19 suite before touching
+    anything (bisect PR #19's S3 change vs environment), fix the
+    proven cause, give the suite its own test database so local runs
+    stop truncating the dev database, split the CI job so failures
+    name their suite, quarantine flaky specs with a 14-day expiry,
+    and make the real suite a required check only after a green
+    streak. Unblocks plan 30's gate.
+
 > **Groq cannot embed, and Bedrock is not in the default region.** Groq exposes no embedding
 > models at all, so 12 adds AWS Bedrock alongside it — and the account's configured region
 > (`us-west-1`) carries only one embedding model against us-west-2's five. Both verified
