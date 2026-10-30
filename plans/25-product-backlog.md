@@ -11,7 +11,7 @@ item; note your branch in the item when you start so two agents don't collide.
   entered by hand or pasted through `/map/import`.
 - Plans 01-24 design the ingestion engine (detect -> fetch -> extract -> publish)
   that replaces manual entry - a port of the State Affairs video pipeline.
-- Latest on main (Oct 29): plan 35 added (repair the real-backend E2E
+- Latest on main (Oct 30): plan 36 added (geoparsing and place disambiguation for the publish stage: five-step resolution cascade, containment + temporal-validity scoring, confidence bands with abstain path, gold-set eval) and plan 35 added (repair the real-backend E2E
   suite and make it a merge gate: triage the red-since-Oct-19 suite with a
   PR #19 bisect before touching anything, fix the proven cause, give the
   suite its own test database so local runs stop truncating the dev
@@ -116,6 +116,18 @@ item; note your branch in the item when you start so two agents don't collide.
     real suite to a required check only after a green streak. Closes
     bug fix #1 and open question 3, and unblocks plan 30's gate.
 
+12. **Geoparsing and place disambiguation (plan 36).** Plan 09 says
+    "geocode, dedupe, write" but no plan owned how a free-text place
+    name becomes coordinates. Plan 36 fills it in: structured
+    pass-through, local gazetteer cache with variant/historical names
+    and valid_from/valid_to, WHG reconciliation (handling its 451-on-fetch
+    quirk), public Nominatim only at 1 req/s as a last resort, and an
+    LLM proposer that never supplies coordinates directly. Scoring ranks
+    containment and temporal validity ahead of prominence; uncertain
+    cases go to plan 34's review queue and hopeless cases publish no
+    pin at all. Lands with the plan 26 pilot; required before plan 29
+    source #3 (Muffinlabs ships no coordinates) publishes.
+
 ## Open questions for James
 
 1. Britannica: coordinate enrichment via Wikidata matching (pins), or
@@ -157,3 +169,10 @@ item; note your branch in the item when you start so two agents don't collide.
 17. Merge gate: required check immediately once green, or after a
     five-run green streak - and should the mocked suite become
     required at the same time?
+18. Geoparsing prominence: GeoNames population, Wikidata, or something
+    else as the tiebreak source when containment and temporal validity
+    leave two candidates equal?
+19. Geoparsing volume: at what miss rate does the public Nominatim
+    trickle valve give way to a self-hosted Photon or Pelias instance?
+20. Unresolved events: list-only entries with no pin, or held entirely
+    unpublished until resolution succeeds?

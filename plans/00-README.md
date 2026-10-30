@@ -119,6 +119,17 @@ working agreement as `~/Code/StateAffairs/plans/00-README.md`.
     and make the real suite a required check only after a green
     streak. Unblocks plan 30's gate.
 
+27. [36-geoparsing-place-disambiguation.md](./36-geoparsing-place-disambiguation.md)
+    - geoparsing and place disambiguation for the publish stage
+    (2026-10-30): a five-step resolution cascade (structured
+    pass-through, local gazetteer cache, WHG reconciliation, public
+    Nominatim as a 1 req/s last resort, LLM proposer never authority),
+    disambiguation scoring with containment and temporal validity
+    ahead of prominence, confidence bands with an abstain path into
+    plan 34's review queue, and a gold-set eval reporting accuracy
+    within 161 km plus abstention rate. Lands with the plan 26 pilot;
+    required before plan 29 source #3 publishes.
+
 > **Groq cannot embed, and Bedrock is not in the default region.** Groq exposes no embedding
 > models at all, so 12 adds AWS Bedrock alongside it — and the account's configured region
 > (`us-west-1`) carries only one embedding model against us-west-2's five. Both verified
