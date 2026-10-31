@@ -11,7 +11,7 @@ item; note your branch in the item when you start so two agents don't collide.
   entered by hand or pasted through `/map/import`.
 - Plans 01-24 design the ingestion engine (detect -> fetch -> extract -> publish)
   that replaces manual entry - a port of the State Affairs video pipeline.
-- Latest on main (Oct 30): plan 36 added (geoparsing and place disambiguation for the publish stage: five-step resolution cascade, containment + temporal-validity scoring, confidence bands with abstain path, gold-set eval) and plan 35 added (repair the real-backend E2E
+- Latest on main (Oct 31): plan 37 added (post-publish lifecycle: per-source change detection, scoped re-publish, SCD2-lite versions, tombstones, unmerge/split procedure, manual-override preservation) and plan 36 added (geoparsing and place disambiguation for the publish stage: five-step resolution cascade, containment + temporal-validity scoring, confidence bands with abstain path, gold-set eval) and plan 35 added (repair the real-backend E2E
   suite and make it a merge gate: triage the red-since-Oct-19 suite with a
   PR #19 bisect before touching anything, fix the proven cause, give the
   suite its own test database so local runs stop truncating the dev
@@ -128,6 +128,19 @@ item; note your branch in the item when you start so two agents don't collide.
     pin at all. Lands with the plan 26 pilot; required before plan 29
     source #3 (Muffinlabs ships no coordinates) publishes.
 
+13. **Post-publish lifecycle (plan 37).** No plan owned what happens
+    after publish, and sources are living documents. Plan 37 adds
+    per-source change detection (Wikidata lastrevid sweep, Muffinlabs
+    hash diff, Britannica existence check that stays link-only, book
+    file hashes), a 7-day settle rule with three deferrals before
+    review, scoped re-publish by change class, SCD2-lite version rows
+    and tombstones instead of hard deletes, an unmerge/split procedure
+    that never re-merges a recorded split pair automatically, and
+    manual-override preservation through the plan 34 review queue.
+    The curated-seed retirement runs through it as
+    tombstone-then-purge (or immediate purge, per James's call).
+    Lands with the plan 26 pilot.
+
 ## Open questions for James
 
 1. Britannica: coordinate enrichment via Wikidata matching (pins), or
@@ -176,3 +189,10 @@ item; note your branch in the item when you start so two agents don't collide.
     trickle valve give way to a self-hosted Photon or Pelias instance?
 20. Unresolved events: list-only entries with no pin, or held entirely
     unpublished until resolution succeeds?
+21. Lifecycle settle window: 7 days and three deferrals before review,
+    or publish corrections immediately and accept edit-war churn?
+22. Curated seed: 30-day tombstone window for link stability, or
+    purge immediately at retirement?
+23. Manual overrides: do reviewer-approved corrections ever expire
+    (for example, re-check after a year), or stand until a human
+    revisits them?

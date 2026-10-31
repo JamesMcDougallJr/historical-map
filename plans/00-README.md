@@ -130,6 +130,17 @@ working agreement as `~/Code/StateAffairs/plans/00-README.md`.
     within 161 km plus abstention rate. Lands with the plan 26 pilot;
     required before plan 29 source #3 publishes.
 
+28. [37-post-publish-lifecycle.md](./37-post-publish-lifecycle.md)
+    - post-publish lifecycle (2026-10-31): change detection per
+    source (Wikidata lastrevid sweep, Muffinlabs hash diff, link-only
+    Britannica existence check, book file hashes), change classes
+    with scoped re-publish, SCD2-lite version rows plus tombstones
+    instead of hard deletes, an unmerge/split procedure with a
+    no-automatic-remerge guard, manual-override preservation, and
+    the curated-seed retirement run as tombstone-then-purge. Lands
+    with the plan 26 pilot; no published event is ever final until
+    this exists.
+
 > **Groq cannot embed, and Bedrock is not in the default region.** Groq exposes no embedding
 > models at all, so 12 adds AWS Bedrock alongside it — and the account's configured region
 > (`us-west-1`) carries only one embedding model against us-west-2's five. Both verified
