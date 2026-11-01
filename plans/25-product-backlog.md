@@ -11,7 +11,7 @@ item; note your branch in the item when you start so two agents don't collide.
   entered by hand or pasted through `/map/import`.
 - Plans 01-24 design the ingestion engine (detect -> fetch -> extract -> publish)
   that replaces manual entry - a port of the State Affairs video pipeline.
-- Latest on main (Oct 31): plan 37 added (post-publish lifecycle: per-source change detection, scoped re-publish, SCD2-lite versions, tombstones, unmerge/split procedure, manual-override preservation) and plan 36 added (geoparsing and place disambiguation for the publish stage: five-step resolution cascade, containment + temporal-validity scoring, confidence bands with abstain path, gold-set eval) and plan 35 added (repair the real-backend E2E
+- Latest on main (Nov 1): plan 38 added (event detail pages and search indexing: one server-rendered page per published event at /events/<slug>, stable slugs with slug history, JSON-LD without rich-result chasing, sitemap and robots from the database, merged 301 / split disambiguation / tombstoned 410 / unknown 404, curated-seed pages noindex until retirement) and plan 37 added (post-publish lifecycle: per-source change detection, scoped re-publish, SCD2-lite versions, tombstones, unmerge/split procedure, manual-override preservation) and plan 36 added (geoparsing and place disambiguation for the publish stage: five-step resolution cascade, containment + temporal-validity scoring, confidence bands with abstain path, gold-set eval) and plan 35 added (repair the real-backend E2E
   suite and make it a merge gate: triage the red-since-Oct-19 suite with a
   PR #19 bisect before touching anything, fix the proven cause, give the
   suite its own test database so local runs stop truncating the dev
@@ -141,6 +141,21 @@ item; note your branch in the item when you start so two agents don't collide.
     tombstone-then-purge (or immediate purge, per James's call).
     Lands with the plan 26 pilot.
 
+14. **Event detail pages and search indexing (plan 38).** Plan 31
+    gives the map shareable URLs but no page behind them, and a
+    client-rendered map's popup text is invisible to search engines
+    and AI crawlers. Plan 38 adds one server-rendered page per
+    published event at /events/<slug> (stable slugs, slug history,
+    one-hop redirects), rendered from the same Postgres the map
+    reads, with per-page metadata, schema.org/Event JSON-LD that
+    never claims more precision than the visible plan 32 date
+    display, a sitemap listing only canonical published URLs with
+    real lastModified values, and lifecycle states as HTTP statuses
+    (merged 301, split disambiguation page, tombstoned 410, unknown
+    404). Curated-seed pages stay noindex until retirement so no
+    search equity builds on pages slated for purge. Lands with the
+    plan 26 pilot, after plans 31 and 37; not a pilot blocker.
+
 ## Open questions for James
 
 1. Britannica: coordinate enrichment via Wikidata matching (pins), or
@@ -196,3 +211,10 @@ item; note your branch in the item when you start so two agents don't collide.
 23. Manual overrides: do reviewer-approved corrections ever expire
     (for example, re-check after a year), or stand until a human
     revisits them?
+24. Detail-page slugs: date-prefixed (1847-07-24-pioneers-enter-...)
+    for uniqueness, or title-only with numeric suffixes on clash?
+25. Per-event OG images (map crop centred on the pin): worth a render
+    pipeline for link unfurls, or is the static site-wide OG image
+    enough for v1?
+26. Split slugs: 200 disambiguation page listing all successors, or
+    301 to the first successor with a notice?

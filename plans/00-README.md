@@ -141,6 +141,19 @@ working agreement as `~/Code/StateAffairs/plans/00-README.md`.
     with the plan 26 pilot; no published event is ever final until
     this exists.
 
+29. [38-event-detail-pages-seo.md](./38-event-detail-pages-seo.md)
+    - event detail pages and search indexing (2026-11-01): one
+    server-rendered page per published event at /events/<slug>
+    with stable slugs and slug history, generateMetadata plus
+    schema.org/Event JSON-LD (no rich-result chasing: historical
+    events are not bookable future events), a sitemap from the
+    database with real lastModified values, robots rules, and
+    lifecycle states as honest HTTP statuses (merged 301 in one
+    hop, split 200 disambiguation page, tombstoned 410, unknown
+    404, never a home-page redirect or a soft 404). Curated-seed
+    pages stay noindex until retirement. Lands with the plan 26
+    pilot, after plans 31 and 37.
+
 > **Groq cannot embed, and Bedrock is not in the default region.** Groq exposes no embedding
 > models at all, so 12 adds AWS Bedrock alongside it — and the account's configured region
 > (`us-west-1`) carries only one embedding model against us-west-2's five. Both verified
