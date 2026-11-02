@@ -11,7 +11,7 @@ item; note your branch in the item when you start so two agents don't collide.
   entered by hand or pasted through `/map/import`.
 - Plans 01-24 design the ingestion engine (detect -> fetch -> extract -> publish)
   that replaces manual entry - a port of the State Affairs video pipeline.
-- Latest on main (Nov 1): plan 38 added (event detail pages and search indexing: one server-rendered page per published event at /events/<slug>, stable slugs with slug history, JSON-LD without rich-result chasing, sitemap and robots from the database, merged 301 / split disambiguation / tombstoned 410 / unknown 404, curated-seed pages noindex until retirement) and plan 37 added (post-publish lifecycle: per-source change detection, scoped re-publish, SCD2-lite versions, tombstones, unmerge/split procedure, manual-override preservation) and plan 36 added (geoparsing and place disambiguation for the publish stage: five-step resolution cascade, containment + temporal-validity scoring, confidence bands with abstain path, gold-set eval) and plan 35 added (repair the real-backend E2E
+- Latest on main (Nov 2): plan 39 added (reader corrections: a public report-an-error form on the detail page, routed into the plan 34 review queue as one item per distinct correction, never auto-published, approved corrections applied through plan 37 with a manual-override flag, submitter prose never published) and plan 38 added (event detail pages and search indexing: one server-rendered page per published event at /events/<slug>, stable slugs with slug history, JSON-LD without rich-result chasing, sitemap and robots from the database, merged 301 / split disambiguation / tombstoned 410 / unknown 404, curated-seed pages noindex until retirement) and plan 37 added (post-publish lifecycle: per-source change detection, scoped re-publish, SCD2-lite versions, tombstones, unmerge/split procedure, manual-override preservation) and plan 36 added (geoparsing and place disambiguation for the publish stage: five-step resolution cascade, containment + temporal-validity scoring, confidence bands with abstain path, gold-set eval) and plan 35 added (repair the real-backend E2E
   suite and make it a merge gate: triage the red-since-Oct-19 suite with a
   PR #19 bisect before touching anything, fix the proven cause, give the
   suite its own test database so local runs stop truncating the dev
@@ -156,6 +156,22 @@ item; note your branch in the item when you start so two agents don't collide.
     search equity builds on pages slated for purge. Lands with the
     plan 26 pilot, after plans 31 and 37; not a pilot blocker.
 
+15. **Reader corrections (plan 39).** Plan 37 deferred a public
+    report-an-error flow; plan 39 is that decision. A form on
+    the plan 38 detail page (wrong date, wrong place/pin, wrong
+    title/description, duplicate, missing event, inappropriate
+    content, other), anonymous in v1, evidence as links only
+    (never pasted source text), routed into plan 34's
+    /admin/review queue as one ingest_review_items row per
+    distinct correction with reason READER_CORRECTION.
+    Reports never change a published event, never create a
+    public URL, and never enter the sitemap; approved
+    corrections apply through plan 37 (version row,
+    manual-override flag, scoped plan 32 date or plan 36 place
+    re-mapping), and submitter prose is never published as
+    event text. Abuse controls: honeypot, hashed-IP rate
+    limits, shape limits, no CAPTCHA in v1.
+
 ## Open questions for James
 
 1. Britannica: coordinate enrichment via Wikidata matching (pins), or
@@ -218,3 +234,10 @@ item; note your branch in the item when you start so two agents don't collide.
     enough for v1?
 26. Split slugs: 200 disambiguation page listing all successors, or
     301 to the first successor with a notice?
+27. Reader corrections: anonymous reports (OpenStreetMap Notes
+    style) for v1, or require sign-in from the start?
+28. Reader reports: one-shot with a single follow-up email at
+    most, or a two-way thread and decision emails when a
+    contact address is given?
+29. Missing-event suggestions in v1 scope, or corrections-only,
+    with suggestions deferred?

@@ -154,6 +154,18 @@ working agreement as `~/Code/StateAffairs/plans/00-README.md`.
     pages stay noindex until retirement. Lands with the plan 26
     pilot, after plans 31 and 37.
 
+30. [39-reader-corrections.md](./39-reader-corrections.md)
+    - reader corrections (2026-11-02): the public "report an
+    error" flow plan 37 deferred. A form on the plan 38 detail
+    page, anonymous in v1, routed into plan 34's review queue
+    as one item per distinct correction (reason
+    READER_CORRECTION), never auto-published and never a public
+    URL. Approved corrections apply through plan 37 (version
+    row, manual-override flag, scoped plan 32 / plan 36
+    re-mapping); submitter prose is never published; abuse
+    controls are honeypot, hashed-IP rate limits, and shape
+    limits, with no CAPTCHA in v1.
+
 > **Groq cannot embed, and Bedrock is not in the default region.** Groq exposes no embedding
 > models at all, so 12 adds AWS Bedrock alongside it — and the account's configured region
 > (`us-west-1`) carries only one embedding model against us-west-2's five. Both verified
