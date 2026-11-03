@@ -165,6 +165,18 @@ working agreement as `~/Code/StateAffairs/plans/00-README.md`.
     re-mapping); submitter prose is never published; abuse
     controls are honeypot, hashed-IP rate limits, and shape
     limits, with no CAPTCHA in v1.
+31. [40-accessible-map-experience.md](./40-accessible-map-experience.md)
+    - accessible map experience (2026-11-03): keyboard, screen
+    reader, and non-color cues for the OpenLayers map. A focusable,
+    escapable map container (tabindex 0, arrow-key pan, +/- zoom,
+    Escape returns focus, skip-map link), a semantic event list as
+    the map's text equivalent reusing plan 30's viewport +
+    time-window query (clusters expand to individual entries, list
+    and pins kept in sync, one debounced aria-live summary per
+    settled view), meaning carried by shape and text never color
+    alone (settling plan 32 open question 6 on the shape side),
+    and prefers-reduced-motion handling. Sequenced after plans 30
+    and 38; not a pilot blocker.
 
 > **Groq cannot embed, and Bedrock is not in the default region.** Groq exposes no embedding
 > models at all, so 12 adds AWS Bedrock alongside it — and the account's configured region

@@ -11,7 +11,7 @@ item; note your branch in the item when you start so two agents don't collide.
   entered by hand or pasted through `/map/import`.
 - Plans 01-24 design the ingestion engine (detect -> fetch -> extract -> publish)
   that replaces manual entry - a port of the State Affairs video pipeline.
-- Latest on main (Nov 2): plan 39 added (reader corrections: a public report-an-error form on the detail page, routed into the plan 34 review queue as one item per distinct correction, never auto-published, approved corrections applied through plan 37 with a manual-override flag, submitter prose never published) and plan 38 added (event detail pages and search indexing: one server-rendered page per published event at /events/<slug>, stable slugs with slug history, JSON-LD without rich-result chasing, sitemap and robots from the database, merged 301 / split disambiguation / tombstoned 410 / unknown 404, curated-seed pages noindex until retirement) and plan 37 added (post-publish lifecycle: per-source change detection, scoped re-publish, SCD2-lite versions, tombstones, unmerge/split procedure, manual-override preservation) and plan 36 added (geoparsing and place disambiguation for the publish stage: five-step resolution cascade, containment + temporal-validity scoring, confidence bands with abstain path, gold-set eval) and plan 35 added (repair the real-backend E2E
+- Latest on main (Nov 3): plan 40 added (accessible map experience: a keyboard-operable, escapable OpenLayers map plus a semantic event list as its text equivalent, meaning carried by shape and text never color alone, reduced-motion handling, sequenced after plans 30 and 38 and not a pilot blocker) and plan 39 added (reader corrections: a public report-an-error form on the detail page, routed into the plan 34 review queue as one item per distinct correction, never auto-published, approved corrections applied through plan 37 with a manual-override flag, submitter prose never published) and plan 38 added (event detail pages and search indexing: one server-rendered page per published event at /events/<slug>, stable slugs with slug history, JSON-LD without rich-result chasing, sitemap and robots from the database, merged 301 / split disambiguation / tombstoned 410 / unknown 404, curated-seed pages noindex until retirement) and plan 37 added (post-publish lifecycle: per-source change detection, scoped re-publish, SCD2-lite versions, tombstones, unmerge/split procedure, manual-override preservation) and plan 36 added (geoparsing and place disambiguation for the publish stage: five-step resolution cascade, containment + temporal-validity scoring, confidence bands with abstain path, gold-set eval) and plan 35 added (repair the real-backend E2E
   suite and make it a merge gate: triage the red-since-Oct-19 suite with a
   PR #19 bisect before touching anything, fix the proven cause, give the
   suite its own test database so local runs stop truncating the dev
@@ -172,6 +172,21 @@ item; note your branch in the item when you start so two agents don't collide.
     event text. Abuse controls: honeypot, hashed-IP rate
     limits, shape limits, no CAPTCHA in v1.
 
+16. **Accessible map experience (plan 40).** No plan owned using
+    the map itself by keyboard or screen reader: plan 30 owns map
+    behaviour at scale, plan 38 owns the detail page, plan 39 owns
+    reporting an error from it. Plan 40 adds a focusable,
+    escapable map container (tabindex 0, arrow-key pan, +/-
+    zoom, Escape returns focus, skip-map link), a semantic event
+    list as the map's text equivalent reusing plan 30's viewport
+    + time-window query (clusters expand to individual entries,
+    list and pins in sync, one debounced aria-live summary per
+    settled view change), meaning by shape and text never color
+    alone (settling plan 32 open question 6 on the shape side),
+    and prefers-reduced-motion handling. Sequenced after plans
+    30 and 38; not a plan 26 pilot blocker; before any public
+    launch or SEO push plan 38 enables.
+
 ## Open questions for James
 
 1. Britannica: coordinate enrichment via Wikidata matching (pins), or
@@ -241,3 +256,11 @@ item; note your branch in the item when you start so two agents don't collide.
     contact address is given?
 29. Missing-event suggestions in v1 scope, or corrections-only,
     with suggestions deferred?
+30. Accessibility target: WCAG AA assumed in plan 40, or AAA for
+    any criterion (e.g. enhanced contrast for map labels)?
+31. Accessible list placement: below the map on all widths, or a
+    side panel on wide screens (simultaneous visibility vs simpler
+    focus order)?
+32. Live-region verbosity: one summary per settled view change
+    enough, or also announce the newly focused event's title when
+    selection changes via the list?
