@@ -187,6 +187,19 @@ item; note your branch in the item when you start so two agents don't collide.
     30 and 38; not a plan 26 pilot blocker; before any public
     launch or SEO push plan 38 enables.
 
+17. **Sequence journeys (plan 41).** No plan owned following a
+    sequence: PR #12 builds event groups and the popup only names
+    them ("Part of: <sequence>"). Plan 41 turns a group into a
+    guided tour on the same map - steps in chronological order
+    (plan 32 start bound, PR #12 member order on ties), numbered
+    pins, a dashed order line labelled as order not a travelled
+    route, plan 31 share links (`sequence` + `step` params),
+    unlocated steps kept in the list and merged/tombstoned steps
+    degraded per plan 37, and plan 40's semantic list as the
+    journey player. No new tables, no authoring UI, no routing
+    engine. Hard prerequisite: PR #12 merges first; sequenced
+    after plan 38; not a plan 26 pilot blocker.
+
 ## Open questions for James
 
 1. Britannica: coordinate enrichment via Wikidata matching (pins), or
@@ -264,3 +277,11 @@ item; note your branch in the item when you start so two agents don't collide.
 32. Live-region verbosity: one summary per settled view change
     enough, or also announce the newly focused event's title when
     selection changes via the list?
+33. Sequence journeys: popup and detail-page links only in v1, or a
+    browse-all-sequences index page too?
+34. Journey route line: dashed order line labelled "not a travelled
+    route", or no line at all (numbered pins only) to avoid
+    implying a path?
+35. Long groups: cap journeys at 30 steps like ArcGIS StoryMaps'
+    Guided Tour, stay near 20 per StoryMapJS guidance, or support
+    any length with a scrolling step list?

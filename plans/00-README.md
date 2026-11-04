@@ -177,6 +177,16 @@ working agreement as `~/Code/StateAffairs/plans/00-README.md`.
     alone (settling plan 32 open question 6 on the shape side),
     and prefers-reduced-motion handling. Sequenced after plans 30
     and 38; not a pilot blocker.
+32. [41-sequence-journeys.md](./41-sequence-journeys.md) - sequence
+    journeys (2026-11-04): guided tours through PR #12's event
+    groups - one step at a time, in chronological order, on the
+    same map, as `/map?sequence=<id>&step=<n>` state (plan 31).
+    Numbered pins, a dashed order line labelled as order not a
+    travelled route (StoryMapJS pattern), unlocated and
+    merged/tombstoned steps degrade without breaking the tour,
+    and plan 40's semantic list is the journey player. No new
+    tables, no authoring UI, no routing engine. After PR #12
+    merges and plan 38's detail pages; not a pilot blocker.
 
 > **Groq cannot embed, and Bedrock is not in the default region.** Groq exposes no embedding
 > models at all, so 12 adds AWS Bedrock alongside it — and the account's configured region
