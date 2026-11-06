@@ -1,21 +1,35 @@
 # Product backlog - next steps and bug fixes
 
-
 Standing backlog of candidate product steps and bug fixes for historical-map,
 maintained by the daily research loop. Coding agents: pick the top unclaimed
 item; note your branch in the item when you start so two agents don't collide.
-
 
 ## What's there today
 
 - The map at `/map` serves **44 hand-curated events across 34 locations from one
   source** (`utah-historical`, seeded from `data/map-data.json`). Everything was
   entered by hand or pasted through `/map/import`.
-
 - Plans 01-24 design the ingestion engine (detect -> fetch -> extract -> publish)
   that replaces manual entry - a port of the State Affairs video pipeline.
-
-- Latest on main (Nov 5): plan 42 added (mobile map experience: touch-first map with a non-modal bottom sheet replacing the popup on small screens, OpenLayers gesture defaults configured, 44pt touch targets, compact timeline, sequenced after plans 30, 31, 38, 40 and 41 and before any public launch) and plan 41 added (sequence journeys: guided tours through PR #12's event groups as /map?sequence=<id>&step=<n> state, numbered pins, dashed order line labelled as order not a travelled route, plan 40's semantic list as the journey player) and plan 40 added (accessible map experience: a keyboard-operable, escapable OpenLayers map plus a semantic event list as its text equivalent, meaning carried by shape and text never color alone, reduced-motion handling, sequenced after plans 30 and 38 and not a pilot blocker) and plan 39 added (reader corrections: a public report-an-error form on the detail page, routed into the plan 34 review queue as one item per distinct correction, never auto-published, approved corrections applied through plan 37 with a manual-override flag, submitter prose never published) and plan 38 added (event detail pages and search indexing: one server-rendered page per published event at /events/<slug>, stable slugs with slug history, JSON-LD without rich-result chasing, sitemap and robots from the database, merged 301 / split disambiguation / tombstoned 410 / unknown 404, curated-seed pages noindex until retirement) and plan 37 added (post-publish lifecycle: per-source change detection, scoped re-publish, SCD2-lite versions, tombstones, unmerge/split procedure, manual-override preservation) and plan 36 added (geoparsing and place disambiguation for the publish stage: five-step resolution cascade, containment + temporal-validity scoring, confidence bands with abstain path, gold-set eval) and plan 35 added (repair the real-backend E2E suite and make it a merge gate: triage the red-since-Oct-19 suite with a PR #19 bisect before touching anything, fix the proven cause, give the suite its own test database so local runs stop truncating the dev database, split the CI job, quarantine flaky specs with a 14-day expiry, required check only after a green streak) and plan 34 (pipeline observability and publish review queue: Bull Board admin, DLQs with replay, durable review queue with fingerprint-verified approval, alerts, LLM cost ledger) and plan 33 (source licensing and attribution: adapter license declarations, publish gate, merged-event attribution union, popup Sources line and /sources page) and plan 32 (fuzzy dates: EDTF Level 1 date model with strict bounds and display string; Wikidata precision/circa mapping; fuzzy events as timeline spans) and plan 31 (shareable map state: deep links for viewport, timeline window, search, selected event) and plan 30 (map UX at scale: OpenLayers clustering, density-aware zoom/default view, timeline semantic zoom, viewport + time-window fetching gated on e2e-real going green); plan 29 (source expansion pass, dedup settled as Jev pairwise judging 2026-10-23) and plan 28 (Britannica link-only adapter) and plan 26 (Wikidata pilot, GLOBAL) on deck;
+- Latest on main (Nov 6): plan 43 added (public read surface: rate limiting, caching, and abuse protection before launch - per-endpoint limits, CDN caching with purge on publish, per-query semantic-search result caching, and a transaction-mode pooler in front of RDS; sequenced before any public launch, not a plan 26 pilot blocker) and plan 42 added (mobile map experience: touch-first map with a non-modal bottom sheet replacing the popup on small screens, OpenLayers gesture defaults configured, 44pt touch targets, compact timeline, sequenced after plans 30, 31, 38, 40 and 41 and before any public launch) and plan 41 added (sequence journeys: guided tours through PR #12's event groups as /map?sequence=<id>&step=<n> state, numbered pins, dashed order line labelled as order not a travelled route, plan 40's semantic list as the journey player) and plan 40 added (accessible map experience: a keyboard-operable, escapable OpenLayers map plus a semantic event list as its text equivalent, meaning carried by shape and text never color alone, reduced-motion handling, sequenced after plans 30 and 38 and not a pilot blocker) and plan 39 added (reader corrections: a public report-an-error form on the detail page, routed into the plan 34 review queue as one item per distinct correction, never auto-published, approved corrections applied through plan 37 with a manual-override flag, submitter prose never published) and plan 38 added (event detail pages and search indexing: one server-rendered page per published event at /events/<slug>, stable slugs with slug history, JSON-LD without rich-result chasing, sitemap and robots from the database, merged 301 / split disambiguation / tombstoned 410 / unknown 404, curated-seed pages noindex until retirement) and plan 37 added (post-publish lifecycle: per-source change detection, scoped re-publish, SCD2-lite versions, tombstones, unmerge/split procedure, manual-override preservation) and plan 36 added (geoparsing and place disambiguation for the publish stage: five-step resolution cascade, containment + temporal-validity scoring, confidence bands with abstain path, gold-set eval) and plan 35 added (repair the real-backend E2E
+  suite and make it a merge gate: triage the red-since-Oct-19 suite with a
+  PR #19 bisect before touching anything, fix the proven cause, give the
+  suite its own test database so local runs stop truncating the dev
+  database, split the CI job, quarantine flaky specs with a 14-day expiry,
+  required check only after a green streak) and plan 34 (pipeline
+  observability and publish review queue: Bull Board admin, DLQs with
+  replay, durable review queue with fingerprint-verified approval, alerts,
+  LLM cost ledger) and plan 33 (source licensing and attribution:
+  adapter license declarations, publish gate, merged-event attribution union,
+  popup Sources line and /sources page) and plan 32 (fuzzy dates: EDTF Level 1 date
+  model with strict bounds and display string; Wikidata precision/circa
+  mapping; fuzzy events as timeline spans) and plan 31 (shareable map state:
+  deep links for viewport, timeline window, search, selected event) and plan 30
+  (map UX at scale: OpenLayers clustering, density-aware zoom/default view,
+  timeline semantic zoom, viewport + time-window fetching gated on e2e-real
+  going green); plan 29 (source expansion pass, dedup settled as Jev pairwise
+  judging 2026-10-23) and plan 28 (Britannica link-only adapter) and plan 26
+  (Wikidata pilot, GLOBAL) on deck;
   PR #20 (search) and PR #12 (event sequences) still open; zero open issues.
 
 ## Bug fixes (triage first)
@@ -33,27 +47,22 @@ item; note your branch in the item when you start so two agents don't collide.
    named second source - it validates detect -> fetch -> extract -> validate ->
    publish end to end. The one-file-per-source `SourceAdapter` design should
    make this the proof point, not another infra plan.
-
 2. **Map UX at scale (plan 30).** The Oct 19 commit moved the timeline and the
    map now opens on the whole world (Oct 14). With 44 events the map is
    navigable; at 4,400 it won't be - plan 30 covers clustering, density-aware
    zoom/default view, timeline semantic zoom, and viewport + time-window
    fetching (gated on e2e-real going green).
-
 3. **Britannica "On This Day" link-only adapter (plan 28).** Editorial curation
    as a link layer: date + short factual identifier + link back, never the
    text. Pending James's call on coordinate enrichment via Wikidata matching.
-
 4. **Retire the curated seed.** Once plan 26's spot-check passes, the 44 curated
    rows leave `data/map-data.json` (keep a snapshot as a test fixture only).
    Standing directive from James (2026-10-20) - do not re-propose keeping them.
-
 5. **Geocoder: evaluate HistGeocoder as a temporal tier.** Confirmed live
    2026-10-22 at histgeocoder.app: Postgres-native, `valid_from`/`valid_to`
    ("did this place exist in 1906"), GNIS public-domain + GeoNames CC BY +
    Wikidata CC0 with the OSM layer switchable off. For the text sources, after
    plan 26 proves the pipeline.
-
 6. **Source #3 and the dedup story (plan 29).** Muffinlabs Today-in-History API
    (keyless JSON, daily refresh, CC BY-SA via Wikipedia) is the named third
    source - it forces the first real geoparsing test since it ships no
@@ -64,7 +73,6 @@ item; note your branch in the item when you start so two agents don't collide.
    boundary/historical-geography
    layer, not an event adapter; GDELT 2.0 stays deferred (post-1979 news
    coding, needs its own CAMEO mapping).
-
 7. **Shareable map state (plan 31).** Deep links for viewport, timeline window,
    search query, and selected event (popup). URL is the single restorable
    state via replaceState + popstate; merged/deleted event ids degrade to the
@@ -204,130 +212,118 @@ item; note your branch in the item when you start so two agents don't collide.
     and 41; before any public launch or SEO push; not a plan 26 pilot
     blocker.
 
+19. **Public read surface protection (plan 43).** No plan owned what
+    happens when the public actually arrives: no rate limit on any
+    read endpoint, no cached response, nothing between a traffic
+    spike and production RDS. Plan 43 adds per-endpoint limits
+    (Upstash sliding window in code, Vercel WAF rules where the plan
+    tier allows), CDN caching with s-maxage and
+    stale-while-revalidate plus purge on publish, per-query result
+    caching for semantic search (the Bedrock-embedding endpoint),
+    and a transaction-mode pooler (RDS Proxy first choice) in front
+    of RDS so a crawl spike cannot exhaust connections. AI training
+    crawlers are challenged or blocked via the WAF AI Bots ruleset
+    while search crawlers keep access for plan 38's SEO. Sequenced
+    before any public launch or SEO push, alongside plans 40 and 42;
+    not a plan 26 pilot blocker (the publish purge hook lands with
+    the pilot).
+
 ## Open questions for James
 
 1. Britannica: coordinate enrichment via Wikidata matching (pins), or
    display-layer links only?
-
 2. Competitor check: Globe of History runs collector -> generator -> verifier
    (a verifier checks generated summaries against source anchors). Should our
    extract stage (plan 08) get a formal verify-against-source step, or is
    plan 14's RAG-with-citations the grounding story?
-
 3. The red e2e-real suite (bug fix #1, since Oct 19): fix this week, or let it
    ride while ingestion work proceeds?
-
 4. Source #3: Muffinlabs daily feed (needs geoparsing) first, or hold out for a
    second structured source that ships coordinates?
-
 5. GDELT as a modern-history freshness layer: worth the CAMEO mapping work,
    or does the map stay pre-1979 deep history?
-
 6. Fuzzy dates: show uncertainty on the map pin itself (hollow/dashed), or
    keep pins uniform and show it only in the popup?
-
 7. Timeline filtering: interval intersection (a circa-1850 event shows in an
    1849-1851 window) or nominal-date only?
-
 8. BCE scope: is pre-1 CE in scope for v1, or does the pilot clamp to CE
    dates and defer BCE handling?
-
 9. Attribution display: per-event Sources line in the popup plus a
    /sources page, or is the popup line alone enough for v1?
-
 10. Share-alike text: if Muffinlabs/Wikipedia-derived descriptions are
     adapted, show them verbatim with CC BY-SA credit, or stay facts-only
     to keep share-alike out of event records?
-
 11. OHM per-element exceptions: exclude non-CC0 elements outright, or
     carry their individual licenses through like any other source?
 
 12. Review queue: James-only for v1, or built for a second reviewer
     from the start?
-
 13. LLM cost: should a daily budget cap hard-pause detect, or alert
     only?
-
 14. Pipeline alerts: which channel should they go to?
-
 15. E2E test database: isolated test stack locally (second PostGIS +
     Martin on distinct ports) vs keeping the shared dev database with
     the backup ritual?
-
 16. E2E quarantine: 14-day expiry, or a shorter fuse, and who owns
     triaging a quarantined spec when it expires?
-
 17. Merge gate: required check immediately once green, or after a
     five-run green streak - and should the mocked suite become
     required at the same time?
-
 18. Geoparsing prominence: GeoNames population, Wikidata, or something
     else as the tiebreak source when containment and temporal validity
     leave two candidates equal?
-
 19. Geoparsing volume: at what miss rate does the public Nominatim
     trickle valve give way to a self-hosted Photon or Pelias instance?
-
 20. Unresolved events: list-only entries with no pin, or held entirely
     unpublished until resolution succeeds?
-
 21. Lifecycle settle window: 7 days and three deferrals before review,
     or publish corrections immediately and accept edit-war churn?
-
 22. Curated seed: 30-day tombstone window for link stability, or
     purge immediately at retirement?
-
 23. Manual overrides: do reviewer-approved corrections ever expire
     (for example, re-check after a year), or stand until a human
     revisits them?
-
 24. Detail-page slugs: date-prefixed (1847-07-24-pioneers-enter-...)
     for uniqueness, or title-only with numeric suffixes on clash?
-
 25. Per-event OG images (map crop centred on the pin): worth a render
     pipeline for link unfurls, or is the static site-wide OG image
     enough for v1?
-
 26. Split slugs: 200 disambiguation page listing all successors, or
     301 to the first successor with a notice?
-
 27. Reader corrections: anonymous reports (OpenStreetMap Notes
     style) for v1, or require sign-in from the start?
-
 28. Reader reports: one-shot with a single follow-up email at
     most, or a two-way thread and decision emails when a
     contact address is given?
-
 29. Missing-event suggestions in v1 scope, or corrections-only,
     with suggestions deferred?
-
 30. Accessibility target: WCAG AA assumed in plan 40, or AAA for
     any criterion (e.g. enhanced contrast for map labels)?
-
 31. Accessible list placement: below the map on all widths, or a
     side panel on wide screens (simultaneous visibility vs simpler
     focus order)?
-
 32. Live-region verbosity: one summary per settled view change
     enough, or also announce the newly focused event's title when
     selection changes via the list?
-
 33. Sequence journeys: popup and detail-page links only in v1, or a
     browse-all-sequences index page too?
-
 34. Journey route line: dashed order line labelled "not a travelled
     route", or no line at all (numbered pins only) to avoid
     implying a path?
-
 35. Long groups: cap journeys at 30 steps like ArcGIS StoryMaps'
     Guided Tour, stay near 20 per StoryMapJS guidance, or support
     any length with a scrolling step list?
-
 36. Pinch-rotate: disable in v1 to stop accidental rotation, or keep
     OpenLayers' default on?
-
 37. Page-scroll: full-viewport map page on mobile, or an embedded map
     with two-finger pan / tap-to-enable?
-
 38. Geolocation: an opt-in "events near me" button using browser
     geolocation in v1, or skip entirely for privacy and simplicity?
+39. Vercel plan tier: Pro (WAF rate limiting and managed rulesets
+    available) or Hobby (in-code Upstash limiting only)? The WAF
+    layer is the upgrade path, not the baseline.
+40. Limiter down: fail open for the map-data endpoints and fail
+    closed for semantic search, or one global call?
+41. AI training crawlers: challenge/block them via the WAF AI Bots
+    ruleset, or allow them behind the same rate limits as humans
+    and rely on robots.txt?

@@ -88,23 +88,27 @@ working agreement as `~/Code/StateAffairs/plans/00-README.md`.
     (2026-10-25): deep links for viewport, timeline window, search, and selected
     event; URL as the single restorable state, with graceful degradation for
     merged/deleted event ids.
+
 23. [32-fuzzy-dates.md](./32-fuzzy-dates.md) - fuzzy dates (2026-10-26):
     EDTF Level 1 date model for events - canonical EDTF string plus strict
     start/end bounds plus a display string; Wikidata precision/circa/
     earliest/latest mapping table; fuzzy events render as timeline spans
     with distinct uncertain markers; dedup blocking uses interval overlap.
+
 24. [33-source-licensing-attribution.md](./33-source-licensing-attribution.md)
     - source licensing and attribution (2026-10-27): every adapter declares
     its license (SPDX) at the boundary; publish rejects undeclared licenses;
     merged events carry the union of attributions; link-only records stay
     link-only through fusion; popup Sources line plus a /sources page;
     OHM is CC0 by default with per-element license exceptions, not ODbL.
+
 25. [34-pipeline-observability-review-queue.md](./34-pipeline-observability-review-queue.md)
     - pipeline observability and publish review queue (2026-10-28):
     Bull Board admin on the ingest service, per-stage dead-letter
     queues with replay, a durable Postgres review queue with
     approve-fingerprint verification and TTL escalation, alert
     thresholds, and a per-source LLM cost ledger.
+
 26. [35-e2e-real-repair-merge-gate.md](./35-e2e-real-repair-merge-gate.md)
     - repair the real-backend E2E suite and make it a merge gate
     (2026-10-29): triage the red-since-Oct-19 suite before touching
@@ -114,6 +118,7 @@ working agreement as `~/Code/StateAffairs/plans/00-README.md`.
     name their suite, quarantine flaky specs with a 14-day expiry,
     and make the real suite a required check only after a green
     streak. Unblocks plan 30's gate.
+
 27. [36-geoparsing-place-disambiguation.md](./36-geoparsing-place-disambiguation.md)
     - geoparsing and place disambiguation for the publish stage
     (2026-10-30): a five-step resolution cascade (structured
@@ -124,6 +129,7 @@ working agreement as `~/Code/StateAffairs/plans/00-README.md`.
     plan 34's review queue, and a gold-set eval reporting accuracy
     within 161 km plus abstention rate. Lands with the plan 26 pilot;
     required before plan 29 source #3 publishes.
+
 28. [37-post-publish-lifecycle.md](./37-post-publish-lifecycle.md)
     - post-publish lifecycle (2026-10-31): change detection per
     source (Wikidata lastrevid sweep, Muffinlabs hash diff, link-only
@@ -134,6 +140,7 @@ working agreement as `~/Code/StateAffairs/plans/00-README.md`.
     the curated-seed retirement run as tombstone-then-purge. Lands
     with the plan 26 pilot; no published event is ever final until
     this exists.
+
 29. [38-event-detail-pages-seo.md](./38-event-detail-pages-seo.md)
     - event detail pages and search indexing (2026-11-01): one
     server-rendered page per published event at /events/<slug>
@@ -146,6 +153,7 @@ working agreement as `~/Code/StateAffairs/plans/00-README.md`.
     404, never a home-page redirect or a soft 404). Curated-seed
     pages stay noindex until retirement. Lands with the plan 26
     pilot, after plans 31 and 37.
+
 30. [39-reader-corrections.md](./39-reader-corrections.md)
     - reader corrections (2026-11-02): the public "report an
     error" flow plan 37 deferred. A form on the plan 38 detail
@@ -175,10 +183,11 @@ working agreement as `~/Code/StateAffairs/plans/00-README.md`.
     same map, as `/map?sequence=<id>&step=<n>` state (plan 31).
     Numbered pins, a dashed order line labelled as order not a
     travelled route (StoryMapJS pattern), unlocated and
-    merged/tombstoned steps degrade without breaking the tour, and
-    plan 40's semantic list is the journey player. No new
+    merged/tombstoned steps degrade without breaking the tour,
+    and plan 40's semantic list is the journey player. No new
     tables, no authoring UI, no routing engine. After PR #12
     merges and plan 38's detail pages; not a pilot blocker.
+
 33. [42-mobile-map-experience.md](./42-mobile-map-experience.md) -
     mobile map experience (2026-11-05): touch-first map - the
     OpenLayers gesture defaults configured (pinch-rotate off, pin
@@ -187,6 +196,17 @@ working agreement as `~/Code/StateAffairs/plans/00-README.md`.
     44pt touch targets, a compact timeline, and the plan 41 journey
     player as the sheet's step list. After plans 30, 31, 38, 40 and
     41; before any public launch; not a pilot blocker.
+
+34. [43-public-read-surface-protection.md](./43-public-read-surface-protection.md) -
+    public read surface: rate limiting, caching, and abuse
+    protection (2026-11-06): per-endpoint limits on the map, search,
+    and MCP read surface (Upstash sliding window in code, or Vercel
+    WAF rules where the plan tier allows), CDN caching with s-maxage
+    and stale-while-revalidate plus purge on publish, per-query
+    result caching for semantic search, and a transaction-mode
+    pooler in front of RDS so a crawl spike cannot exhaust Postgres
+    connections. Before any public launch or SEO push; not a plan
+    26 pilot blocker.
 
 > **Groq cannot embed, and Bedrock is not in the default region.** Groq exposes no embedding
 > models at all, so 12 adds AWS Bedrock alongside it — and the account's configured region
@@ -243,8 +263,8 @@ Do not relitigate without discussion.
 
 ## Correction to CLAUDE.md
 
-`CLAUDE.md` describes `/api/parse` as "AI parse (Claude API via `/api/parse`)".
-It is not — `app/api/parse/route.ts` calls `parseDocument()` from
+`CLAUDE.md` describes `/api/parse` as "AI parse (Claude API via `/api/parse`)". It is not —
+`app/api/parse/route.ts` calls `parseDocument()` from
 `app/map/import/services/processing-service.ts`, which runs the local `regex` and `structured`
 parsers. **There is no Claude API call anywhere in the repo today**, and no `@anthropic-ai/sdk`
 dependency. Phase 8 introduces the first one. Worth fixing in `CLAUDE.md` whenever that file
