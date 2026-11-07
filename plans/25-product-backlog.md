@@ -11,7 +11,7 @@ item; note your branch in the item when you start so two agents don't collide.
   entered by hand or pasted through `/map/import`.
 - Plans 01-24 design the ingestion engine (detect -> fetch -> extract -> publish)
   that replaces manual entry - a port of the State Affairs video pipeline.
-- Latest on main (Nov 6): plan 43 added (public read surface: rate limiting, caching, and abuse protection before launch - per-endpoint limits, CDN caching with purge on publish, per-query semantic-search result caching, and a transaction-mode pooler in front of RDS; sequenced before any public launch, not a plan 26 pilot blocker) and plan 42 added (mobile map experience: touch-first map with a non-modal bottom sheet replacing the popup on small screens, OpenLayers gesture defaults configured, 44pt touch targets, compact timeline, sequenced after plans 30, 31, 38, 40 and 41 and before any public launch) and plan 41 added (sequence journeys: guided tours through PR #12's event groups as /map?sequence=<id>&step=<n> state, numbered pins, dashed order line labelled as order not a travelled route, plan 40's semantic list as the journey player) and plan 40 added (accessible map experience: a keyboard-operable, escapable OpenLayers map plus a semantic event list as its text equivalent, meaning carried by shape and text never color alone, reduced-motion handling, sequenced after plans 30 and 38 and not a pilot blocker) and plan 39 added (reader corrections: a public report-an-error form on the detail page, routed into the plan 34 review queue as one item per distinct correction, never auto-published, approved corrections applied through plan 37 with a manual-override flag, submitter prose never published) and plan 38 added (event detail pages and search indexing: one server-rendered page per published event at /events/<slug>, stable slugs with slug history, JSON-LD without rich-result chasing, sitemap and robots from the database, merged 301 / split disambiguation / tombstoned 410 / unknown 404, curated-seed pages noindex until retirement) and plan 37 added (post-publish lifecycle: per-source change detection, scoped re-publish, SCD2-lite versions, tombstones, unmerge/split procedure, manual-override preservation) and plan 36 added (geoparsing and place disambiguation for the publish stage: five-step resolution cascade, containment + temporal-validity scoring, confidence bands with abstain path, gold-set eval) and plan 35 added (repair the real-backend E2E
+- Latest on main (Nov 7): plan 44 added (product analytics and the search-intelligence loop: cookieless aggregate web analytics plus a server-side search/event log, with a weekly zero-result review that ranks reader demand into the next source-expansion pass; sequenced before any public launch, not a plan 26 pilot blocker) and plan 43 added (public read surface: rate limiting, caching, and abuse protection before launch - per-endpoint limits, CDN caching with purge on publish, per-query semantic-search result caching, and a transaction-mode pooler in front of RDS; sequenced before any public launch, not a plan 26 pilot blocker) and plan 42 added (mobile map experience: touch-first map with a non-modal bottom sheet replacing the popup on small screens, OpenLayers gesture defaults configured, 44pt touch targets, compact timeline, sequenced after plans 30, 31, 38, 40 and 41 and before any public launch) and plan 41 added (sequence journeys: guided tours through PR #12's event groups as /map?sequence=<id>&step=<n> state, numbered pins, dashed order line labelled as order not a travelled route, plan 40's semantic list as the journey player) and plan 40 added (accessible map experience: a keyboard-operable, escapable OpenLayers map plus a semantic event list as its text equivalent, meaning carried by shape and text never color alone, reduced-motion handling, sequenced after plans 30 and 38 and not a pilot blocker) and plan 39 added (reader corrections: a public report-an-error form on the detail page, routed into the plan 34 review queue as one item per distinct correction, never auto-published, approved corrections applied through plan 37 with a manual-override flag, submitter prose never published) and plan 38 added (event detail pages and search indexing: one server-rendered page per published event at /events/<slug>, stable slugs with slug history, JSON-LD without rich-result chasing, sitemap and robots from the database, merged 301 / split disambiguation / tombstoned 410 / unknown 404, curated-seed pages noindex until retirement) and plan 37 added (post-publish lifecycle: per-source change detection, scoped re-publish, SCD2-lite versions, tombstones, unmerge/split procedure, manual-override preservation) and plan 36 added (geoparsing and place disambiguation for the publish stage: five-step resolution cascade, containment + temporal-validity scoring, confidence bands with abstain path, gold-set eval) and plan 35 added (repair the real-backend E2E
   suite and make it a merge gate: triage the red-since-Oct-19 suite with a
   PR #19 bisect before touching anything, fix the proven cause, give the
   suite its own test database so local runs stop truncating the dev
@@ -228,6 +228,20 @@ item; note your branch in the item when you start so two agents don't collide.
     not a plan 26 pilot blocker (the publish purge hook lands with
     the pilot).
 
+20. **Product analytics and the search-intelligence loop (plan 44).**
+    Cookieless aggregate web analytics (Plausible default, Vercel
+    Analytics or self-hosted Umami as alternatives; PostHog
+    deferred) plus a first-party server-side event log in Postgres
+    for search queries with result counts, event opens, and
+    journey completion. A weekly zero-result review replays and
+    classifies failed searches (real gap / vocabulary / retrieval
+    miss / filtered out) and ranks the demand into the next source
+    expansion pass (plan 29). AI-crawler visits are reported
+    separately from server-side logs, since JS analytics never
+    sees them. Before any public launch; not a plan 26 pilot
+    blocker, but the server-side search event lands with the
+    pilot.
+
 ## Open questions for James
 
 1. Britannica: coordinate enrichment via Wikidata matching (pins), or
@@ -327,3 +341,14 @@ item; note your branch in the item when you start so two agents don't collide.
 41. AI training crawlers: challenge/block them via the WAF AI Bots
     ruleset, or allow them behind the same rate limits as humans
     and rely on robots.txt?
+42. Analytics vendor: Plausible cloud (cookieless, ~$9/mo at the
+    10K-pageview tier, EU-hosted) vs Vercel Analytics (zero setup,
+    lives where the app runs) vs self-hosted Umami (MIT, free
+    apart from hosting, runs on the Postgres the repo already
+    has)?
+43. Search-intelligence loop: should a repeated zero-result intent
+    auto-create a plan 34 review item (a standing source-request
+    queue), or stay a manual weekly read with no automatic ticket?
+44. Retention: 90 days for raw search-query rows before aggregating
+    and purging, or shorter (30 days) given the queries are the
+    most personal thing the table holds?

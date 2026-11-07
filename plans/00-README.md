@@ -208,6 +208,17 @@ working agreement as `~/Code/StateAffairs/plans/00-README.md`.
     connections. Before any public launch or SEO push; not a plan
     26 pilot blocker.
 
+35. [44-product-analytics-search-intelligence.md](./44-product-analytics-search-intelligence.md) -
+    product analytics and the search-intelligence loop
+    (2026-11-07): cookieless aggregate web analytics (Plausible
+    default, Vercel Analytics or self-hosted Umami as
+    alternatives; PostHog deferred) plus a first-party
+    server-side event log in Postgres for search, event opens,
+    and journey completion; a weekly zero-result review that
+    classifies failed searches and ranks the demand they show
+    into the next source-expansion pass. Before any public
+    launch; not a plan 26 pilot blocker.
+
 > **Groq cannot embed, and Bedrock is not in the default region.** Groq exposes no embedding
 > models at all, so 12 adds AWS Bedrock alongside it — and the account's configured region
 > (`us-west-1`) carries only one embedding model against us-west-2's five. Both verified
