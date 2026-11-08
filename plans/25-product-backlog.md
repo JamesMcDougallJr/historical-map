@@ -11,7 +11,7 @@ item; note your branch in the item when you start so two agents don't collide.
   entered by hand or pasted through `/map/import`.
 - Plans 01-24 design the ingestion engine (detect -> fetch -> extract -> publish)
   that replaces manual entry - a port of the State Affairs video pipeline.
-- Latest on main (Nov 7): plan 44 added (product analytics and the search-intelligence loop: cookieless aggregate web analytics plus a server-side search/event log, with a weekly zero-result review that ranks reader demand into the next source-expansion pass; sequenced before any public launch, not a plan 26 pilot blocker) and plan 43 added (public read surface: rate limiting, caching, and abuse protection before launch - per-endpoint limits, CDN caching with purge on publish, per-query semantic-search result caching, and a transaction-mode pooler in front of RDS; sequenced before any public launch, not a plan 26 pilot blocker) and plan 42 added (mobile map experience: touch-first map with a non-modal bottom sheet replacing the popup on small screens, OpenLayers gesture defaults configured, 44pt touch targets, compact timeline, sequenced after plans 30, 31, 38, 40 and 41 and before any public launch) and plan 41 added (sequence journeys: guided tours through PR #12's event groups as /map?sequence=<id>&step=<n> state, numbered pins, dashed order line labelled as order not a travelled route, plan 40's semantic list as the journey player) and plan 40 added (accessible map experience: a keyboard-operable, escapable OpenLayers map plus a semantic event list as its text equivalent, meaning carried by shape and text never color alone, reduced-motion handling, sequenced after plans 30 and 38 and not a pilot blocker) and plan 39 added (reader corrections: a public report-an-error form on the detail page, routed into the plan 34 review queue as one item per distinct correction, never auto-published, approved corrections applied through plan 37 with a manual-override flag, submitter prose never published) and plan 38 added (event detail pages and search indexing: one server-rendered page per published event at /events/<slug>, stable slugs with slug history, JSON-LD without rich-result chasing, sitemap and robots from the database, merged 301 / split disambiguation / tombstoned 410 / unknown 404, curated-seed pages noindex until retirement) and plan 37 added (post-publish lifecycle: per-source change detection, scoped re-publish, SCD2-lite versions, tombstones, unmerge/split procedure, manual-override preservation) and plan 36 added (geoparsing and place disambiguation for the publish stage: five-step resolution cascade, containment + temporal-validity scoring, confidence bands with abstain path, gold-set eval) and plan 35 added (repair the real-backend E2E
+- Latest on main (Nov 8): plan 45 added (public launch readiness and go-live runbook: the launch gate with evidence per item, the release sequence with migrations before code, Vercel rollback plus plan 37 data rollback, the launch-day runbook, and the post-launch week; the last plan before the public launch, not a plan 26 pilot blocker) and plan 44 added (product analytics and the search-intelligence loop: cookieless aggregate web analytics plus a server-side search/event log, with a weekly zero-result review that ranks reader demand into the next source-expansion pass; sequenced before any public launch, not a plan 26 pilot blocker) and plan 43 added (public read surface: rate limiting, caching, and abuse protection before launch - per-endpoint limits, CDN caching with purge on publish, per-query semantic-search result caching, and a transaction-mode pooler in front of RDS; sequenced before any public launch, not a plan 26 pilot blocker) and plan 42 added (mobile map experience: touch-first map with a non-modal bottom sheet replacing the popup on small screens, OpenLayers gesture defaults configured, 44pt touch targets, compact timeline, sequenced after plans 30, 31, 38, 40 and 41 and before any public launch) and plan 41 added (sequence journeys: guided tours through PR #12's event groups as /map?sequence=<id>&step=<n> state, numbered pins, dashed order line labelled as order not a travelled route, plan 40's semantic list as the journey player) and plan 40 added (accessible map experience: a keyboard-operable, escapable OpenLayers map plus a semantic event list as its text equivalent, meaning carried by shape and text never color alone, reduced-motion handling, sequenced after plans 30 and 38 and not a pilot blocker) and plan 39 added (reader corrections: a public report-an-error form on the detail page, routed into the plan 34 review queue as one item per distinct correction, never auto-published, approved corrections applied through plan 37 with a manual-override flag, submitter prose never published) and plan 38 added (event detail pages and search indexing: one server-rendered page per published event at /events/<slug>, stable slugs with slug history, JSON-LD without rich-result chasing, sitemap and robots from the database, merged 301 / split disambiguation / tombstoned 410 / unknown 404, curated-seed pages noindex until retirement) and plan 37 added (post-publish lifecycle: per-source change detection, scoped re-publish, SCD2-lite versions, tombstones, unmerge/split procedure, manual-override preservation) and plan 36 added (geoparsing and place disambiguation for the publish stage: five-step resolution cascade, containment + temporal-validity scoring, confidence bands with abstain path, gold-set eval) and plan 35 added (repair the real-backend E2E
   suite and make it a merge gate: triage the red-since-Oct-19 suite with a
   PR #19 bisect before touching anything, fix the proven cause, give the
   suite its own test database so local runs stop truncating the dev
@@ -242,6 +242,18 @@ item; note your branch in the item when you start so two agents don't collide.
     blocker, but the server-side search event lands with the
     pilot.
 
+21. **Public launch readiness and go-live runbook (plan 45).**
+    Six plans say "before any public launch" and none of them
+    defines the launch, so plan 45 does: a go/no-go gate with
+    evidence per item (e2e-real green and required, pilot
+    published, curated seed retired, sitemap submitted, plan 43
+    and plan 44 live, backups with a restore drill done once),
+    a release sequence (migrations before code, destructive
+    migrations as a separate later deploy), Vercel rollback
+    rehearsed at T-2d, a launch-day runbook with abort criteria,
+    and a T+24h checkpoint before any announcement. The last
+    plan before the public launch.
+
 ## Open questions for James
 
 1. Britannica: coordinate enrichment via Wikidata matching (pins), or
@@ -352,3 +364,14 @@ item; note your branch in the item when you start so two agents don't collide.
 44. Retention: 90 days for raw search-query rows before aggregating
     and purging, or shorter (30 days) given the queries are the
     most personal thing the table holds?
+45. Launch domain: a dedicated domain or subdomain (for example
+    map.jamesmcdougalljr.com) for v1, or the Vercel project URL?
+    And who owns the registrar / DNS change?
+46. Soft launch (quiet, no announcement, watch plan 44's
+    analytics for a week and announce only after the T+24h
+    checkpoint passes) or an announced launch day with a fixed
+    date?
+47. Launch data floor: a minimum published-event count and
+    source count before the map is worth announcing (for
+    example, 500 events from 2+ sources), or launch as soon as
+    the pilot validates, regardless of count?
