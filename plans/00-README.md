@@ -228,6 +228,17 @@ working agreement as `~/Code/StateAffairs/plans/00-README.md`.
     runbook, and the post-launch week. The last plan before the
     public launch; not a plan 26 pilot blocker.
 
+37. [46-event-selection-notability.md](./46-event-selection-notability.md) -
+    event selection and notability policy (2026-11-09): the pilot's class
+    whitelist and 5,000-event cap are a pilot device, not a policy, so plan 46
+    defines what qualifies for the map at full scale — a versioned per-source
+    class whitelist with measured per-class volumes, cheap significance signals
+    (sitelink count, reference presence, English article, date precision)
+    stored as a high / standard / minor band on the event row, thresholds set
+    from the pilot's measured sitelink histograms, and density behaviour
+    (highest-band cluster representative, minor events behind a toggle at low
+    zoom). Lands with the plan 26 pilot; before plan 29 source #3.
+
 > **Groq cannot embed, and Bedrock is not in the default region.** Groq exposes no embedding
 > models at all, so 12 adds AWS Bedrock alongside it — and the account's configured region
 > (`us-west-1`) carries only one embedding model against us-west-2's five. Both verified
