@@ -251,6 +251,16 @@ working agreement as `~/Code/StateAffairs/plans/00-README.md`.
     translation of event content in v1. Lands with the plan 26 pilot;
     before plan 29 source #3.
 
+39. [48-event-media-wikimedia-commons.md](./48-event-media-wikimedia-commons.md) -
+    event media: images from Wikimedia Commons (2026-11-11): the pilot
+    ingests text-only events, so plan 48 defines the picture — one hero
+    image per event from Wikidata P18, downloaded to the repo's S3 at
+    publish time (never hotlinked), licence snapshot and TASL caption
+    stored with the event per plan 33, relevance measured by a pilot audit
+    sample with plan 39 image-wrong reports to the plan 34 review queue,
+    imageless events a normal state. Lands with the plan 26 pilot;
+    before plan 29 source #3.
+
 > **Groq cannot embed, and Bedrock is not in the default region.** Groq exposes no embedding
 > models at all, so 12 adds AWS Bedrock alongside it — and the account's configured region
 > (`us-west-1`) carries only one embedding model against us-west-2's five. Both verified
