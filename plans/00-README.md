@@ -261,6 +261,16 @@ working agreement as `~/Code/StateAffairs/plans/00-README.md`.
     imageless events a normal state. Lands with the plan 26 pilot;
     before plan 29 source #3.
 
+40. [49-event-relationships.md](./49-event-relationships.md) -
+    event relationships: causes, effects, sequence, and part-of links
+    (2026-11-12): the pilot ingests events as isolated rows, so plan 49
+    defines how events connect — sourced Wikidata statements only
+    (P155/P156 sequence, P828/P1542 and P1536/P1537 causation, P361/P527
+    part-of), causal claims publish only with a reference, sequence is
+    never shown as causation, derived part-of is kept separate from plan
+    18 curated hierarchies, and shared participants/places are computed
+    weaker links. Lands with the plan 26 pilot; before plan 29 source #3.
+
 > **Groq cannot embed, and Bedrock is not in the default region.** Groq exposes no embedding
 > models at all, so 12 adds AWS Bedrock alongside it — and the account's configured region
 > (`us-west-1`) carries only one embedding model against us-west-2's five. Both verified
