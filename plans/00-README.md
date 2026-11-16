@@ -239,6 +239,18 @@ working agreement as `~/Code/StateAffairs/plans/00-README.md`.
     (highest-band cluster representative, minor events behind a toggle at low
     zoom). Lands with the plan 26 pilot; before plan 29 source #3.
 
+38. [47-multilingual-events-i18n.md](./47-multilingual-events-i18n.md) -
+    multilingual events and interface language (2026-11-10): the global
+    pilot surfaces events whose labels exist only in other languages, so
+    plan 47 defines the language model — language-keyed labels with a
+    Wikidata-style fallback chain (requested locale, mul, English, any),
+    GeoNames alternate names as the multilingual place-name tier, Julian
+    calendar-model normalisation to proleptic Gregorian for timeline math
+    with the original calendar kept for display, and next-intl locale
+    routing with hreflang on the plan 38 detail pages. No machine
+    translation of event content in v1. Lands with the plan 26 pilot;
+    before plan 29 source #3.
+
 > **Groq cannot embed, and Bedrock is not in the default region.** Groq exposes no embedding
 > models at all, so 12 adds AWS Bedrock alongside it — and the account's configured region
 > (`us-west-1`) carries only one embedding model against us-west-2's five. Both verified
