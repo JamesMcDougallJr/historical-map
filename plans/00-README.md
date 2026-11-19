@@ -271,6 +271,16 @@ working agreement as `~/Code/StateAffairs/plans/00-README.md`.
     18 curated hierarchies, and shared participants/places are computed
     weaker links. Lands with the plan 26 pilot; before plan 29 source #3.
 
+41. [50-temporal-playback.md](./50-temporal-playback.md) -
+    temporal playback: play history forward on the map (2026-11-13):
+    a moving cursor date shared with plan 30's timeline, play/pause,
+    step-to-next-event, years-per-second vs events-per-second speeds,
+    new-event pulse on already-loaded features (never a fetch per
+    frame), pause at the loaded window's edge, no autoplay ever,
+    prefers-reduced-motion turns pulses off while keeping playback
+    usable, shared links open paused at the start year. After plans 30,
+    32 and 40; before public launch; not a plan 26 pilot blocker.
+
 > **Groq cannot embed, and Bedrock is not in the default region.** Groq exposes no embedding
 > models at all, so 12 adds AWS Bedrock alongside it — and the account's configured region
 > (`us-west-1`) carries only one embedding model against us-west-2's five. Both verified
