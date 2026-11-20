@@ -281,6 +281,17 @@ working agreement as `~/Code/StateAffairs/plans/00-README.md`.
     usable, shared links open paused at the start year. After plans 30,
     32 and 40; before public launch; not a plan 26 pilot blocker.
 
+42. [51-historical-base-maps.md](./51-historical-base-maps.md) -
+    historical base maps: period-appropriate boundaries and map layers
+    (2026-11-14): the ground moves with the pins — an OpenHistoricalMap
+    boundary overlay filtered by the plan 30 / plan 50 cursor date on
+    start_decdate / end_decdate, with a date-labelled toggle and an
+    honest empty state where OHM has no coverage; a full OHM basemap
+    swap as tier 2 gated on a bridge spike and measured coverage, and
+    curated Allmaps georeferenced sheets as a later tier. After plans
+    29, 30, 32, 40 and 50; before public launch; not a plan 26 pilot
+    blocker.
+
 > **Groq cannot embed, and Bedrock is not in the default region.** Groq exposes no embedding
 > models at all, so 12 adds AWS Bedrock alongside it — and the account's configured region
 > (`us-west-1`) carries only one embedding model against us-west-2's five. Both verified
