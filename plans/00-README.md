@@ -315,6 +315,17 @@ working agreement as `~/Code/StateAffairs/plans/00-README.md`.
     backlog question 29. After plans 39 and 44; before public launch;
     not a plan 26 pilot blocker.
 
+45. [54-data-export.md](./54-data-export.md) -
+    data export: downloadable datasets for readers and researchers
+    (2026-11-17): the map's data made portable — a current-view export
+    (GeoJSON + CSV, same viewport + time-window query as plan 30,
+    10,000-row cap) and a monthly immutable full snapshot on S3 with
+    a Frictionless datapackage.json manifest, per-row sources and
+    licenses, a file-level license equal to the most restrictive row,
+    link-only Britannica rows staying link-only, and tombstoned or
+    unpublished rows never exported. After plans 30, 33 and 37; before
+    public launch; not a plan 26 pilot blocker.
+
 > **Groq cannot embed, and Bedrock is not in the default region.** Groq exposes no embedding
 > models at all, so 12 adds AWS Bedrock alongside it — and the account's configured region
 > (`us-west-1`) carries only one embedding model against us-west-2's five. Both verified
