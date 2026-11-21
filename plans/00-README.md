@@ -292,6 +292,18 @@ working agreement as `~/Code/StateAffairs/plans/00-README.md`.
     29, 30, 32, 40 and 50; before public launch; not a plan 26 pilot
     blocker.
 
+43. [52-saved-collections.md](./52-saved-collections.md) -
+    saved collections: reader-curated sets of events (2026-11-15):
+    the map is read-only and forgetful, so plan 52 adds keeping —
+    device-local lists in v1, server-stored collections shareable
+    by link in v2 with an anonymous owner token as the only
+    credential and no accounts, private by default with no public
+    directory, member notes that never become event text, and
+    plan 37 lifecycle handling so merged members resolve and
+    tombstoned members show as removed, never silently deleted.
+    After plans 30, 31, 32, 37, 38, 40, 41, 42, 46 and 48;
+    before public launch; not a plan 26 pilot blocker.
+
 > **Groq cannot embed, and Bedrock is not in the default region.** Groq exposes no embedding
 > models at all, so 12 adds AWS Bedrock alongside it — and the account's configured region
 > (`us-west-1`) carries only one embedding model against us-west-2's five. Both verified
