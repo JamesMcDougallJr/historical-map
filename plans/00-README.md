@@ -304,6 +304,17 @@ working agreement as `~/Code/StateAffairs/plans/00-README.md`.
     After plans 30, 31, 32, 37, 38, 40, 41, 42, 46 and 48;
     before public launch; not a plan 26 pilot blocker.
 
+44. [53-reader-event-suggestions.md](./53-reader-event-suggestions.md) -
+    reader event suggestions: missing-event submissions (2026-11-16):
+    plan 39 was corrections-only, so plan 53 is the deferred half —
+    an anonymous suggestion form with a mandatory source link, one
+    plan 34 review item per suggestion, approved suggestions entering
+    the plan 26 pipeline as a manual detect and never publishing
+    directly, rejected suggestions resolved with a fixed-list reason,
+    and a status token so the reader can check the outcome. Answers
+    backlog question 29. After plans 39 and 44; before public launch;
+    not a plan 26 pilot blocker.
+
 > **Groq cannot embed, and Bedrock is not in the default region.** Groq exposes no embedding
 > models at all, so 12 adds AWS Bedrock alongside it — and the account's configured region
 > (`us-west-1`) carries only one embedding model against us-west-2's five. Both verified
