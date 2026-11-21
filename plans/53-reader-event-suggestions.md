@@ -1,0 +1,87 @@
+# Reader event suggestions: missing-event submissions
+
+**Related:** [00-README.md](./00-README.md) (phases 05-09), [05-source-adapters.md](./05-source-adapters.md) (candidate-source table), [06-detect-worker.md](./06-detect-worker.md) (manual detect), [08-extract-worker.md](./08-extract-worker.md) (extraction), [11-identity-and-fusion.md](./11-identity-and-fusion.md) (dedup), [13-similarity-and-fusion.md](./13-similarity-and-fusion.md) (judge), [25-product-backlog.md](./25-product-backlog.md) (product step #29), [26-wikidata-pilot.md](./26-wikidata-pilot.md) (global pilot, publish path), [30-map-ux-at-scale.md](./30-map-ux-at-scale.md) (popups), [32-fuzzy-dates.md](./32-fuzzy-dates.md) (date model), [33-source-licensing-attribution.md](./33-source-licensing-attribution.md) (license declarations), [34-pipeline-observability-review-queue.md](./34-pipeline-observability-review-queue.md) (review queue, abuse), [36-geoparsing-place-disambiguation.md](./36-geoparsing-place-disambiguation.md) (geoparsing), [37-post-publish-lifecycle.md](./37-post-publish-lifecycle.md) (change detection), [38-event-detail-pages-seo.md](./38-event-detail-pages-seo.md) (detail pages), [39-reader-corrections.md](./39-reader-corrections.md) (corrections, abuse controls), [40-accessible-map-experience.md](./40-accessible-map-experience.md) (semantic list), [42-mobile-map-experience.md](./42-mobile-map-experience.md) (bottom sheet), [43-public-read-surface-protection.md](./43-public-read-surface-protection.md) (rate limits on new endpoints), [44-product-analytics-search-intelligence.md](./44-product-analytics-search-intelligence.md) (zero-result review), [46-event-selection-notability.md](./46-event-selection-notability.md) (significance bands), [48-event-media-wikimedia-commons.md](./48-event-media-wikimedia-commons.md) (images, no uploads), [49-event-relationships.md](./49-event-relationships.md) (links to existing events), [52-saved-collections.md](./52-saved-collections.md) (anonymous owner tokens).
+
+**Changelog:**
+- 2026-11-16 — First version. Answers backlog question 29, which plan 39 deferred: missing-event suggestions were corrections-only in v1, with suggestions deferred. This plan is the deferred half — a reader who cannot find an event can propose it, and the proposal goes through the same review queue and the same publish pipeline as every other event.
+
+## Why this plan exists
+
+Plan 39 gave readers a way to say "this event is wrong". It deliberately gave them no way to say "this event is missing" — backlog question 29 left that open, and the answer matters because the map's blind spots are exactly what its readers know best: the local battle, the neighbourhood fire, the strike nobody wrote a Wikipedia article about. The comparable products all learned that the suggestion box is where the map grows, and they learned the shape of it the same way:
+
+- **Atlas Obscura** runs on community submissions: 26,809 places contributed by readers (2026), each one passing an editorial review before publication. The draft locks while editors look at it, editors may ask for more information, and the common rejection reasons are a checklist worth copying verbatim: the place already exists in the database, it appears in many guidebooks, it is unverifiable, or the submission contains copyrighted or copied material. The backlog problem is real too — "we often receive more entries than we can edit quickly" — so the queue, not the form, is the scarce resource.
+- **Historypin** takes the opposite trade: anyone with a free account can add a pin with a photo, title, description, date, and place, and chooses a licence for the photo at upload time ("Copyright not evaluated" is an explicit option). 200,000+ assets followed. The lesson is volume with weak provenance — which is why this plan does not copy the upload, only the low friction.
+- **OpenStreetMap Notes** is the closest model for the anonymous case: no login is required to submit, notes are human-to-human communication (automated notes are treated as spam and closed on sight), and notes are marked resolved, never deleted — the record stays. Logged-in users get an email when a note is commented on or resolved; anonymous users get nothing back. The two-way question ("can a mapper ask the contributor for more detail?") is the reason logging in is beneficial, not required.
+- **Google Maps** user-generated content runs ML plus human review, and the rules that matter here are the negative ones: deliberately fake content, copied or stolen photos, and off-topic submissions are all violations, and an edit that is inaccurately placed is rejected rather than fixed in place.
+- **Wikidata** will not let a suggestion skip the evidence: a new item needs an account, "Requests for new items" exists for people who cannot create one, the standing advice is "evidence first, item second" (three independent sources for notability), and duplicates get merged or deleted anyway. An item about yourself is strongly discouraged — the submitter's own history is not a source.
+
+The map has all the pieces to do this well and none of them assembled: plan 39's form and abuse controls, plan 34's review queue, plan 13's dedup judge, plan 36's geoparser, plan 46's notability bands. What no plan owned is the intake itself — what a reader may propose, what evidence it must carry, where the proposal lives while it waits, and what happens to it when it is approved or refused. Without this plan, one of three things happens: a coding agent bolts a free-text "suggest an event" box onto the detail page that writes straight into the events table; or suggestions arrive as emails to James with no queue, no dedup, and no record; or the map stays read-only and the readers who know its gaps best have nowhere to put them.
+
+## The suggestion model: five decisions
+
+### 1. A suggestion is a proposal, never an event
+
+- Suggestions live in their own table (`reader_event_suggestions`), not in the events table and not in any ingest table. One plan 34 review item per distinct suggestion, reason `READER_SUGGESTION`, created at submit time. A suggestion is never auto-published, never gets a public URL, never enters search, the sitemap, or any plan 44 analytics count of published events.
+- The form asks for five things: a title, a date (plan 32 EDTF, fuzzy allowed — "circa 1850" is a legitimate suggestion), a place (free text, resolved later by plan 36 — the reader is not asked to drop a pin precisely, only to name the place as they know it), a one-or-two-sentence description in the reader's own words, and at least one source link. The source link is mandatory: Wikidata's "evidence first, item second" is the single biggest quality lever in this whole plan, and Atlas Obscura's "unverifiable" rejection is the reason. A suggestion with no source is refused at the form, with the refusal explained in plain language, not silently dropped.
+- Evidence is links only, never pasted source text — the plan 39 rule, for the same reason (copyright, and a link is verifiable where pasted prose is not). A suggestion may link a Wikidata item, a Wikipedia article, a newspaper archive, a museum page, a book on the Internet Archive — any URL a reviewer can open. The form caps links at three and text fields at the same shape limits plan 39 uses.
+- No photo uploads in v1. Plan 48 covers images through Wikidata P18, downloaded at publish; a suggested photo arrives as a link if the reader has one, and the publish stage treats it exactly as it treats any other P18 candidate (licence gate first). Uploads would add storage, copyright review, and moderation load for a feature whose job is to propose events, not to host images.
+
+### 2. Approval routes into the pipeline; it does not publish directly
+
+- An approved suggestion does not become an event. It becomes a manual detect: the reviewer approves it into the plan 26 pipeline as a `suggested` source, and the pipeline then does its normal work — plan 08 extracts the event from the suggested source, plan 36 geoparses the place, plan 13 dedups it against what is already published (Jev pairwise judging, same as any other candidate), plan 33 checks the licence, plan 46 assigns the significance band. One publish path for everything, no fast-track that skips the checks — the reviewer approves the *proposal*, the pipeline decides the *event*.
+- The reviewer may also approve with edits: correct the date bounds, the place name, or the title before it enters the pipeline, with the edit recorded on the review item (the plan 34 fingerprint-verified approval). The reader's original text is preserved alongside the edit, so a later reviewer can see what changed and why.
+- Rejection records a reason from a fixed list, borrowed from Atlas Obscura and OSM Notes: already on the map (with a link to the existing event), unverifiable (no usable source), out of scope (not a historical event — a business, a person with no event, a future event), copied text (submitted prose copied from a source), or spam/abuse. Rejected suggestions are resolved, not deleted — the OSM Notes rule — so the same suggestion twice is recognisable as a repeat, not a fresh proposal.
+
+### 3. Dedup at intake, before a human ever sees it
+
+- The most common Atlas rejection is "already exists", and the cheapest place to catch it is the form, not the review queue. On submit, the suggestion is checked against published events with plan 13's blocking (same title words, same place, overlapping date interval per plan 32) — cheap blocking only, no Jev call at intake. If a strong candidate match exists, the form shows the reader the existing event and asks "is this the event you meant?" — a yes routes the reader to the plan 39 correction flow for that event instead of creating a suggestion.
+- If the reader insists it is different, the suggestion is created with the near-match attached, so the reviewer sees the comparison without re-running the search. A suggestion that matches a published event on title, place, and date closely enough is auto-resolved as "already on the map" with a link to the event and no review item at all — the queue is the scarce resource, and Atlas Obscura's backlog warning is the reason to spend it carefully.
+
+### 4. Anonymous in v1, same as corrections — with one deliberate difference
+
+- No account is required to suggest, following plan 39 and OSM Notes. The map has no accounts anywhere (plan 52's collections are anonymous-token, not accounts), and a suggestion box that demanded sign-in would filter out exactly the local-history reader this plan is for.
+- The one difference from plan 39: the form offers an optional contact email *and* returns a status token. OSM Notes shows the cost of pure anonymity — the mapper cannot ask a follow-up question, and the anonymous reporter never learns the outcome. The token is a random string shown once at submit time (the plan 52 owner-token pattern, reused, not reinvented): with it, the reader can check whether their suggestion is waiting, approved, or refused, and read the recorded reason. No account, no password, no email required; lose the token and the status is gone, same as plan 52's edit link.
+- Contact is optional and one-shot at most: if an email is given, the reader gets a single decision email when the suggestion is resolved (the plan 39 question-28 rule — one follow-up, no thread). The email is stored hashed, never shown to reviewers beyond the fact that contact exists, and never used for anything else. Submitter prose is never published as event text — the plan 39 rule, restated because a suggestion's description is the most tempting prose to reuse and the easiest to get wrong.
+
+### 5. Abuse controls are plan 39's, extended by one rule
+
+- Honeypot, hashed-IP rate limits, and shape limits from plan 39 apply unchanged; no CAPTCHA in v1. Plan 43's per-endpoint rate limiting covers the suggestion endpoint like any other write endpoint.
+- The one extension: no automated or bulk suggestions. OSM's rule — "don't create automated notes; notes should be human-to-human communication" — is adopted verbatim as a submission policy, and a burst of suggestions from one hashed IP that trips the rate limit is refused with the same message the form gives for copied text: explain, don't silently drop. Suggestions are also excluded from the plan 44 search-intelligence loop's demand ranking until a human approves one — a flood of suggestions for the same non-event must not manufacture demand for it.
+
+## Surfaces
+
+- **Plan 38 detail page:** a "Suggest a missing event" link in the page footer and on the plan 39 correction form ("not listed here? suggest it instead") — the correction form already catches readers who found the wrong event; this catches the ones who found nothing.
+- **Zero-result search (plan 44):** when a search returns nothing, the empty state offers the suggestion form prefilled with the query as the title. The weekly zero-result review and the suggestion queue feed each other: a repeated zero-result intent with a matching suggestion is a demand signal with evidence attached, and the review can approve the suggestion instead of filing a source request.
+- **Plan 40 semantic list and plan 42 bottom sheet:** the suggestion link is a text link in the list footer and the sheet's overflow menu, never a floating button on the map — the map stays a map, and the suggestion flow is one tap away without competing with pins.
+- **Status page:** `/suggest/<token>` shows the suggestion's state (waiting / approved into the pipeline / published as an event, with a link / refused, with the recorded reason). The page is not indexed, has no list view, and reveals nothing about other suggestions.
+
+## What this plan does not do
+
+- No accounts, no sign-in, no reputation or contributor leaderboard in v1. Historypin's account model and Google Maps' Local Guide badges are explicitly deferred: the map earns the right to identity by shipping the anonymous flow first and measuring whether abuse or volume forces it.
+- No reader-authored event text on the map. The pipeline re-extracts from the suggested source; the reader's description is a review aid, never published content. A reader who wants to write the event's text is writing a source document, and the map ingests documents (plans 05-09), not prose.
+- No photo or file uploads, no video or audio suggestions (plan 48's P18 route covers images; video and audio are plan 48's deferred media, not this plan's).
+- No public suggestion list, no voting, no "most requested events" page. Voting would turn the queue into a popularity contest and invite brigading; demand is measured by plan 44's zero-result review and by the review queue itself, not by a leaderboard.
+- No automatic Wikidata item creation from a suggestion. If the event has no Wikidata item, the pipeline publishes it as a `suggested`-source event with the reader's source link as its anchor (plan 14); creating upstream items is a separate decision for a later plan.
+
+## Sequencing
+
+- After plan 39 (reuses its form, abuse controls, and review-queue plumbing — the two forms share code, and the review UI shows both reasons in one queue) and after the plan 26 pilot (approved suggestions enter a pipeline that exists; there is nothing to approve into before the pilot validates detect through publish).
+- After plan 44's zero-result review exists, so the suggestion queue and the demand signal reinforce each other instead of duplicating.
+- Before any public launch: a launch that invites readers but gives them nowhere to report a missing event wastes the launch's best feedback. Not a plan 26 pilot blocker — the pilot validates ingestion from sources; suggestions are a post-pilot growth loop.
+- Answers backlog question 29 (missing-event suggestions: in scope, as this plan, not corrections-only).
+
+## Done when
+
+- The suggestion form is live on the detail page, the zero-result state, and the semantic list; it refuses sourceless suggestions at the form with a plain-language explanation.
+- Every submitted suggestion creates one plan 34 review item (or auto-resolves as already-on-the-map with a link); no suggestion reaches the events table without passing through the pipeline.
+- An approved suggestion enters the pipeline as a manual detect and is published only after extract, geoparse, dedup, licence, and notability checks — with the reviewer's edits recorded on the review item.
+- Rejected suggestions carry a fixed-list reason, are resolved not deleted, and a repeat of a rejected suggestion is recognisable as a repeat.
+- The status-token page shows waiting / approved / published / refused for the holder only; no suggestion is indexed or listed publicly.
+- Rate limits and the no-automation rule are verified against a burst test; submitter prose appears nowhere on a published event.
+- No Splink anywhere in this plan (dedup remains Jev pairwise judging per the 2026-10-23 decision).
+
+## Open to James (see chat summary)
+
+- Evidence bar: is one source link enough to open a review item, or should a suggestion need two independent sources before a human looks at it (Wikidata asks three for notability)?
+- Approved suggestions: route through the full pipeline as a manual detect, or fast-track publish with reviewer approval alone (faster, but skips the dedup and geoparse checks)?
+- Status lookup: is the anonymous status token the right call in v1, or should status be contact-email-only with one decision email and no token at all?
