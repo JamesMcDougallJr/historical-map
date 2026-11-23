@@ -337,6 +337,19 @@ working agreement as `~/Code/StateAffairs/plans/00-README.md`.
     the embed route. After plans 30, 31, 38, 40, 42, 43 and 44; before
     public launch; not a plan 26 pilot blocker.
 
+47. [56-on-this-day.md](./56-on-this-day.md) -
+    on this day: a daily view of what happened on this date
+    (2026-11-19): /today and /today/MM-DD over published rows
+    (month/day query, plan 46 bands rank the day, top 10 with
+    show-all, year-only and circa dates excluded, births/deaths
+    out of v1, reader-local today with server-UTC fallback, dated
+    URLs as the shareable form, RSS feed as the no-account daily
+    delivery, no email digest or quiz in v1, Feb 29 rule, monthly
+    coverage check against the Wikipedia on-this-day feed. After
+    the plan 26 pilot's first published set and plans 30, 32, 38,
+    40, 43, 44, 46 and 48; before public launch; not a plan 26
+    pilot blocker.
+
 > **Groq cannot embed, and Bedrock is not in the default region.** Groq exposes no embedding
 > models at all, so 12 adds AWS Bedrock alongside it — and the account's configured region
 > (`us-west-1`) carries only one embedding model against us-west-2's five. Both verified
