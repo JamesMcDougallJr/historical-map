@@ -326,6 +326,17 @@ working agreement as `~/Code/StateAffairs/plans/00-README.md`.
     unpublished rows never exported. After plans 30, 33 and 37; before
     public launch; not a plan 26 pilot blocker.
 
+46. [55-embeddable-map-widget.md](./55-embeddable-map-widget.md) -
+    embeddable map widget: put the live map on any site (2026-11-18):
+    a chrome-less /embed route reusing plan 31's share-state params,
+    a copy-paste plain-iframe snippet from the Share panel (no key,
+    no account, Google share-embed pattern), a mandatory non-removable
+    attribution bar with an escape link to the full map, event clicks
+    opening plan 38 detail pages in a new tab, embed traffic under
+    plan 43 limits and counted by Referer under plan 44, noindex on
+    the embed route. After plans 30, 31, 38, 40, 42, 43 and 44; before
+    public launch; not a plan 26 pilot blocker.
+
 > **Groq cannot embed, and Bedrock is not in the default region.** Groq exposes no embedding
 > models at all, so 12 adds AWS Bedrock alongside it — and the account's configured region
 > (`us-west-1`) carries only one embedding model against us-west-2's five. Both verified
