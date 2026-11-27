@@ -400,6 +400,20 @@ working agreement as `~/Code/StateAffairs/plans/00-README.md`.
     plan 59. After the plan 26 pilot, plans 30, 32, 36, 43, 44, 46
     and 51; before public launch; not a pilot blocker.
 
+52. [61-follow-place-or-period.md](./61-follow-place-or-period.md) -
+    follow a place or period: watch alerts when the map gains
+    events you care about (2026-11-24): a follow is a stored plan
+    30 query (place, period, event or collection), in-app feed with
+    unread markers, per-follow token-authenticated RSS/Atom feed,
+    weekly email digest capped at ten events with a re-arm rule
+    (three unopened digests pause it) and one-year default expiry,
+    no web push and no per-event email in v1, no accounts (inherits
+    plan 52's anonymous owner token, OPML export for a second
+    device), follows as plan 44's strongest demand signal feeding
+    plan 29 source decisions. After the plan 26 pilot, plans 30,
+    32, 37, 44, 52, 56 and 60; before public launch; not a pilot
+    blocker.
+
 > **Groq cannot embed, and Bedrock is not in the default region.** Groq exposes no embedding
 > models at all, so 12 adds AWS Bedrock alongside it — and the account's configured region
 > (`us-west-1`) carries only one embedding model against us-west-2's five. Both verified
