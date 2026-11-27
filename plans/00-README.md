@@ -374,6 +374,19 @@ working agreement as `~/Code/StateAffairs/plans/00-README.md`.
     readers, labels by text + shape never color alone. Lands with
     the plan 26 pilot; before public launch; not a pilot blocker.
 
+50. [59-public-read-api.md](./59-public-read-api.md) -
+    public read API: let other people build on the map (2026-11-22):
+    read-only v1 with five endpoints (events list, event by id/slug,
+    place, sources, today), cursor pagination, prefixed hm_live_ /
+    hm_test_ keys shown once and revocable self-serve, one error
+    shape with 429 + Retry-After and X-RateLimit-* headers, URI
+    versioning with a six-month Sunset floor, OpenAPI-first spec,
+    licence and attribution travelling with every row, link-only
+    Britannica rows staying link-only, 451 for records whose source
+    terms forbid redistribution, no writes, no OAuth, no GraphQL,
+    no SDKs, no SLA in v1. Lands after the plan 26 pilot, plans 38,
+    33, 43 and 44; before public launch; not a pilot blocker.
+
 > **Groq cannot embed, and Bedrock is not in the default region.** Groq exposes no embedding
 > models at all, so 12 adds AWS Bedrock alongside it — and the account's configured region
 > (`us-west-1`) carries only one embedding model against us-west-2's five. Both verified
