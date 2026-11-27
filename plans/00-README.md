@@ -350,6 +350,18 @@ working agreement as `~/Code/StateAffairs/plans/00-README.md`.
     40, 43, 44, 46 and 48; before public launch; not a plan 26
     pilot blocker.
 
+48. [57-offline-map-experience.md](./57-offline-map-experience.md) -
+    offline map experience: the map that works with no signal
+    (2026-11-20): Workbox service worker (CacheFirst tiles,
+    NetworkFirst API, precached app shell + manifest), IndexedDB
+    for last-viewed event windows and collections, explicit
+    "save this area" downloads with size estimates and caps,
+    honest stale labelling, PMTiles never in the precache
+    (rangeRequests runtime route only), tile source must allow
+    caching, read-only offline in v1. After plans 30, 42, 43,
+    51 and 52 and the pilot's first published set; before public
+    launch; not a plan 26 pilot blocker.
+
 > **Groq cannot embed, and Bedrock is not in the default region.** Groq exposes no embedding
 > models at all, so 12 adds AWS Bedrock alongside it — and the account's configured region
 > (`us-west-1`) carries only one embedding model against us-west-2's five. Both verified
