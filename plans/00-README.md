@@ -362,6 +362,18 @@ working agreement as `~/Code/StateAffairs/plans/00-README.md`.
     51 and 52 and the pilot's first published set; before public
     launch; not a plan 26 pilot blocker.
 
+49. [58-confidence-provenance-display.md](./58-confidence-provenance-display.md) -
+    confidence and provenance display: show readers what the map
+    knows and how sure it is (2026-11-21): per-field certainty
+    labels (Secure / Probable / Contested / Approximate) computed
+    from plan 32 date signals and plan 36 place bands, the plan 32
+    display string as the only reader-facing date, a "How we know"
+    block on plan 38 detail pages with date/place basis and source
+    anchors, disagreements shown side by side, public "needs a
+    source" flags feeding plan 39 / 53, no numeric percentages to
+    readers, labels by text + shape never color alone. Lands with
+    the plan 26 pilot; before public launch; not a pilot blocker.
+
 > **Groq cannot embed, and Bedrock is not in the default region.** Groq exposes no embedding
 > models at all, so 12 adds AWS Bedrock alongside it — and the account's configured region
 > (`us-west-1`) carries only one embedding model against us-west-2's five. Both verified
