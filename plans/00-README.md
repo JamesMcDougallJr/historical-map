@@ -387,6 +387,19 @@ working agreement as `~/Code/StateAffairs/plans/00-README.md`.
     no SDKs, no SLA in v1. Lands after the plan 26 pilot, plans 38,
     33, 43 and 44; before public launch; not a pilot blocker.
 
+51. [60-coverage-and-gaps.md](./60-coverage-and-gaps.md) -
+    coverage and gaps: show where the map is thin (2026-11-23):
+    H3 hexbin place view (resolution 2 world, 5 city, density per
+    unit area never raw counts), per-century coverage ratios against
+    the pilot's own source-query baselines, modern-country table
+    labelled as such with band mix and image coverage, public
+    /coverage page with honest empty states ("no events published
+    yet", never "nothing happened here"), internal feed pairing gaps
+    with plan 44 zero-result demand for plan 29 source decisions,
+    coverage block in plan 54 snapshots and GET /v1/coverage under
+    plan 59. After the plan 26 pilot, plans 30, 32, 36, 43, 44, 46
+    and 51; before public launch; not a pilot blocker.
+
 > **Groq cannot embed, and Bedrock is not in the default region.** Groq exposes no embedding
 > models at all, so 12 adds AWS Bedrock alongside it — and the account's configured region
 > (`us-west-1`) carries only one embedding model against us-west-2's five. Both verified
